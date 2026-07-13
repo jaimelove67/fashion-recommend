@@ -1,0 +1,118 @@
+name: fashion-recommendation
+
+services:
+  postgres:
+    image: pgvector/pgvector@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fashion_recommendation}
+      POSTGRES_USER: ${POSTGRES_USER:-fashion}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fashion_2404}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-fashion_2404}"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a $${REDIS_PASSWORD} ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-fashion_minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-fashion_2404}
+    ports:
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio-init:
+    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-fashion_minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-fashion_2404}
+      MINIO_BUCKET: ${MINIO_BUCKET:-garments-private}
+    entrypoint: >-
+      /bin/sh -c "mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+      mc mb --ignore-existing local/$$MINIO_BUCKET &&
+      mc anonymous set none local/$$MINIO_BUCKET"
+    restart: "no"
+
+  backend:
+    profiles: ["app"]
+    build:
+      context: ./backend
+    environment:
+      SERVER_PORT: 8080
+      CORS_ALLOWED_ORIGINS: http://localhost:8088,http://127.0.0.1:8088
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-fashion_recommendation}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-fashion}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-fashion_2404}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-fashion_minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-fashion_2404}
+      MINIO_BUCKET: ${MINIO_BUCKET:-garments-private}
+      MINIO_MAX_FILE_SIZE: ${MINIO_MAX_FILE_SIZE:-10485760}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      BAILIAN_MODEL: ${BAILIAN_MODEL:-qwen-plus}
+      BAILIAN_VISION_ENABLED: ${BAILIAN_VISION_ENABLED:-false}
+      BAILIAN_VISION_MODEL: ${BAILIAN_VISION_MODEL:-qwen-vl-plus}
+      BAILIAN_ENDPOINT: ${BAILIAN_ENDPOINT:-https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
+      BAILIAN_CONNECT_TIMEOUT: ${BAILIAN_CONNECT_TIMEOUT:-3s}
+      BAILIAN_READ_TIMEOUT: ${BAILIAN_READ_TIMEOUT:-8s}
+      WEATHER_PRIMARY_BASE_URL: ${WEATHER_PRIMARY_BASE_URL:-https://wttr.in}
+      WEATHER_FALLBACK_GEOCODING_BASE_URL: ${WEATHER_FALLBACK_GEOCODING_BASE_URL:-https://geocoding-api.open-meteo.com}
+      WEATHER_FALLBACK_FORECAST_BASE_URL: ${WEATHER_FALLBACK_FORECAST_BASE_URL:-https://api.open-meteo.com}
+      WEATHER_CONNECT_TIMEOUT: ${WEATHER_CONNECT_TIMEOUT:-3s}
+      WEATHER_READ_TIMEOUT: ${WEATHER_READ_TIMEOUT:-3s}
+      WEATHER_CACHE_TTL: ${WEATHER_CACHE_TTL:-15m}
+      WEATHER_CACHE_MAX_SIZE: ${WEATHER_CACHE_MAX_SIZE:-500}
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8088}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  frontend:
+    profiles: ["app"]
+    build:
+      context: ./frontend
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-8090}:80"
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

@@ -1,0 +1,45 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: fashion-recommendation-api
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5433/fashion_recommendation}
+    username: ${SPRING_DATASOURCE_USERNAME:fashion}
+    password: ${SPRING_DATASOURCE_PASSWORD:fashion_2404}
+  sql:
+    init:
+      mode: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,http://localhost:8088,http://127.0.0.1:8088}
+  bailian:
+    api-key: ${DASHSCOPE_API_KEY:}
+    model: ${BAILIAN_MODEL:qwen-plus}
+    vision-enabled: ${BAILIAN_VISION_ENABLED:false}
+    vision-model: ${BAILIAN_VISION_MODEL:qwen-vl-plus}
+    endpoint: ${BAILIAN_ENDPOINT:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
+    connect-timeout: ${BAILIAN_CONNECT_TIMEOUT:3s}
+    read-timeout: ${BAILIAN_READ_TIMEOUT:8s}
+  weather:
+    primary-base-url: ${WEATHER_PRIMARY_BASE_URL:${WEATHER_BASE_URL:https://wttr.in}}
+    fallback-geocoding-base-url: ${WEATHER_FALLBACK_GEOCODING_BASE_URL:https://geocoding-api.open-meteo.com}
+    fallback-forecast-base-url: ${WEATHER_FALLBACK_FORECAST_BASE_URL:https://api.open-meteo.com}
+    connect-timeout: ${WEATHER_CONNECT_TIMEOUT:3s}
+    read-timeout: ${WEATHER_READ_TIMEOUT:3s}
+    cache-ttl: ${WEATHER_CACHE_TTL:15m}
+    cache-max-size: ${WEATHER_CACHE_MAX_SIZE:500}
+  storage:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ROOT_USER:fashion_minio_admin}
+    secret-key: ${MINIO_ROOT_PASSWORD:fashion_2404}
+    bucket: ${MINIO_BUCKET:garments-private}
+    max-file-size: ${MINIO_MAX_FILE_SIZE:10485760}

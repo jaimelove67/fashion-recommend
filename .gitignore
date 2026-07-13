@@ -1,0 +1,5 @@
+.env
+.codex_tmp/
+frontend/node_modules/
+frontend/dist/
+backend/target/

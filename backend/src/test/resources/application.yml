@@ -1,0 +1,29 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:fashion_test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  sql:
+    init:
+      mode: always
+
+app:
+  cors:
+    allowed-origins: http://localhost:5173
+  bailian:
+    model: qwen-plus-test
+  weather:
+    primary-base-url: https://wttr.in
+    fallback-geocoding-base-url: https://geocoding-api.open-meteo.com
+    fallback-forecast-base-url: https://api.open-meteo.com
+    connect-timeout: 100ms
+    read-timeout: 100ms
+    cache-ttl: 15m
+    cache-max-size: 50
+  storage:
+    endpoint: http://localhost:9000
+    access-key: test-minio-access
+    secret-key: test-minio-secret
+    bucket: test-garments
+    max-file-size: 10485760
