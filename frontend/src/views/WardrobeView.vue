@@ -91,6 +91,12 @@ function isReviewItem(item) {
   return item?.recognitionStatus === 'NEEDS_MANUAL_REVIEW'
 }
 
+function statusLabel(item) {
+  if (isReviewItem(item)) return '待完善'
+  if (item?.recognitionStatus === 'MANUAL_CORRECTED') return '人工确认'
+  return '可推荐'
+}
+
 const filteredItems = computed(() => {
   const normalizedQuery = query.value.trim().toLocaleLowerCase('zh-CN')
   const indexed = wardrobe.value.map((item, index) => ({ item, index }))
@@ -497,7 +503,7 @@ onDeactivated(() => {
                   <span>暂无图片</span>
                 </div>
                 <span class="status-badge" :class="{ review: isReviewItem(item) }">
-                  {{ isReviewItem(item) ? '待完善' : '可推荐' }}
+                  {{ statusLabel(item) }}
                 </span>
                 <div class="card-actions">
                   <button

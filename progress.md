@@ -6,6 +6,20 @@
 - 已恢复现有规划文件和 Git 状态；当前 main 跟踪 origin/main。
 - 发现上一个任务的根 README 和 .gitignore 尚未提交，先作为本轮基线独立发布，避免混入演示数据提交。
 - 第一次规划补丁未应用：Markdown 反引号与执行器模板字符串冲突；改用无冲突锚点后继续。
+- 基线提交 f96bd0d 已推送到 origin/main。
+- 演示数据采用仅重置 demo-user 的幂等 SQL，不依赖一次性的本地数据库快照或实时天气请求。
+- 已增加 8 件衣物、3 条推荐、收藏反馈、风格档案及识别失败后人工修正的种子实现，并在衣橱界面区分“人工确认”状态。
+- Docker 完整栈启动成功；种子连续运行两次后均保持 8 件衣物、3 条推荐、1 条收藏反馈和 1 条 MANUAL_CORRECTED。
+- API 复核结果为 wardrobe=8、recommendations=3、saved=1、feedback=1、manualCorrected=1，个人档案显示名为林知夏。
+- 前端生产构建、PowerShell 语法检查、Compose 配置检查和 git diff 检查均通过。
+- 第 1 项提交 8c243d6 已创建；首次推送因 GitHub HTTPS 连接被重置而失败，暂停后续阶段并先检查远端连通性。
+- git ls-remote 随后也因 github.com:443 无法连接而失败，确认问题位于外部网络链路而非提交内容或 Git 认证。
+- 网络诊断结果：github.com 可解析且可 ping，但 TCP 443 不通；继续检查 GitHub SSH 备用端口。
+- SSH 443、SSH 22 和本机 GitHub 凭据检查通过，改用 SSH URL 完成第 1 项推送。
+- ssh.github.com:443 因该别名尚无 known_hosts 记录而被安全校验拒绝；不关闭校验，改用已知的 github.com:22。
+- github.com:22 主机校验通过，但 GitHub 返回 publickey 拒绝；不擅自向用户账号添加 SSH Key，转查现有身份配置和本地代理。
+- 检测到 Clash Verge 代理 127.0.0.1:7897，准备以单命令配置方式验证 HTTPS，不修改全局 Git 配置。
+- 本地 gh CLI 通过代理成功读取 jaimelove67/fashion-recommend，确认账号权限、仓库和 main 默认分支均正常。
 
 ## 2026-07-13
 
