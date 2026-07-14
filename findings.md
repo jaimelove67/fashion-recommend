@@ -23,6 +23,14 @@
 - ssh.github.com:443 和 github.com:22 均可连接，本机已有 GitHub SSH 密钥，可用 SSH 作为 HTTPS 推送的备用路径。
 - 本机 Clash Verge 的 HTTP 代理监听 127.0.0.1:7897，但 Git 未配置代理；可对单次 Git 命令传入该代理恢复 HTTPS。
 
+## 开发期边界文档发现
+
+- 四项边界都已在代码中显式可观察：用户头写在请求层，推荐响应带 engine，趋势响应带 demoMode，衣物带 recognitionStatus。
+- X-User-Id 只承担原型期数据分区，不是认证；仓储查询仍按 user_id 限制数据，跨用户读取测试返回 404。
+- LLM fallback 不是静默伪装：模型结果先校验字段、长度、衣物 ID 和数量，失败后响应 engine 为 development-rule-v1。
+- 趋势 demoMode 已被首页、趋势页和通知区展示为开发样本，避免把内置样本当实时平台数据。
+- 视觉默认关闭时不会猜测标签；记录进入 NEEDS_MANUAL_REVIEW，且被推荐候选过滤，人工修正后才恢复可用。
+
 ## 代码现状
 
 - 前端已经是 Vue/Vite 单页，当前调用 `/api/v1/trends` 和 `/api/v1/me/style-profile`。
