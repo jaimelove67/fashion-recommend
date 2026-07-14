@@ -1,0 +1,74 @@
+{
+  "evidenceVersion": 1,
+  "provider": "Alibaba Cloud Bailian",
+  "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+  "startedAt": "2026-07-14T16:32:24.0950043+08:00",
+  "completedAt": "2026-07-14T16:32:28.6875134+08:00",
+  "callId": "chatcmpl-66fad4c4-9e16-9dbf-b200-e4a4af795e67",
+  "model": "qwen-plus",
+  "finishReason": "stop",
+  "requestSummary": {
+    "userId": "demo-user",
+    "occasion": "毕业答辩现场",
+    "styleHint": "正式、克制、层次清楚，适合室内汇报",
+    "wardrobeItemCount": 8,
+    "weather": {
+      "city": "杭州",
+      "temperatureC": 27,
+      "apparentTemperatureC": 28,
+      "precipitationMm": 0,
+      "windSpeedKmh": 10,
+      "source": "evidence-snapshot"
+    },
+    "responseFormat": "json_object"
+  },
+  "usage": {
+    "promptTokens": 617,
+    "completionTokens": 226,
+    "totalTokens": 843
+  },
+  "result": {
+    "summary": "为毕业答辩现场选择正式、克制且层次清晰的搭配，兼顾杭州27℃室内环境与林知夏的极简通勤+低饱和休闲风格偏好。",
+    "reason": "答辩属正式汇报场合，需体现专业感与克制感；室内温度适宜，无需厚重外套，但轻量西装可提升正式度与层次；上装选用暖白牛津纺衬衫（极简通勤、中性色基底）叠搭雾蓝轻薄针织衫（低饱和休闲、清爽层次），形成柔和而清晰的视觉节奏；下装选石墨灰直筒西裤（利落通勤、与西装同色系延伸轮廓）；鞋履选黑色方头乐福鞋（正式通勤、稳重收尾），避免运动鞋削弱正式感。整体符合雾蓝与暖白、石墨灰的色彩建议，且全部单品均来自衣橱，无编造。",
+    "itemIds": [
+      22,
+      23,
+      24,
+      28
+    ]
+  },
+  "validation": {
+    "exactResultFields": true,
+    "itemCountBetweenTwoAndFour": true,
+    "itemIdsUnique": true,
+    "allItemsBelongToDemoUser": true,
+    "resolvedItems": [
+      {
+        "id": 22,
+        "name": "暖白牛津纺衬衫",
+        "category": "上装"
+      },
+      {
+        "id": 23,
+        "name": "雾蓝轻薄针织衫",
+        "category": "上装"
+      },
+      {
+        "id": 24,
+        "name": "石墨灰直筒西裤",
+        "category": "下装"
+      },
+      {
+        "id": 28,
+        "name": "黑色方头乐福鞋",
+        "category": "鞋履"
+      }
+    ]
+  },
+  "redaction": {
+    "apiKeyStored": false,
+    "authorizationHeaderStored": false,
+    "fullEnvironmentStored": false,
+    "imagePayloadStored": false
+  }
+}

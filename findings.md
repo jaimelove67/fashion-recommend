@@ -31,6 +31,17 @@
 - 趋势 demoMode 已被首页、趋势页和通知区展示为开发样本，避免把内置样本当实时平台数据。
 - 视觉默认关闭时不会猜测标签；记录进入 NEEDS_MANUAL_REVIEW，且被推荐候选过滤，人工修正后才恢复可用。
 
+## 百炼证明材料发现
+
+- 当前 Docker 后端已配置 DASHSCOPE_API_KEY，文本模型为 qwen-plus；视觉模型开关仍为 false。
+- 推荐 prompt 把场合、天气、风格档案和衣橱都声明为数据而非指令，要求只选当前 wardrobe 中 2-4 个互不重复 ID。
+- 模型输出必须是只含 summary、reason、itemIds 的 JSON；服务端还会复验字段集合、长度、数量、重复 ID 和跨用户衣物 ID。
+- 视觉 prompt 限定 name、category、color、style 四字段，类别只能来自五个枚举；本阶段保留真实文本推荐调用即可，不改变默认关闭的视觉边界。
+- 第一次通过业务 API 发起的真实推荐发生了显式 fallback；证明材料必须等待 engine=llm，不能仅凭已配置 Key 判断调用成功。
+- 宿主机通过本地代理成功调用百炼 qwen-plus，provider call ID 为 chatcmpl-66fad4c4-9e16-9dbf-b200-e4a4af795e67，usage 为 617 + 226 = 843 tokens。
+- 返回结果只含 summary、reason、itemIds；4 个 ID 互不重复且全部解析到 demo-user 当前衣橱。
+- 证明材料采用脱敏 JSON 加说明文档，既保留可核验 ID 和结果，又不写入 API Key、Authorization 或完整环境。
+
 ## 代码现状
 
 - 前端已经是 Vue/Vite 单页，当前调用 `/api/v1/trends` 和 `/api/v1/me/style-profile`。

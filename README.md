@@ -131,6 +131,15 @@ demo-user
 
 这些边界的设计理由、安全失败方式和生产化替换方案见 [开发期边界与生产化路径](docs/development-boundaries.md)。
 
+## 大模型证明材料
+
+项目保留了一次脱敏的真实百炼 qwen-plus 推荐调用，包含 provider call ID、token usage、结构化结果和衣橱 ID 校验；同时给出推荐调用流程图及 prompt 约束说明：
+
+- [百炼大模型接入与调用证据](docs/llm-integration-evidence.md)
+- [真实调用脱敏 JSON](docs/llm-evidence/bailian-recommendation-2026-07-14.json)
+
+证明材料不包含 DASHSCOPE_API_KEY、Authorization 头或完整环境变量。预置演示数据仍明确标记为 development-rule-v1，与真实调用证据分开保存。
+
 ## 环境变量
 
 .env.example 是 Compose 配置的完整示例。复制为 .env 后按需修改，尤其不要把真实密钥和生产密码提交到仓库。
