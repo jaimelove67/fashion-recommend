@@ -11,6 +11,7 @@ Thumbs.db
 
 # Local tools
 .codex_tmp/
+.playwright-cli/
 
 # Frontend dependencies and build output
 frontend/node_modules/
@@ -25,6 +26,7 @@ backend/target/
 *.class
 
 # Local tools, temporary files, and generated output
+output/
 outputs/
 tmp/
 temp/

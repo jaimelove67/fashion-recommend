@@ -196,6 +196,19 @@ Compose 文件校验：
 docker compose config -q
 ~~~
 
+前端 E2E 冒烟验证：
+
+~~~powershell
+docker compose --profile app up --build -d
+Set-Location frontend
+npm ci
+npm run test:e2e
+~~~
+
+E2E 默认使用系统已安装的 Google Chrome，不需要额外下载浏览器。它会使用独立测试用户，通过真实页面完成“打开页面 -> 添加衣物 -> 生成推荐 -> 收藏推荐”，并从后端历史接口再次确认 saved=true。失败时的 trace、截图、视频和 HTML 报告位于 output/playwright/，不会进入 Git。
+
+可通过 E2E_BASE_URL、E2E_API_URL、E2E_CITY 和 E2E_BROWSER_CHANNEL 覆盖默认的前端地址、后端地址、测试城市和浏览器通道。需要在可见浏览器中演示时运行 npm run test:e2e:headed。
+
 提交前建议再检查：
 
 ~~~powershell

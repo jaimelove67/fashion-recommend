@@ -42,6 +42,25 @@
 - 返回结果只含 summary、reason、itemIds；4 个 ID 互不重复且全部解析到 demo-user 当前衣橱。
 - 证明材料采用脱敏 JSON 加说明文档，既保留可核验 ID 和结果，又不写入 API Key、Authorization 或完整环境。
 
+## 前端 E2E 发现
+
+- npx、Node 24 和 Playwright 1.59.1 可用，可以使用正式 Playwright Test 文件而不是临时点击脚本。
+- 衣橱表单已有可访问标签：单品名称、类别、颜色、风格，提交按钮为“加入衣橱”。
+- 推荐表单已有场合、城市、风格提示标签，生成和收藏按钮都有稳定可见文本。
+- 前端固定发送 demo-user；E2E 可在浏览器路由层把 X-User-Id 改为独立测试用户，避免污染答辩数据且无需修改产品身份逻辑。
+- 推荐至少需要两类衣物；测试可用 API 为独立用户预置下装和鞋履，再由页面新增上装，保证“添加衣物”仍由真实 UI 验证。
+- 前端尚无 Playwright 配置、E2E 目录或测试依赖，需要新增最小配置、单个 smoke spec 和 npm 命令。
+- Playwright CLI 真实快照确认主导航“衣橱”、页面“添加单品”和“人工确认”均以语义角色暴露，可优先使用 getByRole/getByLabel。
+- CLI 会在根目录生成 .playwright-cli 临时快照，提交前应纳入忽略规则；正式测试还需忽略 test-results 和 playwright-report。
+- Playwright Test 成功收集到 1 个 Chromium spec，说明配置和测试语法有效。
+- 本机 1.59.1 缓存只有 ffmpeg/winldd，CLI 的临时浏览器不被 Playwright Test 识别；浏览器安装需显式使用本地代理。
+- 两次 shell 超时只结束外层命令，遗留 4 个 playwright install chromium 子进程并持有 ms-playwright/__dirlock；必须先清理明确匹配的孤儿安装进程。
+- 代理下载进程虽已连接但长期不落盘；本机已有 Chrome 150，可将 Playwright 项目固定到官方 chrome channel，去掉答辩前的大体积浏览器下载依赖。
+- 首次 E2E 页面 POST 衣橱返回 403，但不带 Origin 的相同 Nginx 请求返回 200；Compose 覆盖的 CORS_ALLOWED_ORIGINS 仅含 8088，缺少实际前端 8090，是浏览器写请求失败的根因候选。
+- 带 http://localhost:8090 Origin 的反例稳定返回 403 Invalid CORS request；加入 FRONTEND_PORT 来源并重建后，同一请求返回 200。
+- 修复 CORS 后完整 E2E 首次通过，真实完成页面新增衣物、推荐生成、收藏以及历史 saved=true 复核。
+- E2E 连续第二次通过，finally 清理逻辑把测试用户衣橱记录恢复为 0；推荐历史使用独立测试用户，不影响 demo-user 答辩数据。
+
 ## 代码现状
 
 - 前端已经是 Vue/Vite 单页，当前调用 `/api/v1/trends` 和 `/api/v1/me/style-profile`。

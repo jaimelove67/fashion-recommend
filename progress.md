@@ -30,6 +30,22 @@
 - 16:32:24 从宿主机按相同请求契约成功调用百炼 qwen-plus，取得 call ID、usage 和合法结构化结果。
 - 已新增 Mermaid 推荐流程图、prompt 四层约束说明和脱敏 JSON 调用记录，并在 README 中增加入口。
 - 证据 JSON 解析、token 合计、衣橱 ID 校验和真实 Key 泄漏检查通过；后端 24 项测试全部通过。
+- 第 3 项提交 3696172 已推送到 origin/main。
+- 第 4 项开始：确认 Playwright 1.59.1 可用，并梳理衣橱、推荐和收藏流程的稳定可访问标签。
+- Playwright CLI 已打开 Docker 前端并完成首页、衣橱真实快照，语义控件与源码预期一致。
+- 第一次 E2E 多文件补丁因 README 更新块残留多余 hunk 标记而未应用；依赖安装成功，改为拆分补丁继续。
+- 已加入 @playwright/test 1.59.1、Chromium 配置和完整业务 smoke spec，并补充运行命令及失败产物位置。
+- 首次 npx playwright install chromium 在 184 秒后无输出超时；不重复同一路径，先关闭 CLI 会话并检查浏览器缓存与代理。
+- CLI 会话已关闭；test --list 成功收集 1 个 spec，浏览器缓存确认缺少 Chromium，改用代理下载。
+- 第二次 Chromium 安装显式使用代理后仍无输出超时，判断阻塞更可能来自首次超时遗留的缓存锁；先验证进程和锁路径再处理。
+- 已确认 4 个孤儿安装进程及锁目录的绝对路径，准备只清理这些临时状态后重试。
+- 第三次直接 CLI 下载已建立代理连接但长期未完成，主动终止；确认系统 Chrome 150 可供 Playwright channel 直接使用。
+- 首次 E2E 使用系统 Chrome 成功运行到页面新增衣物，但 POST wardrobe 返回非 2xx；trace、截图和视频已保留，先诊断真实响应再修改。
+- 相同请求不带 Origin 时返回 200，初步定位为 Docker CORS 配置缺少前端 8090；先构造带 Origin 的反例确认。
+- 带 Origin 的反例确认返回 403 Invalid CORS request；修复 Compose 时首次补丁因变量插值冲突未应用，改用普通字符串后已加入 FRONTEND_PORT 来源。
+- 后端重建后带 8090 Origin 的 POST 返回 200；首次完整 E2E 通过，1 个测试耗时 13.3 秒。
+- E2E 第二次运行继续通过，测试结束后 e2e-smoke 用户衣橱残留数为 0。
+- 最终验证：前端构建通过、后端 24 项测试通过、Compose 配置通过、临时产物忽略规则命中、待提交文件未包含真实 API Key。
 
 ## 2026-07-13
 
