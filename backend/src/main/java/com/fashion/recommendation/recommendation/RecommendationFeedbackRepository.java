@@ -2,6 +2,8 @@ package com.fashion.recommendation.recommendation;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -12,6 +14,21 @@ public class RecommendationFeedbackRepository {
 
     public RecommendationFeedbackRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
+    }
+
+    public Map<Long, Double> averageRatingByItem(String userId) {
+        Map<Long, Double> ratings = new LinkedHashMap<>();
+        jdbcTemplate.query(
+                "SELECT ri.wardrobe_item_id AS item_id, AVG(f.rating) AS avg_rating "
+                        + "FROM recommendation_items ri "
+                        + "JOIN recommendation_feedback f ON f.recommendation_id = ri.recommendation_id "
+                        + "WHERE f.user_id = ? AND ri.wardrobe_item_id IS NOT NULL "
+                        + "GROUP BY ri.wardrobe_item_id",
+                rs -> {
+                    ratings.put(rs.getLong("item_id"), rs.getDouble("avg_rating"));
+                },
+                userId);
+        return ratings;
     }
 
     public RecommendationFeedback save(String userId, Long recommendationId, RecommendationFeedbackRequest request) {

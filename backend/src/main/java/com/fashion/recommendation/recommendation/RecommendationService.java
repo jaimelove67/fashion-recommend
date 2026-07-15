@@ -8,6 +8,7 @@ import com.fashion.recommendation.wardrobe.WardrobeItem;
 import com.fashion.recommendation.wardrobe.WardrobeRepository;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +26,7 @@ public class RecommendationService {
     private static final Logger log = LoggerFactory.getLogger(RecommendationService.class);
     private static final String LLM_ENGINE = "llm";
     private static final String RULE_ENGINE = "development-rule-v1";
+    private static final double NEUTRAL_RATING = 3.0;
 
     private final WardrobeRepository wardrobeRepository;
     private final RecommendationRepository recommendationRepository;
@@ -57,14 +59,15 @@ public class RecommendationService {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "请先添加并完善至少两件衣物，再生成穿搭推荐");
         }
 
+        Map<Long, Double> itemRatings = feedbackRepository.averageRatingByItem(userId);
         WeatherSnapshot weather = weatherService.current(request.city());
-        List<WardrobeItem> ruleSelected = selectItems(wardrobe, weather.temperatureC());
+        List<WardrobeItem> ruleSelected = selectItems(wardrobe, weather.temperatureC(), itemRatings);
         if (ruleSelected.size() < 2 || distinctCategoryCount(ruleSelected) < 2) {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "当前衣橱缺少可组合的不同类别衣物");
         }
 
         StyleProfile profile = profileService.current(userId);
-        RecommendationDraft draft = tryLlmRecommendation(request, wardrobe, weather, profile)
+        RecommendationDraft draft = tryLlmRecommendation(request, wardrobe, weather, profile, itemRatings)
                 .orElseGet(() -> buildRuleRecommendation(request, ruleSelected, weather, profile));
         Instant generatedAt = Instant.now();
         Long recommendationId = recommendationRepository.create(
@@ -123,17 +126,21 @@ public class RecommendationService {
                 recommendationRepository.findItems(record.id()));
     }
 
-    private static List<WardrobeItem> selectItems(List<WardrobeItem> wardrobe, double temperature) {
+    private static List<WardrobeItem> selectItems(
+            List<WardrobeItem> wardrobe, double temperature, Map<Long, Double> itemRatings) {
         List<String> categoryOrder = temperature < 18
                 ? List.of("外套", "上装", "下装", "鞋履", "配饰")
                 : List.of("上装", "下装", "鞋履", "外套", "配饰");
+        List<WardrobeItem> ranked = wardrobe.stream()
+                .sorted(Comparator.comparingDouble((WardrobeItem item) -> feedbackScore(item, itemRatings)).reversed())
+                .toList();
         Map<Long, WardrobeItem> selected = new LinkedHashMap<>();
         for (String category : categoryOrder) {
-            wardrobe.stream().filter(item -> matchesCategory(item.category(), category)).findFirst()
+            ranked.stream().filter(item -> matchesCategory(item.category(), category)).findFirst()
                     .ifPresent(item -> selected.putIfAbsent(item.id(), item));
         }
         if (selected.size() < 4) {
-            for (WardrobeItem item : wardrobe) {
+            for (WardrobeItem item : ranked) {
                 selected.putIfAbsent(item.id(), item);
                 if (selected.size() == 4) {
                     break;
@@ -143,11 +150,16 @@ public class RecommendationService {
         return new ArrayList<>(selected.values());
     }
 
+    private static double feedbackScore(WardrobeItem item, Map<Long, Double> itemRatings) {
+        return itemRatings.getOrDefault(item.id(), NEUTRAL_RATING);
+    }
+
     private Optional<RecommendationDraft> tryLlmRecommendation(
-            RecommendationRequest request, List<WardrobeItem> wardrobe, WeatherSnapshot weather, StyleProfile profile) {
+            RecommendationRequest request, List<WardrobeItem> wardrobe, WeatherSnapshot weather, StyleProfile profile,
+            Map<Long, Double> itemRatings) {
         try {
             LlmRecommendationContext context = new LlmRecommendationContext(
-                    request.occasion().trim(), request.styleHint(), wardrobe, weather, profile);
+                    request.occasion().trim(), request.styleHint(), wardrobe, weather, profile, itemRatings);
             return llmRecommendationClient.recommend(context)
                     .flatMap(result -> validateLlmResult(result, wardrobe));
         } catch (RuntimeException exception) {
