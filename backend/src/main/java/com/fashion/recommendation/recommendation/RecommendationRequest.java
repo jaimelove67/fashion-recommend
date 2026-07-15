@@ -1,10 +1,10 @@
 package com.fashion.recommendation.recommendation;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 public record RecommendationRequest(
-        @NotBlank String occasion,
-        @NotBlank String city,
-        Double temperatureC,
-        String styleHint) {
+        @NotBlank @Size(max = 80) String occasion,
+        @NotBlank @Size(max = 80) String city,
+        @Size(max = 120) String styleHint) {
 }

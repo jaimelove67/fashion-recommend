@@ -70,6 +70,7 @@ public class WardrobeController {
         var data = wardrobeService.readImage(effectiveUserId, itemId);
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(data.contentType()))
+                .header("X-Content-Type-Options", "nosniff")
                 .body(new ByteArrayResource(data.content()));
     }
 
