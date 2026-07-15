@@ -140,6 +140,22 @@ class RecommendationControllerTest {
     }
 
     @Test
+    void refusesRecommendationWhenAllItemsShareOneCategory() throws Exception {
+        String userId = "single-category-user";
+        createItem(userId, "米白衬衫", "上装", "暖白");
+        createItem(userId, "灰色卫衣", "上装", "石墨灰");
+
+        mockMvc.perform(post("/api/v1/recommendations")
+                        .header("X-User-Id", userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"occasion":"通勤","city":"长沙"}
+                                """))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value(422));
+    }
+
+    @Test
     void deletesWardrobeItemForTheCurrentUser() throws Exception {
         String userId = "delete-wardrobe-user";
         long itemId = createItem(userId, "灰色卫衣", "上装", "灰色");

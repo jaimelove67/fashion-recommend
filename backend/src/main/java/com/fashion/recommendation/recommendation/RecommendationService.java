@@ -59,7 +59,7 @@ public class RecommendationService {
 
         WeatherSnapshot weather = weatherService.current(request.city());
         List<WardrobeItem> ruleSelected = selectItems(wardrobe, weather.temperatureC());
-        if (ruleSelected.size() < 2) {
+        if (ruleSelected.size() < 2 || distinctCategoryCount(ruleSelected) < 2) {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "当前衣橱缺少可组合的不同类别衣物");
         }
 
@@ -198,6 +198,22 @@ public class RecommendationService {
         }
         String normalized = category.trim();
         return normalized.contains(target) || (target.equals("鞋履") && normalized.contains("鞋"));
+    }
+
+    private static long distinctCategoryCount(List<WardrobeItem> items) {
+        return items.stream().map(item -> canonicalCategory(item.category())).distinct().count();
+    }
+
+    private static String canonicalCategory(String category) {
+        if (category == null) {
+            return "";
+        }
+        for (String canonical : List.of("外套", "上装", "下装", "鞋履", "配饰")) {
+            if (matchesCategory(category, canonical)) {
+                return canonical;
+            }
+        }
+        return category.trim();
     }
 
     private static String buildReason(
