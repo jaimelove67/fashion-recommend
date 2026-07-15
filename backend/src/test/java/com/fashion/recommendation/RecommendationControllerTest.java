@@ -156,6 +156,46 @@ class RecommendationControllerTest {
     }
 
     @Test
+    void ruleEnginePrefersItemsWithHigherHistoricalFeedback() throws Exception {
+        String userId = "feedback-loop-user";
+        long preferredTopId = createItem(userId, "酒红针织衫", "上装", "酒红");
+        createItem(userId, "深蓝直筒裤", "下装", "深蓝");
+
+        var first = mockMvc.perform(post("/api/v1/recommendations")
+                        .header("X-User-Id", userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"occasion":"通勤","city":"长沙"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.engine").value("development-rule-v1"))
+                .andReturn();
+        long firstId = readData(first).path("id").asLong();
+
+        mockMvc.perform(post("/api/v1/me/recommendations/" + firstId + "/feedback")
+                        .header("X-User-Id", userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"rating":5,"feedbackType":"useful"}
+                                """))
+                .andExpect(status().isOk());
+
+        long newerTopId = createItem(userId, "灰色卫衣", "上装", "石墨灰");
+
+        mockMvc.perform(post("/api/v1/recommendations")
+                        .header("X-User-Id", userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"occasion":"通勤","city":"长沙"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.engine").value("development-rule-v1"))
+                .andExpect(jsonPath("$.data.items[0].id").value((int) preferredTopId));
+
+        assertTrue(newerTopId > preferredTopId, "newer item should sort first without the feedback signal");
+    }
+
+    @Test
     void deletesWardrobeItemForTheCurrentUser() throws Exception {
         String userId = "delete-wardrobe-user";
         long itemId = createItem(userId, "灰色卫衣", "上装", "灰色");

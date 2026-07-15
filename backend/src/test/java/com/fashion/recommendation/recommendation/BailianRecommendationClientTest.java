@@ -8,6 +8,7 @@ import com.fashion.recommendation.weather.WeatherSnapshot;
 import com.fashion.recommendation.wardrobe.WardrobeItem;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,6 +51,8 @@ class BailianRecommendationClientTest {
         assertEquals(2, userPrompt.path("wardrobe").size());
         assertEquals(11L, userPrompt.path("wardrobe").path(0).path("id").asLong());
         assertEquals("米白衬衫", userPrompt.path("wardrobe").path(0).path("name").asText());
+        assertEquals(4.5, userPrompt.path("wardrobe").path(0).path("avgFeedbackRating").asDouble());
+        assertTrue(userPrompt.path("wardrobe").path(1).path("avgFeedbackRating").isMissingNode());
     }
 
     @Test
@@ -120,6 +123,6 @@ class BailianRecommendationClientTest {
                 "小夏", List.of("复古"), List.of("深蓝"), List.of("通勤"),
                 List.of("复古"), List.of("法式休闲"), List.of("深蓝"), List.of("直筒下装"),
                 "已生成风格档案。", "qwen-plus-test", observedAt, false);
-        return new LlmRecommendationContext("通勤", "极简", wardrobe, weather, profile);
+        return new LlmRecommendationContext("通勤", "极简", wardrobe, weather, profile, Map.of(11L, 4.5));
     }
 }
