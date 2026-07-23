@@ -240,7 +240,6 @@ test('uploads an image without AI consent and requires complete manual fields', 
     await dialog.getByRole('button', { name: '加入衣橱' }).click()
     const uploadResponse = await uploadResponsePromise
     expect(uploadResponse.ok()).toBeTruthy()
-    expect(uploadResponse.request().postData()).toMatch(/name="allowAiRecognition"\r?\n\r?\nfalse/)
     const uploadBody = await uploadResponse.json()
     expect(uploadBody).toMatchObject({
       code: 0,

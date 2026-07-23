@@ -20,9 +20,9 @@
 - [completed] 2. 实现认证接口、服务端身份上下文和前端登录会话
 - [completed] 3. 引入 Flyway 版本迁移并删除未使用的 Redis 服务
 - [completed] 4. 实现可配置趋势适配器和视觉识别显式授权
-- [in_progress] 5. 扩充认证、隔离、上传授权、趋势降级和浏览器 E2E 测试
-- [in_progress] 6. 更新 README、环境变量和生产边界说明
-- [in_progress] 7. 执行后端、前端、Compose、完整栈与浏览器对抗验证
+- [completed] 5. 扩充认证、隔离、上传授权、趋势降级和浏览器 E2E 测试
+- [completed] 6. 更新 README、环境变量和生产边界说明
+- [completed] 7. 执行后端、前端、Compose、完整栈与浏览器对抗验证
 
 ## 验收条件
 
@@ -53,6 +53,18 @@
 | 首次 `mvn test` 的 Spring 上下文无法实例化趋势适配器 | 1 | 定位为双构造器缺少 `@Autowired`；Flyway/纯单元测试已通过，标注生产构造器后重跑 |
 | 并行恢复读取因受管终端找不到 `git` 导致整组命令中断 | 1 | 改为逐项容错读取；业务验证继续，最终差异检查单独定位 Git |
 | Python 环境缺少 `bcrypt`，无法生成演示密码哈希 | 1 | 不安装额外依赖，改用项目已缓存的 Spring Security BCrypt 实现 |
+| Git HTTPS 推送三次被连接重置 | 3 | `gh api` 可达；运行 `gh auth setup-git` 重配凭据后推送成功 |
+| Docker Windows 服务无权限启动，后台 Desktop 50 秒未就绪 | 2 | 通过 Docker Desktop GUI 启动并确认 Engine running；保留数据卷重建应用栈 |
+| 后端镜像首次重建时 Maven Central 响应体中断 | 1 | 前端构建已通过；为 Maven 阶段增加 BuildKit 持久缓存与 3 次传输重试后再构建 |
+| 后端缓存重建超过 10 分钟工具上限 | 1 | 不重复 Compose 构建；复用已填充缓存并改用 BuildKit host 网络绕过 Docker NAT |
+| Playwright 对浏览器 multipart 请求调用 `postData()` 返回 null | 1 | 删除依赖内部缓冲的断言；保留默认未勾选、必填字段、MANUAL_CORRECTED 响应，并由后端 mock 验证模型零调用 |
+
+## 阶段七完成结果
+
+- 认证、Principal 数据隔离、CSRF、Flyway、授权趋势源、视觉逐次同意和 Redis 移除已落地。
+- 真实旧 PostgreSQL 数据卷完成 baseline 0 -> V1，数据保留；演示种子连续执行两次稳定且账号可登录。
+- Maven Docker 测试 37/37、Playwright E2E 4/4、Compose 配置、前后端镜像构建和健康检查通过。
+- 应用内浏览器完成桌面与 390x844 视口 QA，控制台无 warning/error，页面和弹窗无横向溢出或重叠。
 
 ---
 

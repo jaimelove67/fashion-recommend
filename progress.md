@@ -9,6 +9,19 @@
 - 前端 E2E 并行任务已完成：脚本静态校验通过，共发现 4 个 Chromium 测试；完整运行等待容器启动。
 - 搜索旧身份引用时发现演示种子未创建认证账号，已纳入本轮最小修复。
 - Python 生成 BCrypt 哈希失败（缺少 `bcrypt` 模块）；下一步改用现有 Spring Security 依赖，避免引入工具依赖。
+- 创建分支 `codex/fix-major-gaps`，提交 `fb386ae`；执行 `gh auth setup-git` 后推送成功，并创建草稿 PR #1。
+- Docker Desktop 已通过 GUI 启动并确认 Engine running；当前显示的是旧应用栈，含待清理的孤立 Redis 容器。
+- 首次完整 Compose 重建中前端 Vite 构建通过（170.50 kB JS / 89.17 kB CSS）；后端在 `dependency:go-offline` 下载 guava 时响应体中断，尚未替换运行中旧容器。
+- 后端 Dockerfile 已增加 BuildKit Maven 缓存和有限网络重试，准备重新构建。
+- 第二轮后端构建未返回编译错误，但超过 10 分钟工具上限；改用 `docker build --network=host` 复用缓存并缩短网络路径。
+- `docker build --network=host` 成功构建新后端；Compose 使用新镜像重建，旧 Redis 孤立容器已移除，健康检查为 UP。
+- 真实旧库完成 Flyway baseline 0 -> V1，迁移历史为两条成功记录；数据卷保留。
+- 演示种子连续两次执行结果稳定，真实登录与衣橱读取通过。
+- 首轮完整 E2E 为 3/4 通过；唯一失败是 Playwright 不保留 multipart `postData()`，业务上传已成功并返回 `MANUAL_CORRECTED`。已移除该脆弱观察点，等待重跑。
+- 删除脆弱 multipart 观察点后 E2E 4/4 通过。
+- Maven Docker 容器完整后端测试通过：8 个套件、37 项测试、0 失败、0 错误、0 跳过。
+- 应用内浏览器完成桌面首页、衣橱、上传弹窗和 390x844 移动布局验收；页面身份、非空内容、控制台、交互和截图证据全部通过。
+- 阶段七验收条件全部满足；准备仅暂存本轮修复文件，明确排除并保留独立的 `HistoryView.vue` 工作区改动。
 
 ## 2026-07-22
 

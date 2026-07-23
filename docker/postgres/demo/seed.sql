@@ -2,6 +2,16 @@
 
 BEGIN;
 
+INSERT INTO app_users (username, password_hash, enabled)
+VALUES ('demo-user', '$2a$10$4vvgBGdouM233ddKN5aFS.y/of5uLi4cLIwYOl0.itFhin6e/s8vu', TRUE)
+ON CONFLICT (username) DO UPDATE
+SET password_hash = EXCLUDED.password_hash,
+    enabled = TRUE;
+
+INSERT INTO app_authorities (username, authority)
+VALUES ('demo-user', 'ROLE_USER')
+ON CONFLICT (username, authority) DO NOTHING;
+
 DELETE FROM recommendations WHERE user_id = 'demo-user';
 DELETE FROM wardrobe_items WHERE user_id = 'demo-user';
 DELETE FROM style_profiles WHERE user_id = 'demo-user';

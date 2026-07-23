@@ -84,11 +84,28 @@ mvn spring-boot:run
 
 ## 账号与会话
 
-项目不提供预置账号。首次打开页面后切换到“注册”，创建账号并自动登录；以后使用同一用户名和密码登录。用户名为 3-32 位小写字母、数字、下划线或连字符，密码至少 8 个字符且 UTF-8 编码不超过 72 字节。注册可通过 `AUTH_REGISTRATION_ENABLED=false` 关闭。
+正常启动不会创建默认账号。首次打开页面后切换到“注册”，创建账号并自动登录；以后使用同一用户名和密码登录。用户名为 3-32 位小写字母、数字、下划线或连字符，密码至少 8 个字符且 UTF-8 编码不超过 72 字节。注册可通过 `AUTH_REGISTRATION_ENABLED=false` 关闭。
 
 密码使用 BCrypt 存储。Spring Security 将认证状态保存在服务端 Session 中，浏览器只接收 HttpOnly、SameSite=Lax 的 `JSESSIONID` Cookie，前端不保存可伪造的用户 ID 或认证 Token。个人接口从认证上下文取得用户名；匿名访问返回 401，退出登录会使当前 Session 失效并清除会话数据。
 
 前端在同源请求中携带 Cookie，并从 `GET /api/v1/auth/csrf` 取得 CSRF Token；所有 POST、PUT、DELETE 请求发送服务端返回的 `X-XSRF-TOKEN` 请求头。令牌过期导致 403 时前端只刷新一次令牌并重试。生产部署应启用 HTTPS，并设置 `SESSION_COOKIE_SECURE=true`。
+
+## 准备答辩演示数据
+
+完整应用启动且 Flyway 迁移完成后，在项目根目录执行：
+
+~~~powershell
+.\scripts\seed-demo-data.ps1
+~~~
+
+脚本在单个事务中幂等重置 `demo-user`，准备 8 件衣物、3 条推荐、1 条收藏反馈、1 份风格档案和 1 条识别失败后人工修正记录。登录凭据仅用于本地演示：
+
+~~~text
+用户名：demo-user
+密码：demo-password-2026
+~~~
+
+每次执行都会重置该演示账号的密码和业务数据，不影响其他账号。预置推荐标记为 `development-rule-v1`，不会伪装成真实模型结果；生产环境不应运行此脚本。
 
 ## 核心演示流程
 
@@ -139,7 +156,6 @@ mvn spring-boot:run
 | POSTGRES_DB | fashion_recommendation | 数据库名 |
 | POSTGRES_USER / POSTGRES_PASSWORD | fashion / fashion_2404 | 数据库账号 |
 | POSTGRES_PORT | 5433 | PostgreSQL 主机端口 |
-| REDIS_PORT / REDIS_PASSWORD | 6380 / fashion_2404 | Redis 主机端口和密码 |
 | MINIO_PORT / MINIO_CONSOLE_PORT | 9000 / 9001 | MinIO API 和控制台端口 |
 | MINIO_ROOT_USER / MINIO_ROOT_PASSWORD | fashion_minio_admin / fashion_2404 | MinIO 管理账号 |
 | MINIO_BUCKET | garments-private | 私有图片桶名称 |
@@ -150,12 +166,17 @@ mvn spring-boot:run
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
 | BACKEND_PORT / FRONTEND_PORT | 8088 / 8090 | Docker 应用的主机端口 |
+| AUTH_REGISTRATION_ENABLED | true | 是否允许创建本地账号 |
+| SESSION_TIMEOUT | 30m | 服务端 Session 有效期 |
+| SESSION_COOKIE_SECURE | false | HTTPS 部署时应设置为 true |
 | DASHSCOPE_API_KEY | 空 | 百炼 API Key；为空时使用规则推荐 |
 | BAILIAN_MODEL | qwen-plus | 文本推荐模型 |
 | BAILIAN_VISION_ENABLED | false | 是否启用图片视觉识别 |
 | BAILIAN_VISION_MODEL | qwen-vl-plus | 视觉识别模型 |
 | BAILIAN_ENDPOINT | 百炼兼容接口 | 模型请求地址 |
 | BAILIAN_CONNECT_TIMEOUT / BAILIAN_READ_TIMEOUT | 3s / 8s | 模型连接和读取超时 |
+
+授权趋势源变量：`TREND_JSON_URL`、`TREND_PLATFORM`、`TREND_CONNECT_TIMEOUT`、`TREND_READ_TIMEOUT`、`TREND_CACHE_TTL`。`TREND_JSON_URL` 为空时使用开发样本。数据源必须返回只含 `items` 的 JSON 对象；每条记录必须且只能包含 `id`、`platform`、`title`、`topicTags`、`heatScore`、`publishedAt`、`sourceUrl`、`imageUrl`。条目数为 1-50，热度为 0-100 整数，时间为 ISO-8601，链接为 HTTP(S)，`imageUrl` 可为 `null`。任一约束失败时整批拒绝并降级，不会把部分脏数据标记为实时趋势。
 
 天气变量：WEATHER_PRIMARY_BASE_URL、WEATHER_FALLBACK_GEOCODING_BASE_URL、WEATHER_FALLBACK_FORECAST_BASE_URL、WEATHER_CONNECT_TIMEOUT、WEATHER_READ_TIMEOUT、WEATHER_CACHE_TTL、WEATHER_CACHE_MAX_SIZE。默认使用 wttr.in，失败后回退到 Open-Meteo，并在进程内缓存天气结果。
 
@@ -220,7 +241,7 @@ git status --short
 
 ### 端口被占用
 
-Docker 模式可修改 .env 中的 POSTGRES_PORT、REDIS_PORT、BACKEND_PORT 或 FRONTEND_PORT 后重新启动。源码模式下，后端默认使用 8080，前端默认使用 5173，代理地址见 frontend/vite.config.js。
+Docker 模式可修改 .env 中的 POSTGRES_PORT、MINIO_PORT、BACKEND_PORT 或 FRONTEND_PORT 后重新启动。源码模式下，后端默认使用 8080，前端默认使用 5173，代理地址见 frontend/vite.config.js。
 
 ### 如何清空本地演示数据
 
@@ -229,4 +250,4 @@ docker compose down -v
 docker compose --profile app up --build -d
 ~~~
 
-这会删除所有本地数据库、对象存储和 Redis 数据，请确认不再需要当前演示数据后再执行。
+这会删除所有本地数据库和对象存储数据，包括账号、衣橱、推荐记录和上传图片，请确认不再需要当前演示数据后再执行。

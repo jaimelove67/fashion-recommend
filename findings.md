@@ -8,6 +8,13 @@
 - 当前受管 PowerShell 的 PATH 中没有 Git；这只阻碍差异命令，不影响源文件读取、构建和容器验证。
 - 对抗搜索发现 `docker/postgres/demo/seed.sql` 仍只为 `demo-user` 写业务数据，却没有创建可登录账号；认证上线后这些演示数据无法从 UI 访问，属于答辩路径回归。
 - 新版 Playwright 已改为 UI 注册真实账号并共享 Session/CSRF，覆盖未认证 401、刷新续期、退出清理、AI 默认未授权、人工字段必填、反馈持久化和 390x844 布局。
+- 当前修复已提交 `fb386ae` 并推送到 `codex/fix-major-gaps`，草稿 PR 为 GitHub #1。
+- Docker Desktop 恢复了旧镜像组成的历史栈，其中仍有孤立 Redis 容器；新 Compose 已删除 Redis，重建时需 `--remove-orphans`，但不能删除 PostgreSQL/MinIO 数据卷。
+- 真实旧 PostgreSQL 数据卷已由 Flyway 成功建立 baseline 0 并迁移到 V1，日志只显示既有表/列跳过，应用健康检查为 UP。
+- 修复后的种子连续执行两次均保持 8 件衣物、3 条推荐、1 条收藏反馈和 1 条人工修正；`demo-user / demo-password-2026` 可经 Session/CSRF 登录并读取 8 件衣物。
+- 新 Compose 启动后旧 Redis 孤立容器已移除，PostgreSQL 与 MinIO 数据卷未删除。
+- 完整 Playwright E2E 为 4/4 通过；Maven Docker 容器中的 Surefire 报告为 8 个套件、37 项测试、0 失败、0 错误、0 跳过。
+- 应用内浏览器桌面与 390x844 视口验收通过：页面非空、无框架错误覆盖层、登录和衣橱交互正常、控制台无 warning/error；移动端 `scrollWidth == viewportWidth == 390`，上传对话框完整位于视口内。
 
 ## 2026-07-22 主要缺口收敛
 
