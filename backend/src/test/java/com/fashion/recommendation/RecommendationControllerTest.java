@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fashion.recommendation.recommendation.LlmRecommendationClient;
 import com.fashion.recommendation.recommendation.LlmRecommendationContext;
 import com.fashion.recommendation.recommendation.LlmRecommendationResult;
+import com.fashion.recommendation.recognition.GarmentRecognitionResult;
 import com.fashion.recommendation.recognition.GarmentRecognitionService;
 import com.fashion.recommendation.storage.ImageStorage;
 import com.fashion.recommendation.storage.StoredImage;
@@ -31,6 +32,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,6 +42,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -67,7 +71,6 @@ class RecommendationControllerTest {
                 invocation.getArgument(0), 26.0, 27.5, 0.0, 1, 10.0,
                 java.time.Instant.parse("2026-07-13T02:00:00Z"), "test-weather"));
         given(llmRecommendationClient.recommend(any(LlmRecommendationContext.class))).willReturn(Optional.empty());
-        given(garmentRecognitionService.recognize(any())).willReturn(Optional.empty());
     }
 
     @Test
@@ -78,7 +81,8 @@ class RecommendationControllerTest {
         createItem(userId, "低跟皮鞋", "鞋履", "黑色");
 
         var generated = mockMvc.perform(post("/api/v1/recommendations")
-                        .header("X-User-Id", userId)
+                        .with(user(userId))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"occasion":"通勤","city":"长沙","temperatureC":26.0,"styleHint":"极简"}
@@ -94,12 +98,14 @@ class RecommendationControllerTest {
         long recommendationId = readData(generated).path("id").asLong();
 
         mockMvc.perform(post("/api/v1/me/recommendations/" + recommendationId + "/save")
-                        .header("X-User-Id", userId))
+                        .with(user(userId))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.saved").value(true));
 
         mockMvc.perform(post("/api/v1/me/recommendations/" + recommendationId + "/feedback")
-                        .header("X-User-Id", userId)
+                        .with(user(userId))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(""" 
                                 {"rating":5,"feedbackType":"useful","comment":"适合通勤"}
@@ -108,20 +114,25 @@ class RecommendationControllerTest {
                 .andExpect(jsonPath("$.data.feedback.rating").value(5))
                 .andExpect(jsonPath("$.data.feedback.comment").value("适合通勤"));
 
-        mockMvc.perform(get("/api/v1/me/recommendations").header("X-User-Id", userId))
+        mockMvc.perform(get("/api/v1/me/recommendations")
+                        .with(user(userId))
+                        .header("X-User-Id", "another-user"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(1))
                 .andExpect(jsonPath("$.data[0].saved").value(true))
                 .andExpect(jsonPath("$.data[0].feedback.rating").value(5));
 
         mockMvc.perform(get("/api/v1/recommendations/" + recommendationId)
-                        .header("X-User-Id", "another-user"))
+                        .with(user("another-user"))
+                        .header("X-User-Id", userId))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404));
 
-        mockMvc.perform(delete("/api/v1/me/wardrobe/" + topId).header("X-User-Id", userId))
+        mockMvc.perform(delete("/api/v1/me/wardrobe/" + topId)
+                        .with(user(userId))
+                        .with(csrf()))
                 .andExpect(status().isOk());
-        mockMvc.perform(get("/api/v1/recommendations/" + recommendationId).header("X-User-Id", userId))
+        mockMvc.perform(get("/api/v1/recommendations/" + recommendationId).with(user(userId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items.length()").value(3))
                 .andExpect(jsonPath("$.data.items[0].name").value("米白衬衫"));
@@ -130,7 +141,8 @@ class RecommendationControllerTest {
     @Test
     void refusesRecommendationWhenWardrobeCannotFormAnOutfit() throws Exception {
         mockMvc.perform(post("/api/v1/recommendations")
-                        .header("X-User-Id", "empty-wardrobe-user")
+                        .with(user("empty-wardrobe-user"))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"occasion":"周末","city":"长沙"}
@@ -146,7 +158,8 @@ class RecommendationControllerTest {
         createItem(userId, "灰色卫衣", "上装", "石墨灰");
 
         mockMvc.perform(post("/api/v1/recommendations")
-                        .header("X-User-Id", userId)
+                        .with(user(userId))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"occasion":"通勤","city":"长沙"}
@@ -162,7 +175,8 @@ class RecommendationControllerTest {
         createItem(userId, "深蓝直筒裤", "下装", "深蓝");
 
         var first = mockMvc.perform(post("/api/v1/recommendations")
-                        .header("X-User-Id", userId)
+                        .with(user(userId))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"occasion":"通勤","city":"长沙"}
@@ -173,7 +187,8 @@ class RecommendationControllerTest {
         long firstId = readData(first).path("id").asLong();
 
         mockMvc.perform(post("/api/v1/me/recommendations/" + firstId + "/feedback")
-                        .header("X-User-Id", userId)
+                        .with(user(userId))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"rating":5,"feedbackType":"useful"}
@@ -183,7 +198,8 @@ class RecommendationControllerTest {
         long newerTopId = createItem(userId, "灰色卫衣", "上装", "石墨灰");
 
         mockMvc.perform(post("/api/v1/recommendations")
-                        .header("X-User-Id", userId)
+                        .with(user(userId))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"occasion":"通勤","city":"长沙"}
@@ -200,11 +216,13 @@ class RecommendationControllerTest {
         String userId = "delete-wardrobe-user";
         long itemId = createItem(userId, "灰色卫衣", "上装", "灰色");
 
-        mockMvc.perform(delete("/api/v1/me/wardrobe/" + itemId).header("X-User-Id", userId))
+        mockMvc.perform(delete("/api/v1/me/wardrobe/" + itemId)
+                        .with(user(userId))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
 
-        mockMvc.perform(get("/api/v1/me/wardrobe").header("X-User-Id", userId))
+        mockMvc.perform(get("/api/v1/me/wardrobe").with(user(userId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(0));
     }
@@ -213,7 +231,8 @@ class RecommendationControllerTest {
     void persistsStylePreferencesAndIgnoresClientTemperature() throws Exception {
         String userId = "profile-user";
         mockMvc.perform(post("/api/v1/me/style-profile/refresh")
-                        .header("X-User-Id", userId)
+                        .with(user(userId))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"displayName":"小林","stylePreferences":["复古","通勤"],"colorPreferences":["酒红","深蓝"],"occasions":["约会","通勤"]}
@@ -222,7 +241,7 @@ class RecommendationControllerTest {
                 .andExpect(jsonPath("$.data.displayName").value("小林"))
                 .andExpect(jsonPath("$.data.colorPreferences[0]").value("酒红"));
 
-        mockMvc.perform(get("/api/v1/me/style-profile").header("X-User-Id", userId))
+        mockMvc.perform(get("/api/v1/me/style-profile").with(user(userId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.stylePreferences[0]").value("复古"))
                 .andExpect(jsonPath("$.data.occasions[0]").value("约会"));
@@ -230,7 +249,8 @@ class RecommendationControllerTest {
         createItem(userId, "针织衫", "上装", "酒红");
         createItem(userId, "半身裙", "下装", "深蓝");
         mockMvc.perform(post("/api/v1/recommendations")
-                        .header("X-User-Id", userId)
+                        .with(user(userId))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"occasion":"约会","city":"长沙","temperatureC":-10.0}
@@ -247,7 +267,8 @@ class RecommendationControllerTest {
         long bottomId = createItem(userId, "深蓝直筒裤", "下装", "深蓝");
         createItem(userId, "低跟皮鞋", "鞋履", "黑色");
         mockMvc.perform(post("/api/v1/me/style-profile/refresh")
-                        .header("X-User-Id", userId)
+                        .with(user(userId))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"displayName":"小夏","stylePreferences":["复古"],"colorPreferences":["深蓝"],"occasions":["约会"]}
@@ -258,7 +279,8 @@ class RecommendationControllerTest {
                 new LlmRecommendationResult("深蓝复古穿搭", "色彩呼应风格档案与当前天气。", List.of(topId, bottomId))));
 
         mockMvc.perform(post("/api/v1/recommendations")
-                        .header("X-User-Id", userId)
+                        .with(user(userId))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"occasion":"约会","city":"长沙","styleHint":"法式复古"}
@@ -296,7 +318,8 @@ class RecommendationControllerTest {
                 new LlmRecommendationResult("不应接受的推荐", "包含其他用户的衣物 ID。", List.of(topId, foreignItemId))));
 
         var result = mockMvc.perform(post("/api/v1/recommendations")
-                        .header("X-User-Id", userId)
+                        .with(user(userId))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"occasion":"通勤","city":"长沙"}
@@ -322,7 +345,8 @@ class RecommendationControllerTest {
                 .willThrow(new ResourceAccessException("LLM timeout", new SocketTimeoutException("read timed out")));
 
         mockMvc.perform(post("/api/v1/recommendations")
-                        .header("X-User-Id", userId)
+                        .with(user(userId))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"occasion":"约会","city":"长沙"}
@@ -333,23 +357,27 @@ class RecommendationControllerTest {
     }
 
     @Test
-    void storesUploadedImageAndAllowsManualCorrectionAfterRecognitionFailure() throws Exception {
+    void storesUploadedImageWithoutAiRecognitionByDefaultAndAllowsManualCorrection() throws Exception {
         String userId = "image-user";
         given(imageStorage.store(anyString(), any())).willReturn(new StoredImage("wardrobe/image-user/a.png", "image/png"));
 
         var upload = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart(
                         "/api/v1/me/wardrobe/upload")
                         .file(new MockMultipartFile("image", "shirt.png", "image/png", new byte[] {1, 2, 3}))
-                        .header("X-User-Id", userId))
+                        .with(user(userId))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.recognitionStatus").value("NEEDS_MANUAL_REVIEW"))
                 .andExpect(jsonPath("$.data.category").value("待识别"))
-                .andExpect(jsonPath("$.data.imageUrl").value(org.hamcrest.Matchers.containsString("/image?userId=image-user")))
+                .andExpect(jsonPath("$.data.imageUrl").value(org.hamcrest.Matchers.endsWith("/image")))
+                .andExpect(jsonPath("$.data.imageUrl").value(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("userId"))))
                 .andReturn();
         long itemId = readData(upload).path("id").asLong();
 
         mockMvc.perform(put("/api/v1/me/wardrobe/" + itemId)
-                        .header("X-User-Id", userId)
+                        .with(user(userId))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name":"米白衬衫","category":"上装","color":"暖白","style":"极简"}
@@ -358,10 +386,33 @@ class RecommendationControllerTest {
                 .andExpect(jsonPath("$.data.recognitionStatus").value("MANUAL_CORRECTED"))
                 .andExpect(jsonPath("$.data.name").value("米白衬衫"));
 
-        mockMvc.perform(get("/api/v1/me/wardrobe").header("X-User-Id", "another-image-user"))
+        mockMvc.perform(get("/api/v1/me/wardrobe").with(user("another-image-user")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(0));
         verify(imageStorage).store(eq(userId), any());
+        verifyNoInteractions(garmentRecognitionService);
+    }
+
+    @Test
+    void invokesAiRecognitionOnlyWhenExplicitlyAllowed() throws Exception {
+        String userId = "ai-image-user";
+        given(imageStorage.store(anyString(), any())).willReturn(
+                new StoredImage("wardrobe/ai-image-user/a.png", "image/png"));
+        given(garmentRecognitionService.recognize(any())).willReturn(Optional.of(
+                new GarmentRecognitionResult("雾蓝衬衫", "上装", "雾蓝", "极简")));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart(
+                        "/api/v1/me/wardrobe/upload")
+                        .file(new MockMultipartFile("image", "shirt.png", "image/png", new byte[] {1, 2, 3}))
+                        .param("allowAiRecognition", "true")
+                        .with(user(userId))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.recognitionStatus").value("RECOGNIZED"))
+                .andExpect(jsonPath("$.data.name").value("雾蓝衬衫"))
+                .andExpect(jsonPath("$.data.category").value("上装"));
+
+        verify(garmentRecognitionService).recognize(any());
     }
 
     @Test
@@ -369,15 +420,17 @@ class RecommendationControllerTest {
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart(
                         "/api/v1/me/wardrobe/upload")
                         .file(new MockMultipartFile("image", "script.svg", "image/svg+xml", new byte[] {1}))
-                        .header("X-User-Id", "invalid-image-user"))
+                        .with(user("invalid-image-user"))
+                        .with(csrf()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
-        org.mockito.Mockito.verifyNoInteractions(imageStorage);
+        verifyNoInteractions(imageStorage, garmentRecognitionService);
     }
 
     private long createItem(String userId, String name, String category, String color) throws Exception {
         var result = mockMvc.perform(post("/api/v1/me/wardrobe")
-                        .header("X-User-Id", userId)
+                        .with(user(userId))
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.createObjectNode()
                                 .put("name", name)

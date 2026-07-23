@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -38,10 +39,19 @@ public class RecommendationFeedbackRepository {
                         + "WHERE recommendation_id = ? AND user_id = ?",
                 request.rating(), request.feedbackType(), request.comment(), Timestamp.from(updatedAt), recommendationId, userId);
         if (updated == 0) {
-            jdbcTemplate.update(
-                    "INSERT INTO recommendation_feedback (recommendation_id, user_id, rating, feedback_type, comment, updated_at) "
-                            + "VALUES (?, ?, ?, ?, ?, ?)",
-                    recommendationId, userId, request.rating(), request.feedbackType(), request.comment(), Timestamp.from(updatedAt));
+            try {
+                jdbcTemplate.update(
+                        "INSERT INTO recommendation_feedback (recommendation_id, user_id, rating, feedback_type, comment, updated_at) "
+                                + "VALUES (?, ?, ?, ?, ?, ?)",
+                        recommendationId, userId, request.rating(), request.feedbackType(), request.comment(),
+                        Timestamp.from(updatedAt));
+            } catch (DuplicateKeyException exception) {
+                jdbcTemplate.update(
+                        "UPDATE recommendation_feedback SET rating = ?, feedback_type = ?, comment = ?, updated_at = ? "
+                                + "WHERE recommendation_id = ? AND user_id = ?",
+                        request.rating(), request.feedbackType(), request.comment(), Timestamp.from(updatedAt),
+                        recommendationId, userId);
+            }
         }
         return new RecommendationFeedback(request.rating(), request.feedbackType(), request.comment(), updatedAt);
     }

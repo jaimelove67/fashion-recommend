@@ -17,11 +17,12 @@ class TrendControllerTest {
     private MockMvc mockMvc;
 
     @Test
-    void returnsTheDouyinPrimaryTrendFeed() throws Exception {
+    void returnsTheExplicitDevelopmentTrendFeedWhenNoSourceIsConfigured() throws Exception {
         mockMvc.perform(get("/api/v1/trends"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.primarySource").value("douyin"))
+                .andExpect(jsonPath("$.data.primarySource").value("douyin-development-sample"))
+                .andExpect(jsonPath("$.data.demoMode").value(true))
                 .andExpect(jsonPath("$.data.items.length()").value(3));
     }
 }

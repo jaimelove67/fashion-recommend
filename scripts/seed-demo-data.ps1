@@ -22,7 +22,7 @@ try {
     $seedSql = Get-Content -LiteralPath $seedFile -Raw -Encoding utf8
     $seedSql | docker compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
     if ($LASTEXITCODE -ne 0) {
-        throw 'Demo data seed failed. Confirm the backend has started once so schema.sql has initialized the tables.'
+        throw 'Demo data seed failed. Confirm the backend has started once so Flyway has initialized the tables.'
     }
 
     Write-Host 'Demo data is ready for user demo-user.'

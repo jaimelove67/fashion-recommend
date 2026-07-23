@@ -6,13 +6,25 @@ spring:
     driver-class-name: org.h2.Driver
   sql:
     init:
-      mode: always
+      mode: never
+  flyway:
+    baseline-on-migrate: true
+    baseline-version: 0
+    clean-disabled: true
 
 app:
+  auth:
+    registration-enabled: true
   cors:
     allowed-origins: http://localhost:5173
   bailian:
     model: qwen-plus-test
+  trends:
+    endpoint: ""
+    platform: configured-feed
+    connect-timeout: 100ms
+    read-timeout: 100ms
+    cache-ttl: 1m
   weather:
     primary-base-url: https://wttr.in
     fallback-geocoding-base-url: https://geocoding-api.open-meteo.com

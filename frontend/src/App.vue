@@ -5,6 +5,8 @@ import {
   CircleAlert,
   Clock3,
   Home,
+  LoaderCircle,
+  LogOut,
   Search,
   Shirt,
   Sparkles,
@@ -19,6 +21,7 @@ import WardrobeView from './views/WardrobeView.vue'
 import RecommendationView from './views/RecommendationView.vue'
 import HistoryView from './views/HistoryView.vue'
 import ProfileView from './views/ProfileView.vue'
+import LoginView from './views/LoginView.vue'
 
 const fashion = reactive(useFashionApp())
 const searchInput = ref(null)
@@ -103,7 +106,15 @@ onBeforeUnmount(() => fashion.dispose())
 </script>
 
 <template>
-  <div class="app-shell" @keydown.esc="closePanels">
+  <main v-if="fashion.state.authPhase === 'checking'" class="session-gate" role="status" aria-live="polite">
+    <div class="session-gate-brand"><strong>知己</strong><span>WEAVESELF</span></div>
+    <LoaderCircle class="spinning" :size="23" aria-hidden="true" />
+    <span>正在检查登录状态</span>
+  </main>
+
+  <LoginView v-else-if="fashion.state.authPhase === 'guest'" :app="fashion" />
+
+  <div v-else class="app-shell" @keydown.esc="closePanels">
     <header class="app-header">
       <button class="brand" type="button" aria-label="返回知己首页" @click="fashion.selectView('home')">
         <strong>知己</strong><span>WEAVESELF</span>
@@ -134,7 +145,18 @@ onBeforeUnmount(() => fashion.dispose())
         </button>
         <button class="profile-button" type="button" :class="{ active: fashion.state.activeView === 'profile' }" aria-label="打开个人风格档案" @click="fashion.selectView('profile')">
           <UserRound :size="18" />
-          <span>{{ fashion.state.profile?.displayName || '我' }}</span>
+          <span>{{ fashion.state.profile?.displayName || fashion.state.authUser?.username || '我' }}</span>
+        </button>
+        <button
+          class="utility-button"
+          type="button"
+          :disabled="fashion.state.authSubmitting"
+          aria-label="退出登录"
+          title="退出登录"
+          @click="fashion.logout"
+        >
+          <LoaderCircle v-if="fashion.state.authSubmitting" class="spinning" :size="18" aria-hidden="true" />
+          <LogOut v-else :size="18" aria-hidden="true" />
         </button>
       </div>
     </header>

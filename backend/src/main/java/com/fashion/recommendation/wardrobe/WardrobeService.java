@@ -5,8 +5,6 @@ import com.fashion.recommendation.recognition.GarmentRecognitionService;
 import com.fashion.recommendation.storage.ImageStorage;
 import com.fashion.recommendation.storage.StoredImage;
 import com.fashion.recommendation.storage.StoredImageData;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
@@ -48,14 +46,17 @@ public class WardrobeService {
             String manualName,
             String manualCategory,
             String manualColor,
-            String manualStyle) {
+            String manualStyle,
+            boolean allowAiRecognition) {
         validateImage(image);
         StoredImage stored = imageStorage.store(userId, image);
-        Optional<GarmentRecognitionResult> recognition;
-        try {
-            recognition = recognitionService.recognize(image);
-        } catch (RuntimeException exception) {
-            recognition = Optional.empty();
+        Optional<GarmentRecognitionResult> recognition = Optional.empty();
+        if (allowAiRecognition) {
+            try {
+                recognition = recognitionService.recognize(image);
+            } catch (RuntimeException exception) {
+                recognition = Optional.empty();
+            }
         }
 
         GarmentRecognitionResult detected = recognition.orElse(new GarmentRecognitionResult("", "", "", ""));
@@ -66,13 +67,14 @@ public class WardrobeService {
         boolean complete = StringUtils.hasText(manualName) || StringUtils.hasText(detected.name());
         complete &= isRecognizedCategory(category) && !"待识别".equals(color);
         String status = complete ? (recognition.isPresent() ? "RECOGNIZED" : "MANUAL_CORRECTED") : "NEEDS_MANUAL_REVIEW";
-        String message = complete ? null : "图片识别未得到完整信息，请手动确认类别、颜色和名称";
+        String message = complete ? null : allowAiRecognition
+                ? "AI 识别未得到完整信息，请手动确认类别、颜色和名称"
+                : "请手动确认类别、颜色和名称";
         try {
             WardrobeItem item = wardrobeRepository.create(userId,
                     new WardrobeItemRequest(name, category, color, style, null),
                     stored.objectKey(), status, message);
-            String imageUrl = "/api/v1/me/wardrobe/" + item.id() + "/image?userId="
-                    + URLEncoder.encode(userId, StandardCharsets.UTF_8);
+            String imageUrl = "/api/v1/me/wardrobe/" + item.id() + "/image";
             wardrobeRepository.updateImageUrl(item.id(), userId, imageUrl);
             return wardrobeRepository.findByIdForUser(item.id(), userId).orElseThrow();
         } catch (RuntimeException exception) {

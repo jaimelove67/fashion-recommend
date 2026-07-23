@@ -88,6 +88,36 @@ img {
   min-height: 100vh;
 }
 
+.session-gate {
+  display: flex;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 13px;
+  color: var(--muted);
+  background: var(--bg);
+  font-size: 12px;
+}
+
+.session-gate-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin-bottom: 15px;
+  color: var(--ink);
+}
+
+.session-gate-brand strong {
+  font: 700 27px/1 var(--serif);
+}
+
+.session-gate-brand span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+}
+
 .app-header {
   position: sticky;
   top: 0;
@@ -185,6 +215,11 @@ img {
 .profile-button.active {
   border-color: var(--line);
   background: var(--surface);
+}
+
+.utility-button:disabled {
+  cursor: wait;
+  opacity: .58;
 }
 
 .notification-dot {

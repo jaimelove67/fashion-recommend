@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.Timestamp;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -52,14 +53,25 @@ public class StyleProfileRepository {
                 writeList(profile.colorSuggestions()), writeList(profile.itemSuggestions()), profile.reasonSummary(),
                 profile.modelName(), Timestamp.from(profile.generatedAt()), userId);
         if (updated == 0) {
-            jdbcTemplate.update(
-                    "INSERT INTO style_profiles (user_id, display_name, style_preferences, color_preferences, occasion_preferences, "
-                            + "style_tags, try_style_tags, color_suggestions, item_suggestions, reason_summary, model_name, updated_at) "
-                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    userId, profile.displayName(), writeList(profile.stylePreferences()), writeList(profile.colorPreferences()),
-                    writeList(profile.occasions()), writeList(profile.styleTags()), writeList(profile.tryStyleTags()),
-                    writeList(profile.colorSuggestions()), writeList(profile.itemSuggestions()), profile.reasonSummary(),
-                    profile.modelName(), Timestamp.from(profile.generatedAt()));
+            try {
+                jdbcTemplate.update(
+                        "INSERT INTO style_profiles (user_id, display_name, style_preferences, color_preferences, occasion_preferences, "
+                                + "style_tags, try_style_tags, color_suggestions, item_suggestions, reason_summary, model_name, updated_at) "
+                                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        userId, profile.displayName(), writeList(profile.stylePreferences()), writeList(profile.colorPreferences()),
+                        writeList(profile.occasions()), writeList(profile.styleTags()), writeList(profile.tryStyleTags()),
+                        writeList(profile.colorSuggestions()), writeList(profile.itemSuggestions()), profile.reasonSummary(),
+                        profile.modelName(), Timestamp.from(profile.generatedAt()));
+            } catch (DuplicateKeyException exception) {
+                jdbcTemplate.update(
+                        "UPDATE style_profiles SET display_name = ?, style_preferences = ?, color_preferences = ?, occasion_preferences = ?, "
+                                + "style_tags = ?, try_style_tags = ?, color_suggestions = ?, item_suggestions = ?, reason_summary = ?, "
+                                + "model_name = ?, updated_at = ? WHERE user_id = ?",
+                        profile.displayName(), writeList(profile.stylePreferences()), writeList(profile.colorPreferences()),
+                        writeList(profile.occasions()), writeList(profile.styleTags()), writeList(profile.tryStyleTags()),
+                        writeList(profile.colorSuggestions()), writeList(profile.itemSuggestions()), profile.reasonSummary(),
+                        profile.modelName(), Timestamp.from(profile.generatedAt()), userId);
+            }
         }
     }
 

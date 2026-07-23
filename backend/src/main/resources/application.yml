@@ -1,5 +1,12 @@
 server:
   port: ${SERVER_PORT:8080}
+  servlet:
+    session:
+      timeout: ${SESSION_TIMEOUT:30m}
+      cookie:
+        http-only: true
+        same-site: lax
+        secure: ${SESSION_COOKIE_SECURE:false}
 
 spring:
   application:
@@ -10,7 +17,11 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:fashion_2404}
   sql:
     init:
-      mode: always
+      mode: never
+  flyway:
+    baseline-on-migrate: true
+    baseline-version: 0
+    clean-disabled: true
 
 management:
   endpoints:
@@ -19,6 +30,8 @@ management:
         include: health,info,metrics,prometheus
 
 app:
+  auth:
+    registration-enabled: ${AUTH_REGISTRATION_ENABLED:true}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,http://localhost:8088,http://127.0.0.1:8088}
   bailian:
@@ -29,6 +42,12 @@ app:
     endpoint: ${BAILIAN_ENDPOINT:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
     connect-timeout: ${BAILIAN_CONNECT_TIMEOUT:3s}
     read-timeout: ${BAILIAN_READ_TIMEOUT:8s}
+  trends:
+    endpoint: ${TREND_JSON_URL:}
+    platform: ${TREND_PLATFORM:configured-feed}
+    connect-timeout: ${TREND_CONNECT_TIMEOUT:3s}
+    read-timeout: ${TREND_READ_TIMEOUT:5s}
+    cache-ttl: ${TREND_CACHE_TTL:15m}
   weather:
     primary-base-url: ${WEATHER_PRIMARY_BASE_URL:${WEATHER_BASE_URL:https://wttr.in}}
     fallback-geocoding-base-url: ${WEATHER_FALLBACK_GEOCODING_BASE_URL:https://geocoding-api.open-meteo.com}

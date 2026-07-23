@@ -556,9 +556,9 @@ onDeactivated(() => {
       >
         <header class="modal-header">
           <div>
-            <p class="section-kicker">{{ editingId ? '修正资料' : uploadIntent ? '上传识别' : '手动录入' }}</p>
+            <p class="section-kicker">{{ editingId ? '修正资料' : uploadIntent ? '图片上传' : '手动录入' }}</p>
             <h2 id="garment-modal-title">{{ editingId ? '编辑这件单品' : '添加一件单品' }}</h2>
-            <p>{{ editingId ? '修改名称、类别、颜色或风格。' : '可上传实物图自动识别，也可直接填写信息。' }}</p>
+            <p>{{ editingId ? '修改名称、类别、颜色或风格。' : '上传图片后可选择 AI 识别，也可直接填写信息。' }}</p>
           </div>
           <button
             type="button"
@@ -576,7 +576,7 @@ onDeactivated(() => {
             <input
               ref="firstField"
               v-model.trim="garmentForm.name"
-              :required="!selectedImage"
+              :required="!selectedImage || !state.allowAiRecognition"
               maxlength="120"
               placeholder="例如：米白衬衫"
               autocomplete="off"
@@ -586,7 +586,8 @@ onDeactivated(() => {
           <div class="form-grid">
             <label>
               <span>类别</span>
-              <select v-model="garmentForm.category">
+              <select v-model="garmentForm.category" :required="!selectedImage || !state.allowAiRecognition">
+                <option value="" disabled>{{ selectedImage && state.allowAiRecognition ? '由 AI 识别' : '请选择类别' }}</option>
                 <option v-for="category in categories" :key="category" :value="category">{{ category }}</option>
               </select>
             </label>
@@ -594,7 +595,7 @@ onDeactivated(() => {
               <span>颜色</span>
               <input
                 v-model.trim="garmentForm.color"
-                :required="!selectedImage"
+                :required="!selectedImage || !state.allowAiRecognition"
                 maxlength="40"
                 placeholder="例如：暖白"
                 autocomplete="off"
@@ -618,9 +619,20 @@ onDeactivated(() => {
               ref="fileField"
               type="file"
               accept="image/jpeg,image/png,image/webp"
+              aria-label="衣物图片"
               @change="app.selectImage($event)"
             />
-            <small>{{ selectedImage ? selectedImage.name : '支持 JPG、PNG、WebP，上传后沿用现有图片识别流程。' }}</small>
+            <small>{{ selectedImage ? selectedImage.name : '支持 JPG、PNG、WebP，选择后可决定是否启用 AI 识别。' }}</small>
+          </label>
+
+          <label v-if="!editingId && selectedImage" class="recognition-consent">
+            <input
+              v-model="state.allowAiRecognition"
+              type="checkbox"
+              aria-describedby="recognition-consent-note"
+            />
+            <span>使用 AI 自动识别</span>
+            <small id="recognition-consent-note">图片只会在本次勾选后发送给已配置的识别模型。</small>
           </label>
 
           <label v-if="!editingId && !selectedImage">
@@ -1475,6 +1487,37 @@ select:focus-visible {
 }
 
 .upload-field small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.garment-form .recognition-consent {
+  display: grid;
+  align-items: start;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 13px;
+  background: var(--surface);
+}
+
+.garment-form .recognition-consent input[type="checkbox"] {
+  width: 17px;
+  min-height: 17px;
+  margin: 1px 0 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.recognition-consent > span {
+  min-width: 0;
+}
+
+.recognition-consent small {
+  grid-column: 2;
   color: var(--muted);
   font-size: 10px;
   font-weight: 400;

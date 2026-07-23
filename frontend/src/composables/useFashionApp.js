@@ -1,7 +1,7 @@
 import { computed, reactive } from 'vue'
 
-const USER_ID = 'demo-user'
 const VALID_VIEWS = new Set(['home', 'trend', 'recommend', 'wardrobe', 'history', 'profile'])
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
 const COLOR_MAP = {
   '低饱和': '#9da6a1',
@@ -28,9 +28,37 @@ function startOfLocalDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate())
 }
 
+function createGarmentForm() {
+  return { name: '', category: '', color: '', style: '', imageUrl: '' }
+}
+
+function createRecommendationForm() {
+  return { occasion: '通勤', city: '', styleHint: '' }
+}
+
+function createProfileForm() {
+  return { displayName: '', stylePreferences: '', colorPreferences: '', occasions: '' }
+}
+
+async function readApiBody(response) {
+  return response.json().catch(() => null)
+}
+
+function responseError(response, body, fallback = '接口请求失败') {
+  const error = new Error(body?.message || `${fallback} (${response.status})`)
+  error.status = response.status
+  return error
+}
+
 export function useFashionApp() {
   const categories = ['上装', '下装', '鞋履', '外套', '配饰']
+  let csrf = null
+  let sessionVersion = 0
   const state = reactive({
+    authPhase: 'checking',
+    authUser: null,
+    authSubmitting: false,
+    authError: '',
     activeView: 'home',
     trends: [],
     trendMeta: { primarySource: '', fetchedAt: null, demoMode: false },
@@ -54,45 +82,202 @@ export function useFashionApp() {
     deletingId: null,
     editingId: null,
     selectedImage: null,
+    allowAiRecognition: false,
     globalQuery: '',
     searchOpen: false,
     notificationsOpen: false,
-    garmentForm: { name: '', category: '上装', color: '', style: '', imageUrl: '' },
-    recommendationForm: { occasion: '通勤', city: '', styleHint: '' },
-    profileForm: { displayName: '', stylePreferences: '', colorPreferences: '', occasions: '' }
+    garmentForm: createGarmentForm(),
+    recommendationForm: createRecommendationForm(),
+    profileForm: createProfileForm()
   })
 
-  async function request(path, options = {}) {
+  function resetPrivateState() {
+    sessionVersion += 1
+    state.wardrobe = []
+    state.history = []
+    state.currentRecommendation = null
+    state.profile = null
+    state.weather = null
+    state.wardrobeLoading = false
+    state.historyLoading = false
+    state.profileLoading = false
+    state.weatherLoading = false
+    state.generating = false
+    state.saving = false
+    state.adding = false
+    state.profileSaving = false
+    state.feedbackSavingId = null
+    state.deletingId = null
+    state.editingId = null
+    state.selectedImage = null
+    state.allowAiRecognition = false
+    state.globalQuery = ''
+    state.searchOpen = false
+    state.notificationsOpen = false
+    state.garmentForm = createGarmentForm()
+    state.recommendationForm = createRecommendationForm()
+    state.profileForm = createProfileForm()
+    state.error = ''
+  }
+
+  function isCurrentSession(version) {
+    return state.authPhase === 'authenticated' && version === sessionVersion
+  }
+
+  function expireSession() {
+    if (state.authPhase !== 'guest') resetPrivateState()
+    csrf = null
+    state.authUser = null
+    state.authPhase = 'guest'
+    state.authError = '登录状态已失效，请重新登录。'
+  }
+
+  async function refreshCsrf() {
+    const response = await fetch('/api/v1/auth/csrf', {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' }
+    })
+    const body = await readApiBody(response)
+    if (!response.ok || !body || body.code !== 0 || !body.data?.headerName || !body.data?.token) {
+      throw responseError(response, body, '无法建立安全会话')
+    }
+    csrf = body.data
+    return csrf
+  }
+
+  async function ensureCsrf() {
+    return csrf || refreshCsrf()
+  }
+
+  async function request(path, options = {}, policy = {}) {
+    const method = String(options.method || 'GET').toUpperCase()
+    const headers = new Headers(options.headers || {})
+    headers.set('Accept', 'application/json')
+    if (options.body instanceof URLSearchParams && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/x-www-form-urlencoded;charset=UTF-8')
+    } else if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json')
+    }
+    if (WRITE_METHODS.has(method)) {
+      const token = await ensureCsrf()
+      headers.set(token.headerName, token.token)
+    }
+
     const response = await fetch(path, {
       ...options,
-      headers: { 'Content-Type': 'application/json', 'X-User-Id': USER_ID, ...(options.headers || {}) }
+      method,
+      credentials: 'same-origin',
+      headers
     })
-    const body = await response.json().catch(() => null)
+    const body = await readApiBody(response)
+    if (response.status === 403 && WRITE_METHODS.has(method) && policy.retryCsrf !== false) {
+      csrf = null
+      await refreshCsrf()
+      return request(path, options, { ...policy, retryCsrf: false })
+    }
+    if (response.status === 401) {
+      if (!policy.allowUnauthorized) expireSession()
+      throw responseError(response, body, '请先登录')
+    }
     if (!response.ok || !body || body.code !== 0) {
-      throw new Error(body?.message || `接口请求失败 (${response.status})`)
+      throw responseError(response, body)
     }
     return body.data
   }
 
   async function requestMultipart(path, formData) {
-    const response = await fetch(path, {
+    return request(path, {
       method: 'POST',
-      headers: { 'X-User-Id': USER_ID },
       body: formData
     })
-    const body = await response.json().catch(() => null)
-    if (!response.ok || !body || body.code !== 0) {
-      throw new Error(body?.message || `图片上传失败 (${response.status})`)
-    }
-    return body.data
   }
 
   function showError(cause) {
+    if (cause?.status === 401) return
     state.error = cause instanceof Error ? cause.message : '接口暂时不可用，请稍后重试。'
   }
 
   function clearError() {
     state.error = ''
+  }
+
+  async function loadPrivateData() {
+    return Promise.allSettled([loadWardrobe(), loadHistory(), loadProfile()])
+  }
+
+  async function completeLogin(username, password) {
+    await request('/api/v1/auth/login', {
+      method: 'POST',
+      body: new URLSearchParams({ username, password })
+    }, { allowUnauthorized: true })
+    csrf = null
+    await refreshCsrf()
+    const user = await request('/api/v1/auth/me', {}, { allowUnauthorized: true })
+    resetPrivateState()
+    state.authUser = user
+    state.authPhase = 'authenticated'
+    state.authError = ''
+    await loadPrivateData()
+  }
+
+  async function login(credentials) {
+    if (state.authSubmitting) return false
+    state.authSubmitting = true
+    state.authError = ''
+    try {
+      await completeLogin(credentials.username, credentials.password)
+      return true
+    } catch (cause) {
+      resetPrivateState()
+      state.authUser = null
+      state.authPhase = 'guest'
+      state.authError = cause instanceof Error ? cause.message : '登录失败，请稍后重试。'
+      return false
+    } finally {
+      state.authSubmitting = false
+    }
+  }
+
+  async function register(credentials) {
+    if (state.authSubmitting) return false
+    state.authSubmitting = true
+    state.authError = ''
+    try {
+      await request('/api/v1/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({ username: credentials.username, password: credentials.password })
+      }, { allowUnauthorized: true })
+      await completeLogin(credentials.username, credentials.password)
+      return true
+    } catch (cause) {
+      resetPrivateState()
+      state.authUser = null
+      state.authPhase = 'guest'
+      state.authError = cause instanceof Error ? cause.message : '注册失败，请稍后重试。'
+      return false
+    } finally {
+      state.authSubmitting = false
+    }
+  }
+
+  async function logout() {
+    if (state.authSubmitting) return false
+    state.authSubmitting = true
+    clearError()
+    try {
+      await request('/api/v1/auth/logout', { method: 'POST' })
+      csrf = null
+      resetPrivateState()
+      state.authUser = null
+      state.authPhase = 'guest'
+      state.authError = ''
+      return true
+    } catch (cause) {
+      showError(cause)
+      return state.authPhase === 'guest'
+    } finally {
+      state.authSubmitting = false
+    }
   }
 
   async function loadTrends() {
@@ -116,24 +301,34 @@ export function useFashionApp() {
   }
 
   async function loadWardrobe() {
+    if (state.authPhase !== 'authenticated' || state.wardrobeLoading) return null
+    const version = sessionVersion
     state.wardrobeLoading = true
     try {
-      state.wardrobe = await request('/api/v1/me/wardrobe')
+      const wardrobe = await request('/api/v1/me/wardrobe')
+      if (isCurrentSession(version)) state.wardrobe = wardrobe
+      return wardrobe
     } catch (cause) {
       showError(cause)
+      return null
     } finally {
-      state.wardrobeLoading = false
+      if (isCurrentSession(version)) state.wardrobeLoading = false
     }
   }
 
   async function loadHistory() {
+    if (state.authPhase !== 'authenticated' || state.historyLoading) return null
+    const version = sessionVersion
     state.historyLoading = true
     try {
-      state.history = await request('/api/v1/me/recommendations')
+      const history = await request('/api/v1/me/recommendations')
+      if (isCurrentSession(version)) state.history = history
+      return history
     } catch (cause) {
       showError(cause)
+      return null
     } finally {
-      state.historyLoading = false
+      if (isCurrentSession(version)) state.historyLoading = false
     }
   }
 
@@ -147,22 +342,31 @@ export function useFashionApp() {
   }
 
   async function loadProfile() {
+    if (state.authPhase !== 'authenticated' || state.profileLoading) return null
+    const version = sessionVersion
     state.profileLoading = true
     try {
-      state.profile = await request('/api/v1/me/style-profile')
-      hydrateProfileForm(state.profile)
+      const profile = await request('/api/v1/me/style-profile')
+      if (isCurrentSession(version)) {
+        state.profile = profile
+        hydrateProfileForm(profile)
+      }
+      return profile
     } catch (cause) {
       showError(cause)
+      return null
     } finally {
-      state.profileLoading = false
+      if (isCurrentSession(version)) state.profileLoading = false
     }
   }
 
   async function saveProfile() {
+    if (state.authPhase !== 'authenticated') return null
+    const version = sessionVersion
     state.profileSaving = true
     clearError()
     try {
-      state.profile = await request('/api/v1/me/style-profile/refresh', {
+      const profile = await request('/api/v1/me/style-profile/refresh', {
         method: 'POST',
         body: JSON.stringify({
           displayName: state.profileForm.displayName,
@@ -171,48 +375,56 @@ export function useFashionApp() {
           occasions: listFromCsv(state.profileForm.occasions)
         })
       })
-      hydrateProfileForm(state.profile)
-      return state.profile
+      if (isCurrentSession(version)) {
+        state.profile = profile
+        hydrateProfileForm(profile)
+      }
+      return profile
     } catch (cause) {
       showError(cause)
       return null
     } finally {
-      state.profileSaving = false
+      if (isCurrentSession(version)) state.profileSaving = false
     }
   }
 
   async function loadWeather() {
-    if (!state.recommendationForm.city) return null
+    if (state.authPhase !== 'authenticated' || !state.recommendationForm.city) return null
+    const version = sessionVersion
     state.weatherLoading = true
     clearError()
     try {
-      state.weather = await request(`/api/v1/weather/current?city=${encodeURIComponent(state.recommendationForm.city)}`)
-      return state.weather
+      const weather = await request(`/api/v1/weather/current?city=${encodeURIComponent(state.recommendationForm.city)}`)
+      if (isCurrentSession(version)) state.weather = weather
+      return weather
     } catch (cause) {
-      state.weather = null
+      if (isCurrentSession(version)) state.weather = null
       showError(cause)
       return null
     } finally {
-      state.weatherLoading = false
+      if (isCurrentSession(version)) state.weatherLoading = false
     }
   }
 
   function resetGarmentForm() {
-    state.garmentForm = { name: '', category: '上装', color: '', style: '', imageUrl: '' }
+    state.garmentForm = createGarmentForm()
     state.editingId = null
     state.selectedImage = null
+    state.allowAiRecognition = false
   }
 
   function selectImage(event) {
     state.selectedImage = event?.target?.files?.[0] || null
+    state.allowAiRecognition = false
   }
 
   function editGarment(item) {
     state.editingId = item.id
     state.selectedImage = null
+    state.allowAiRecognition = false
     state.garmentForm = {
       name: item.name === '待补充衣物' ? '' : item.name,
-      category: categories.includes(item.category) ? item.category : '上装',
+      category: categories.includes(item.category) ? item.category : '',
       color: item.color === '待识别' ? '' : item.color,
       style: item.style || '',
       imageUrl: item.imageUrl || ''
@@ -220,6 +432,8 @@ export function useFashionApp() {
   }
 
   async function addGarment() {
+    if (state.authPhase !== 'authenticated') return null
+    const version = sessionVersion
     state.adding = true
     clearError()
     try {
@@ -234,68 +448,79 @@ export function useFashionApp() {
             style: state.garmentForm.style
           })
         })
-        state.wardrobe = state.wardrobe.map((candidate) => candidate.id === item.id ? item : candidate)
+        if (isCurrentSession(version)) {
+          state.wardrobe = state.wardrobe.map((candidate) => candidate.id === item.id ? item : candidate)
+        }
       } else if (state.selectedImage) {
         const formData = new FormData()
         formData.append('image', state.selectedImage)
+        formData.append('allowAiRecognition', String(state.allowAiRecognition))
         for (const [key, value] of Object.entries(state.garmentForm)) {
           if (key !== 'imageUrl' && value) formData.append(key, value)
         }
         item = await requestMultipart('/api/v1/me/wardrobe/upload', formData)
-        state.wardrobe = [item, ...state.wardrobe]
+        if (isCurrentSession(version)) state.wardrobe = [item, ...state.wardrobe]
       } else {
         item = await request('/api/v1/me/wardrobe', {
           method: 'POST',
           body: JSON.stringify(state.garmentForm)
         })
-        state.wardrobe = [item, ...state.wardrobe]
+        if (isCurrentSession(version)) state.wardrobe = [item, ...state.wardrobe]
       }
-      resetGarmentForm()
+      if (isCurrentSession(version)) resetGarmentForm()
       return item
     } catch (cause) {
       showError(cause)
       return null
     } finally {
-      state.adding = false
+      if (isCurrentSession(version)) state.adding = false
     }
   }
 
   async function deleteGarment(itemId) {
+    if (state.authPhase !== 'authenticated') return false
+    const version = sessionVersion
     state.deletingId = itemId
     clearError()
     try {
       await request(`/api/v1/me/wardrobe/${itemId}`, { method: 'DELETE' })
-      state.wardrobe = state.wardrobe.filter((item) => item.id !== itemId)
+      if (isCurrentSession(version)) state.wardrobe = state.wardrobe.filter((item) => item.id !== itemId)
       return true
     } catch (cause) {
       showError(cause)
       return false
     } finally {
-      state.deletingId = null
+      if (isCurrentSession(version)) state.deletingId = null
     }
   }
 
   async function generateRecommendation() {
+    if (state.authPhase !== 'authenticated') return null
+    const version = sessionVersion
     state.generating = true
     clearError()
     try {
-      state.currentRecommendation = await request('/api/v1/recommendations', {
+      const recommendation = await request('/api/v1/recommendations', {
         method: 'POST',
         body: JSON.stringify({ ...state.recommendationForm })
       })
-      state.weather = state.currentRecommendation.weather || null
-      await loadHistory()
-      return state.currentRecommendation
+      if (isCurrentSession(version)) {
+        state.currentRecommendation = recommendation
+        state.weather = recommendation.weather || null
+        await loadHistory()
+      }
+      return recommendation
     } catch (cause) {
       showError(cause)
       return null
     } finally {
-      state.generating = false
+      if (isCurrentSession(version)) state.generating = false
     }
   }
 
   async function rateRecommendation(recommendation, rating) {
-    if (!recommendation) return null
+    if (state.authPhase !== 'authenticated' || !recommendation) return null
+    const version = sessionVersion
     state.feedbackSavingId = recommendation.id
     clearError()
     try {
@@ -303,34 +528,39 @@ export function useFashionApp() {
         method: 'POST',
         body: JSON.stringify({ rating, feedbackType: 'rating' })
       })
-      if (state.currentRecommendation?.id === updated.id) state.currentRecommendation = updated
-      state.history = state.history.map((item) => item.id === updated.id ? updated : item)
+      if (isCurrentSession(version)) {
+        if (state.currentRecommendation?.id === updated.id) state.currentRecommendation = updated
+        state.history = state.history.map((item) => item.id === updated.id ? updated : item)
+      }
       return updated
     } catch (cause) {
       showError(cause)
       return null
     } finally {
-      state.feedbackSavingId = null
+      if (isCurrentSession(version)) state.feedbackSavingId = null
     }
   }
 
   async function saveRecommendation(recommendation = state.currentRecommendation) {
-    if (!recommendation || recommendation.saved) return recommendation
+    if (state.authPhase !== 'authenticated' || !recommendation || recommendation.saved) return recommendation
+    const version = sessionVersion
     state.saving = true
     clearError()
     try {
       const saved = await request(`/api/v1/me/recommendations/${recommendation.id}/save`, { method: 'POST' })
-      if (state.currentRecommendation?.id === saved.id) state.currentRecommendation = saved
-      const exists = state.history.some((item) => item.id === saved.id)
-      state.history = exists
-        ? state.history.map((item) => item.id === saved.id ? saved : item)
-        : [saved, ...state.history]
+      if (isCurrentSession(version)) {
+        if (state.currentRecommendation?.id === saved.id) state.currentRecommendation = saved
+        const exists = state.history.some((item) => item.id === saved.id)
+        state.history = exists
+          ? state.history.map((item) => item.id === saved.id ? saved : item)
+          : [saved, ...state.history]
+      }
       return saved
     } catch (cause) {
       showError(cause)
       return null
     } finally {
-      state.saving = false
+      if (isCurrentSession(version)) state.saving = false
     }
   }
 
@@ -458,19 +688,40 @@ export function useFashionApp() {
 
   function syncViewFromLocation() {
     const view = window.location.hash.slice(1)
-    selectView(VALID_VIEWS.has(view) ? view : 'home', { updateHistory: false, instant: true })
+    const nextView = VALID_VIEWS.has(view) ? view : 'home'
+    if (view !== nextView) window.history.replaceState(null, '', `#${nextView}`)
+    selectView(nextView, { updateHistory: false, instant: true })
   }
 
   async function initialize() {
     const requestedView = window.location.hash.slice(1)
     state.activeView = VALID_VIEWS.has(requestedView) ? requestedView : 'home'
     if (!VALID_VIEWS.has(requestedView)) window.history.replaceState(null, '', '#home')
-    window.addEventListener('popstate', syncViewFromLocation)
-    await Promise.allSettled([loadTrends(), loadWardrobe(), loadHistory(), loadProfile()])
+    window.addEventListener('hashchange', syncViewFromLocation)
+    state.authPhase = 'checking'
+    state.authError = ''
+    const trendsPromise = loadTrends()
+    try {
+      await refreshCsrf()
+      const user = await request('/api/v1/auth/me', {}, { allowUnauthorized: true })
+      resetPrivateState()
+      state.authUser = user
+      state.authPhase = 'authenticated'
+      state.authError = ''
+      await loadPrivateData()
+    } catch (cause) {
+      resetPrivateState()
+      state.authUser = null
+      state.authPhase = 'guest'
+      state.authError = cause?.status === 401
+        ? ''
+        : (cause instanceof Error ? cause.message : '暂时无法检查登录状态。')
+    }
+    await trendsPromise
   }
 
   function dispose() {
-    window.removeEventListener('popstate', syncViewFromLocation)
+    window.removeEventListener('hashchange', syncViewFromLocation)
   }
 
   return {
@@ -487,6 +738,9 @@ export function useFashionApp() {
     colorFor,
     initialize,
     dispose,
+    login,
+    register,
+    logout,
     clearError,
     loadTrends,
     loadWardrobe,
