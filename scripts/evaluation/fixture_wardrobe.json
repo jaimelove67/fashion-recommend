@@ -1,0 +1,59 @@
+{
+  "meta": {
+    "kind": "fixture",
+    "purpose": "演示评估脚本可运行性与指标计算；不是真实实验结论，不得作为实验数据引用。",
+    "note": "衣橱结构参考 demo-user 演示数据（8 件衣物，跨 5 个类别）；llm_results 有意包含合法与非法样本以覆盖各 fallback 路径。",
+    "seed": 20260804
+  },
+  "wardrobe": [
+    {"id": 1, "name": "暖白牛津纺衬衫", "category": "上装", "color": "暖白", "style": "极简", "rating": 4.5},
+    {"id": 2, "name": "雾蓝轻薄针织衫", "category": "上装", "color": "雾蓝", "style": "休闲", "rating": 4.2},
+    {"id": 3, "name": "石墨灰直筒西裤", "category": "下装", "color": "石墨灰", "style": "通勤", "rating": 4.8},
+    {"id": 4, "name": "黑色方头乐福鞋", "category": "鞋履", "color": "黑色", "style": "通勤", "rating": 4.6},
+    {"id": 5, "name": "米白宽腿休闲裤", "category": "下装", "color": "米白", "style": "休闲", "rating": 3.9},
+    {"id": 6, "name": "藏青薄款风衣", "category": "外套", "color": "藏青", "style": "通勤", "rating": 4.4},
+    {"id": 7, "name": "黑色极简邮差包", "category": "配饰", "color": "黑色", "style": "极简", "rating": 3.8},
+    {"id": 8, "name": "浅灰羊绒围巾", "category": "配饰", "color": "浅灰", "style": "法式休闲", "rating": 4.0}
+  ],
+  "llm_results": [
+    {
+      "summary": "通勤推荐：针织衫、西裤、乐福鞋与风衣的层次组合。",
+      "reason": "雾蓝针织衫与石墨灰西裤形成稳定对比，风衣应对温差，乐福鞋适合通勤。",
+      "itemIds": [2, 3, 4, 6],
+      "modelName": "qwen-plus",
+      "providerCallId": "chatcmpl-fixture-valid-a",
+      "promptTokens": 100,
+      "completionTokens": 50,
+      "totalTokens": 150
+    },
+    {
+      "summary": "通勤推荐：衬衫、西裤与乐福鞋。",
+      "reason": "暖白衬衫与石墨灰西裤适合通勤场景。",
+      "itemIds": [1, 3, 4],
+      "modelName": "qwen-plus",
+      "providerCallId": "chatcmpl-fixture-valid-b",
+      "promptTokens": 90,
+      "completionTokens": 40,
+      "totalTokens": 130
+    },
+    {
+      "reason": "缺少 summary 字段的非法结果。",
+      "itemIds": [1, 3, 4]
+    },
+    {
+      "summary": "重复 ID 的非法结果。",
+      "reason": "itemIds 出现重复，应判为 duplicate-item-ids。",
+      "itemIds": [1, 1, 3, 4]
+    },
+    {
+      "summary": "引用衣橱之外 ID 的非法结果。",
+      "reason": "itemIds 含 999 不在当前衣橱，应判为 foreign-item-ids。",
+      "itemIds": [1, 3, 999]
+    },
+    {
+      "summary": "同类别组合的非法结果。",
+      "reason": "两件均为上装，应判为 same-category。",
+      "itemIds": [1, 2]
+    }
+  ]
+}

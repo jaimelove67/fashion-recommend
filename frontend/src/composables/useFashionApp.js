@@ -65,6 +65,9 @@ export function useFashionApp() {
     selectedTrendId: null,
     wardrobe: [],
     history: [],
+    historyTotal: 0,
+    historyPage: 0,
+    historyHasNext: false,
     currentRecommendation: null,
     profile: null,
     weather: null,
@@ -95,6 +98,9 @@ export function useFashionApp() {
     sessionVersion += 1
     state.wardrobe = []
     state.history = []
+    state.historyTotal = 0
+    state.historyPage = 0
+    state.historyHasNext = false
     state.currentRecommendation = null
     state.profile = null
     state.weather = null
@@ -316,14 +322,21 @@ export function useFashionApp() {
     }
   }
 
-  async function loadHistory() {
+  async function loadHistory(options = {}) {
     if (state.authPhase !== 'authenticated' || state.historyLoading) return null
+    const append = options.append === true
+    const page = append ? state.historyPage + 1 : 0
     const version = sessionVersion
     state.historyLoading = true
     try {
-      const history = await request('/api/v1/me/recommendations')
-      if (isCurrentSession(version)) state.history = history
-      return history
+      const historyPage = await request(`/api/v1/me/recommendations?page=${page}&size=20`)
+      if (isCurrentSession(version)) {
+        state.history = append ? [...state.history, ...historyPage.content] : historyPage.content
+        state.historyTotal = historyPage.totalElements
+        state.historyPage = historyPage.page
+        state.historyHasNext = historyPage.hasNext
+      }
+      return historyPage
     } catch (cause) {
       showError(cause)
       return null
@@ -592,7 +605,8 @@ export function useFashionApp() {
       for (const item of recommendation.items || []) covered.add(item.id || item.name)
     }
     return {
-      total: state.history.length,
+      total: state.historyTotal,
+      loaded: state.history.length,
       saved: savedHistory.value.length,
       averageRating: ratings.length ? ratings.reduce((sum, value) => sum + value, 0) / ratings.length : null,
       coveredItems: covered.size
@@ -667,6 +681,15 @@ export function useFashionApp() {
     return FALLBACK_COLORS[hash % FALLBACK_COLORS.length]
   }
 
+  // Weather is usually live (wttr.in / open-meteo). The configured-demo snapshot is static offline
+  // presentation data and must never be shown as real-time weather.
+  function weatherSourceLabel(source = '') {
+    if (source === 'configured-demo') return '配置演示天气 · 非实时'
+    if (source === 'wttr.in') return '实时天气 · wttr.in'
+    if (source === 'open-meteo') return '实时天气 · Open-Meteo'
+    return source || '未知来源'
+  }
+
   async function ensureViewData(view) {
     if (view === 'trend' && !state.trends.length) await loadTrends()
     if (view === 'wardrobe' && !state.wardrobe.length) await loadWardrobe()
@@ -736,6 +759,7 @@ export function useFashionApp() {
     profileDimensions,
     historyTrend,
     colorFor,
+    weatherSourceLabel,
     initialize,
     dispose,
     login,

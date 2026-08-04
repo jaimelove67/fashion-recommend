@@ -1,5 +1,44 @@
 # 当前发现
 
+## 2026-08-04 审计缺口收尾发现
+
+- 推荐审计元数据与 V3 迁移、配置演示天气、Prometheus/pgvector 口径修正均为既有 dirty worktree 变更，已保留未动；surefire 报告（20:13）确认后端 60 项测试全通过，E2E spec 4 项。
+- build_graduation_doc.py 原有大量与当前实现不符的措辞：JWT、Redis、管理员后台、pgvector、MyBatis-Plus、Spring AI、Jsoup/抖音、旧表名（sys_user/garment/outfit_plan/favorite_outfit）与“待实测”测试模板；已全部改为当前真实边界（Session+CSRF、Flyway V1-V3、JDBC、60 项测试、4 项 E2E、推荐审计 generationAudit、configured-demo 离线天气）。
+- 规则引擎可按五大类别各取一款，最多 5 件；2-4 件数量边界属于 LLM 输入边界，不属于规则引擎输出契约。评估协议把这两类边界分开定义，避免把 5 件规则输出误判为非法。
+- 本机无 LibreOffice（soffice）与 pdf2image，Documents 渲染器无法做 DOCX 视觉渲染；已记录确切失败信息并明确“未完成视觉渲染 QA”，只做结构 QA。
+- 评估脚本 seed 实际控制 baseline 子集抽样与 LLM 结果抽样；相同 seed 报告逐字节一致，不同 seed 得到不同子集。
+- `final_recommendation` 必须与 `validate_llm_result` 共用同一输入边界，否则“重复 ID 的非法结果”会在最终推荐中出现重复 ID；已改为复用校验结果。
+
+## 2026-08-04 离线天气演示发现
+
+- 天气原本只依赖两个真实 provider（wttr.in、Open-Meteo），无网络时两者都失败会直接返回 503，答辩演示无法在离线环境展示天气驱动的推荐路径。
+- 新增默认关闭的开关 `app.weather.configured-demo-enabled` / `WEATHER_CONFIGURED_DEMO_ENABLED`（默认 `false`）：仅当两个真实 provider 都失败且请求城市与配置城市（trim 后不区分大小写）一致时，才返回静态快照，`source=configured-demo`，前端明确标注“配置演示天气/非实时”，绝不把静态数据冒充实时天气。
+- 城市未找到（NOT_FOUND）不被静态快照掩盖：`WeatherService` 先判断 fallback 的 NOT_FOUND 再判断 configured-demo，所以未找到城市仍返回 404。
+- 配置校验采用与现有缓存配置一致的 fail-fast：启用时任一字段缺失/非有限/温度不合理/降水风速为负，应用启动失败；默认关闭时不校验携带的配置值。
+- 推荐理由文案对 `configured-demo` 使用“天气”而非“实况”，避免生成文本把演示数据表述为实时天气。
+
+## 2026-08-04 推荐审计元数据发现
+
+- 推荐来源此前只记录 engine，无法从数据库核对真实模型调用与降级原因；本轮新增 Flyway V3 审计列，只有真实成功的百炼响应才写入 provider_call_id 与三类 token，规则降级只写稳定枚举式 fallback_reason，不持久化异常原文。
+- 生成耗时使用 `Duration.between(startedAt, Instant.now())` 覆盖天气、LLM 与规则选择的完整计算时间，并 `Math.max(0, ...)` 保证非负。为不把外部天气/LLM 调用留在数据库写事务中，`generate()` 改为非事务，仅用 `TransactionTemplate` 包裹 create+addItems 两个写操作；读取与外部调用全部在写事务之外。残余风险：召回/读取与写事务不做强制隔离，并发写同一用户仍由数据库唯一约束兜底。
+- API 通过嵌套 `generationAudit` 返回元数据，engine 仍保留在顶层，旧前端只读 engine/summary/reason 不受影响。
+- 前两次 Claude 批处理均因 8 美元预算上限退出：第一次未产生文件修改，第二次已落地配置口径改动（Actuator 收敛、移除 pgvector/Prometheus 口径、固定前端 vite 版本）。本轮改为小批次逐项落地。
+
+## 2026-08-04 审计发现
+
+- README 与 docker/README 声称的 Prometheus 指标地址实测返回 401：安全配置只放行 Actuator 的 health/info，`/actuator/prometheus` 与 `/actuator/metrics` 均被拒绝，且当前没有 Prometheus 消费者。
+- 迁移文件与仓储查询中不存在任何 vector 列或向量查询，pgvector 未使用；Compose 的 pgvector 镜像与 `01-extensions.sql` 的 `CREATE EXTENSION vector` 均无实际消费者。
+- `frontend/package.json` 将 `@vitejs/plugin-vue` 与 `vite` 声明为 `latest`，未固定版本；package-lock 当前解析为 `@vitejs/plugin-vue@6.0.7` 与 `vite@8.1.4`。
+
+## 2026-08-01 审查发现
+
+- `RecommendationService` 在规则候选阶段要求至少两个类别，但 LLM 结果只检查数量、重复 ID 和衣橱归属，同类别结果可绕过业务约束。
+- `BailianGarmentRecognitionService` 使用无超时的默认 `RestClient`，没有消费项目已有的百炼连接/读取超时配置。
+- `WardrobeService.delete` 先删除 MinIO 对象再删除数据库记录，数据库删除失败会留下指向不存在图片的衣物记录。
+- 推荐历史一次加载全部记录，并为每条记录分别查询反馈和衣物，存在无分页和 N+1 查询。
+- 反馈与风格档案 DTO 缺少与数据库列一致的长度约束，超长输入可能在数据库层变成 500。
+- `frontend/package-lock.json` 锁定 PostCSS 8.5.16；npm audit 报告该版本存在 1 个 high 漏洞。
+
 ## 2026-07-22 收尾复核
 
 - 已确认 `SecurityConfig` 使用 BCrypt、JDBC 用户表、HttpOnly Session 与 cookie/header CSRF；除趋势、天气、CSRF、登录和注册外，其余接口要求认证。

@@ -2,6 +2,40 @@
 
 # 阶段七：主要缺口收敛计划
 
+# 阶段八：审查缺口修复计划
+
+## 目标
+
+按代码审查优先级修复推荐业务约束、外部视觉调用超时、对象存储删除一致性、历史查询规模边界、输入校验和前端高危依赖，并逐项验证。
+
+## 阶段
+
+- [completed] 1. 增加 LLM 推荐结果的类别互异校验与反例测试
+- [completed] 2. 为视觉识别客户端接入连接/读取超时
+- [completed] 3. 修复衣物图片删除的数据库与对象存储一致性策略
+- [completed] 4. 为推荐历史增加分页并消除列表 N+1 查询
+- [completed] 5. 补齐反馈/风格档案输入长度约束与测试
+- [completed] 6. 升级 PostCSS 依赖并重新构建/审计
+- [completed] 7. 完整回归验证并记录未覆盖环境
+
+## 验收条件
+
+- LLM 返回同类别衣物时回退规则引擎。
+- 视觉识别请求受配置的连接和读取超时限制。
+- 删除图片失败不会留下不可见的数据库/对象存储不一致，且失败行为有测试。
+- 历史列表有明确分页边界，查询不会按记录逐条访问反馈和衣物明细。
+- 超长反馈与档案字段返回标准 400，而不是数据库 500。
+- `npm audit --audit-level=high` 不再报告当前 PostCSS 高危版本。
+
+## 阶段八完成结果
+
+- LLM 同类别衣物结果会回退规则引擎，并有反例测试。
+- 视觉识别消费连接/读取超时配置，并有慢响应测试。
+- 图片删除使用 Flyway V2 清理任务表，数据库事务提交后由调度器重试 MinIO 清理。
+- 推荐历史支持分页和批量反馈/衣物查询，避免无界响应与列表 N+1。
+- 反馈、风格档案和格式错误 JSON 均返回标准 400。
+- PostCSS 升级到 8.5.25，npm audit、后端 44 项测试、前端构建和 Compose 配置均通过。
+
 ## 目标
 
 在不伪造外部数据、不默认消耗付费模型的前提下，消除当前原型中可以由仓库自身解决的主要缺口：可信用户身份、可演进数据库、真实趋势适配入口、视觉识别用户授权和关键反例测试。
@@ -58,6 +92,9 @@
 | 后端镜像首次重建时 Maven Central 响应体中断 | 1 | 前端构建已通过；为 Maven 阶段增加 BuildKit 持久缓存与 3 次传输重试后再构建 |
 | 后端缓存重建超过 10 分钟工具上限 | 1 | 不重复 Compose 构建；复用已填充缓存并改用 BuildKit host 网络绕过 Docker NAT |
 | Playwright 对浏览器 multipart 请求调用 `postData()` 返回 null | 1 | 删除依赖内部缓冲的断言；保留默认未勾选、必填字段、MANUAL_CORRECTED 响应，并由后端 mock 验证模型零调用 |
+| 批量历史查询的单参数 lambda 匹配两个 `JdbcTemplate.query` 重载 | 1 | 显式转换为 `RowCallbackHandler`，保持批量装配方案不变 |
+| 输入约束测试链式 `putArray` 构造出数组根节点 | 1 | 改为显式 `ObjectNode`；同时发现并补齐格式错误 JSON 的统一 ApiResponse 处理 |
+| outbox 多文件补丁缺少更新块分隔 | 1 | 拆分为服务、新类、迁移配置三个补丁，未产生部分写入 |
 
 ## 阶段七完成结果
 
@@ -160,3 +197,79 @@
 - Playwright E2E 连续两次通过，覆盖页面新增衣物、生成推荐、收藏及历史接口 saved=true 复核。
 - E2E 发现并修复 Docker 前端 8090 Origin 未被后端 CORS 允许的问题。
 - 前端构建、后端 24 项测试、Compose 校验和密钥泄漏检查全部通过。
+
+---
+
+# 阶段九：答辩交付缺口收敛计划
+
+## 目标
+
+在保持当前功能闭环不变的前提下，收敛答辩交付中仅由仓库自身可以消除的口径与文档缺口，避免在答辩材料中声称未实现的能力。本轮以最小改动推进，不触碰业务 Java 代码、不读取 .env、不覆盖用户未提交改动。
+
+## 阶段
+
+- [completed] 1. 配置口径：收敛 Actuator 暴露、移除未使用的 Prometheus 依赖、移除未使用的 pgvector 口径、固定前端 vite 依赖版本
+- [in_progress] 2. 推荐审计元数据：为推荐/识别调用补齐可核对、可脱敏的审计元数据
+- [completed] 3. 离线天气：评估无网络环境下天气降级与演示路径
+- [pending] 4. 研究评估材料：产出对齐论文/开题等研究要求的评估材料
+- [pending] 5. 毕业设计文档同步：同步 README 与开发边界文档与当前实现一致
+- [pending] 6. 完整验证：执行前后端构建、审计、Compose 校验与差异检查
+
+## 验收条件
+
+- 安全策略保持默认不对外开放，Actuator 仅暴露 health/info。
+- 仓库不再声称使用 pgvector 或提供可访问的 Prometheus 指标地址。
+- 前端构建依赖版本固定为 lockfile 当前解析结果，不再依赖 latest。
+- 文档口径与当前实现一致，不出现未实现能力的声明。
+
+## 阶段九配置口径完成结果
+
+- 安全策略保持默认不对外开放，Actuator 仅暴露 health/info，仓库不再声称 pgvector 或 Prometheus 指标地址。
+- 前端 `package.json` 与 `package-lock.json` 根 `dependencies` 均固定 `vite@8.1.4`、`@vitejs/plugin-vue@6.0.7`，不再依赖 `latest`，且不改变已解析包。
+
+## 阶段九推荐审计元数据计划
+
+用一次可核验、可脱敏的审计元数据收敛推荐来源的“可核对”口径。只有真实成功的百炼响应才写入 providerCallId 与三类 token；规则降级不伪装模型调用；旧历史记录保持为空而不是回填猜测值。
+
+- [completed] 1. 新增 Flyway V3：为 recommendations 增加可空审计列 model_name、prompt_version、provider_call_id、prompt_tokens、completion_tokens、total_tokens、generation_latency_ms、fallback_reason，兼容 H2/PostgreSQL 与旧 V2 数据。
+- [completed] 2. 百炼客户端解析真实响应 id、model 与 usage 三类 token，定义稳定 prompt 版本常量，缺失值不伪造。
+- [completed] 3. 服务层保存稳定枚举式 fallback 原因，不持久化异常原文；生成耗时覆盖天气+模型+规则选择全流程且非负。
+- [completed] 4. API 通过嵌套 generationAudit 返回元数据，旧前端只读 engine 保持兼容。
+- [in_progress] 5. 测试：合法 LLM 元数据落库与返回、无 key/异常/非法 ID/同类别 fallback 原因、V2->V3 迁移保留旧数据且新列为空、usage 缺失时成功但 token 为空。
+- [pending] 6. 同步 README、llm-integration-evidence、development-boundaries、findings、progress 与收集核对结果。
+
+## 阶段九执行记录
+
+- 前两次 Claude CLI 批处理均因 8 美元预算上限退出；第一次未产生任何文件修改，第二次已完成配置口径改动（Actuator 收敛、移除 pgvector/Prometheus 口径、固定前端 vite 版本）。本轮改为小批次逐项落地并逐项验证。
+
+## 阶段九离线天气演示完成结果
+
+- 新增默认关闭的开关 `app.weather.configured-demo-enabled` / `WEATHER_CONFIGURED_DEMO_ENABLED`（默认 `false`），以及静态快照字段 city、temperatureC、apparentTemperatureC、precipitationMm、weatherCode、windSpeedKmh。
+- 仅当两个真实 provider（wttr.in、Open-Meteo）都失败且请求城市与配置城市（trim 后不区分大小写）一致时，才返回静态快照，`source=configured-demo`；前端把该 source 明确标注为“配置演示天气/非实时”，不冒充实时天气。城市未找到（NOT_FOUND）不被静态快照掩盖，仍返回 404。
+- 配置校验采用与现有缓存配置一致的 fail-fast 方式：启用时任一字段缺失/非有限/温度不合理/降水风速为负，应用启动失败。
+- 测试：`WeatherServiceTest` 覆盖默认关闭双失败仍 503、开启且城市匹配返回 configured-demo、城市不匹配仍 503、NOT_FOUND 仍 404、以及配置非法的反例。
+- 文档：application.yml、docker-compose.yml、.env.example、README、development-boundaries、findings、progress 已同步，明确答辩可在 `.env` 显式启用但不能冒充实时天气。
+
+---
+
+# 阶段十：审计缺口收尾执行
+
+## 目标
+
+在最外层审计任务中收尾两项可复现交付：① 默认离线、不调用付费模型的研究评估协议与脚本；② 局部修订毕业设计 DOCX 生成器并重新生成，使其措辞与当前源码/迁移/测试/配置一致。本阶段只追加记录，不改写既有历史。
+
+## 已完成
+
+- [completed] 1. 只读审计当前工作区：git status/diff、task_plan/findings/progress、后端 API/DTO/迁移/测试、前端契约、README 与 docs、build_graduation_doc.py。
+- [completed] 2. 实现离线评估协议与脚本（scripts/evaluation/）：纯标准库 Python，默认只读本地 JSON 并计算，不联网、不调用百炼或任何模型 API，不内置实验结论。
+- [completed] 3. 运行评估反例测试（25 项 unittest 全部通过）与 fixture 评估（输出真实计算指标）。
+- [completed] 4. 局部修订 build_graduation_doc.py 并重新生成 docx/基于大语言模型的智能穿搭推荐系统_毕业设计成果.docx。
+- [completed] 5. 结构 QA（ZIP/段落/表格/关键术语）通过；视觉渲染 QA 因环境缺失 pdf2image 与 LibreOffice 未完成，已记录确切失败信息。
+- [completed] 6. 记录本阶段真实状态到 task_plan/findings/progress，并做最终差异检查。
+
+## 验收条件
+
+- 评估脚本默认离线，seed 实际控制抽样；输出只含真实计算结果或明确未执行状态。
+- 反例覆盖缺字段、重复 ID、衣橱外 ID、同类别、空数据；规则引擎契约与 LLM 输入边界分开定义。
+- DOCX 不再出现 JWT、Redis、管理员后台、pgvector、旧表名与“待实测”；改为 Session+CSRF、Flyway V1-V3、后端 60 项测试、4 项 E2E、推荐审计字段与离线演示天气边界。
+- 记录只追加不重写；所有失败命令与原因写入记录。

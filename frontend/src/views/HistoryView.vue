@@ -31,7 +31,48 @@ const filters = [
 ]
 
 const ratedCount = computed(() => props.app.state.history.filter((item) => Number.isFinite(item.feedback?.rating)).length)
-const maxTrendCount = computed(() => Math.max(1, ...props.app.historyTrend.map((item) => item.count)))
+const historyRungWidth = 13
+const historyRungs = computed(() => {
+  const days = props.app.historyTrend || []
+  const maxTotal = Math.max(1, ...days.map((day) => Math.max(0, Number(day.count) || 0)))
+  const base = 258
+  const step = Math.min(12, 192 / (maxTotal + 1))
+  const x0 = (index) => 38 + index * 53
+
+  return days.map((day, dayIndex) => {
+    const total = Math.max(0, Number(day.count) || 0)
+    const saved = Math.min(total, Math.max(0, Number(day.saved) || 0))
+    let offset = 0
+    const segments = [
+      { key: 'unsaved', label: '未收藏', value: total - saved, shade: '#8F8E88' },
+      { key: 'saved', label: '已收藏', value: saved, shade: '#1C1C1A' }
+    ].map((segment, segmentIndex) => {
+      const start = offset + segmentIndex
+      const rungs = Array.from({ length: segment.value }, (_, rungIndex) => {
+        const seed = rungIndex + 1 + dayIndex * 17 + segmentIndex * 31
+        const random = Math.abs(((seed * 73856093) ^ ((dayIndex + segmentIndex + 2) * 19349663)) % 1000) / 1000
+        return {
+          key: `${day.key}-${segment.key}-${rungIndex}`,
+          index: rungIndex + 1,
+          y: base - (start + rungIndex) * step,
+          opacity: 0.62 + random * 0.38,
+          delay: dayIndex * 90 + (start + rungIndex) * 12
+        }
+      })
+      const labelY = segment.value ? base - (start + segment.value / 2) * step + 2.5 : base
+      offset += segment.value
+      return { ...segment, rungs, labelY }
+    })
+
+    return {
+      ...day,
+      total,
+      x: x0(dayIndex),
+      totalY: base - (offset + segments.length - 1) * step - 8,
+      segments
+    }
+  })
+})
 const filteredHistory = computed(() => {
   const normalized = query.value.trim().toLocaleLowerCase('zh-CN')
   return props.app.state.history.filter((item) => {
@@ -92,12 +133,12 @@ function clearFilters() {
         <small>服务端返回记录</small>
       </article>
       <article>
-        <span>已收藏</span>
+        <span>已加载收藏</span>
         <strong>{{ app.savedHistory.length }}</strong>
         <small>已确认保存</small>
       </article>
       <article>
-        <span>已评分</span>
+        <span>已加载评分</span>
         <strong>{{ ratedCount }}</strong>
         <small>提交过反馈的方案</small>
       </article>
@@ -111,32 +152,48 @@ function clearFilters() {
     <section class="trend-section" aria-labelledby="history-trend-title">
       <header class="section-heading">
         <div>
-          <p class="section-kicker">最近 7 天</p>
-          <h2 id="history-trend-title">推荐与收藏趋势</h2>
+          <p class="section-kicker">已加载记录 · 最近 7 天</p>
+          <h2 id="history-trend-title">生成方案的收藏构成</h2>
         </div>
-        <div class="chart-legend" aria-label="图例"><span><i></i>生成</span><span><i></i>收藏</span></div>
+        <div class="chart-legend" aria-label="图例">
+          <span><i class="saved-mark"></i>已收藏</span>
+          <span><i class="unsaved-mark"></i>未收藏</span>
+        </div>
       </header>
 
-      <div class="history-chart" role="img" aria-label="最近七天推荐生成与收藏数量柱状图">
-        <div v-for="day in app.historyTrend" :key="day.key" class="chart-column">
-          <div class="bar-area">
-            <span
-              class="bar total-bar"
-              :class="{ empty: day.count === 0 }"
-              :style="{ height: `${day.count ? Math.max(12, day.count / maxTrendCount * 100) : 3}%` }"
-              :title="`${day.label} 生成 ${day.count} 条`"
-            ></span>
-            <span
-              class="bar saved-bar"
-              :class="{ empty: day.saved === 0 }"
-              :style="{ height: `${day.saved ? Math.max(12, day.saved / maxTrendCount * 100) : 3}%` }"
-              :title="`${day.label} 收藏 ${day.saved} 条`"
-            ></span>
-          </div>
-          <strong>{{ day.count }}<small v-if="day.saved"> / {{ day.saved }}</small></strong>
-          <span>{{ day.label }}</span>
-        </div>
+      <div class="history-chart" role="img" aria-label="最近七天按生成日期统计的推荐方案收藏构成图">
+        <svg viewBox="0 0 440 320" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+          <line x1="24" y1="262" x2="416" y2="262" class="chart-baseline" />
+          <g v-for="day in historyRungs" :key="day.key">
+            <g v-for="segment in day.segments" :key="`${day.key}-${segment.key}`">
+              <line
+                v-for="rung in segment.rungs"
+                :key="rung.key"
+                :x1="day.x - historyRungWidth"
+                :x2="day.x + historyRungWidth"
+                :y1="rung.y"
+                :y2="rung.y"
+                :stroke="segment.shade"
+                :style="{ '--rung-opacity': rung.opacity, '--rung-delay': `${rung.delay}ms` }"
+                class="history-rung"
+              >
+                <title>{{ day.label }} · {{ segment.label }} · 第 {{ rung.index }} 条</title>
+              </line>
+              <text
+                v-if="segment.value"
+                :x="day.x + historyRungWidth + 7"
+                :y="segment.labelY"
+                :fill="segment.shade"
+                class="segment-value"
+              >{{ segment.value }}</text>
+            </g>
+            <text :x="day.x" :y="day.totalY" class="day-total">{{ day.total }}</text>
+            <text :x="day.x" y="282" class="day-label">{{ day.label }}</text>
+          </g>
+          <text x="220" y="307" class="chart-note">ONE RUNG = ONE GENERATED RECOMMENDATION · DARK = SAVED</text>
+        </svg>
       </div>
+      <p class="chart-source">按当前已加载记录的生成日期统计 · 已收藏表示该推荐记录当前状态，不代表收藏操作发生日期</p>
     </section>
 
     <section class="records-section" aria-labelledby="records-title">
@@ -145,7 +202,7 @@ function clearFilters() {
           <p class="section-kicker">全部记录</p>
           <h2 id="records-title">方案档案</h2>
         </div>
-        <span>当前显示 {{ filteredHistory.length }} / {{ app.state.history.length }} 条</span>
+        <span>当前显示 {{ filteredHistory.length }} / 已加载 {{ app.state.history.length }} / 共 {{ app.state.historyTotal }} 条</span>
       </header>
 
       <div class="record-tools">
@@ -216,7 +273,7 @@ function clearFilters() {
             <div><span>生成来源</span><p>{{ item.engine }}</p></div>
             <div v-if="item.weather">
               <span>天气快照</span>
-              <p>{{ item.weather.temperatureC }}°C · 体感 {{ item.weather.apparentTemperatureC }}°C · 降水 {{ item.weather.precipitationMm }} mm · 风速 {{ item.weather.windSpeedKmh }} km/h · {{ item.weather.source }}</p>
+              <p>{{ item.weather.temperatureC }}°C · 体感 {{ item.weather.apparentTemperatureC }}°C · 降水 {{ item.weather.precipitationMm }} mm · 风速 {{ item.weather.windSpeedKmh }} km/h · {{ app.weatherSourceLabel(item.weather.source) }}</p>
             </div>
           </div>
 
@@ -250,6 +307,17 @@ function clearFilters() {
             </button>
           </footer>
         </article>
+        <button
+          v-if="app.state.historyHasNext"
+          class="load-more-button"
+          type="button"
+          :disabled="app.state.historyLoading"
+          @click="app.loadHistory({ append: true })"
+        >
+          <LoaderCircle v-if="app.state.historyLoading" class="spinning" :size="16" />
+          <ChevronDown v-else :size="16" />
+          加载更多记录
+        </button>
       </div>
 
       <div v-else class="state-panel empty-state">
@@ -353,29 +421,47 @@ function clearFilters() {
   letter-spacing: 0;
 }
 
-.chart-legend { display: flex; gap: 17px; color: var(--muted); font-size: 10px; }
+.chart-legend { display: flex; flex-wrap: wrap; justify-content: end; gap: 17px; color: var(--muted); font-size: 10px; }
 .chart-legend span { display: flex; align-items: center; gap: 6px; }
-.chart-legend i { width: 8px; height: 8px; background: var(--ink); }
-.chart-legend span:last-child i { background: var(--accent); }
+.chart-legend i { width: 8px; height: 8px; }
+.chart-legend .saved-mark { background: #1C1C1A; }
+.chart-legend .unsaved-mark { background: #8F8E88; }
 .history-chart {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(52px, 1fr));
-  gap: 13px;
-  min-height: 230px;
+  overflow-x: auto;
   margin-top: 25px;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  padding: 23px 12px 18px;
+  padding: 14px 0 10px;
 }
 
-.chart-column { display: grid; grid-template-rows: 145px auto auto; gap: 5px; min-width: 0; text-align: center; }
-.bar-area { display: flex; height: 145px; align-items: end; justify-content: center; gap: 5px; }
-.bar { display: block; width: 13px; min-height: 4px; background: var(--ink); transition: height .2s ease; }
-.saved-bar { background: var(--accent); }
-.bar.empty { background: var(--line); }
-.chart-column strong { font-family: Georgia, serif; font-size: 15px; font-weight: 500; }
-.chart-column strong small { color: var(--accent); font: 500 9px/1 sans-serif; }
-.chart-column > span { color: var(--muted); font-size: 10px; }
+.history-chart svg { display: block; width: min(560px, 100%); min-width: 440px; height: 320px; margin: 0 auto; }
+.chart-baseline { stroke: #DEDDD6; stroke-width: .8; }
+.history-rung {
+  --rung-opacity: 1;
+  --rung-delay: 0ms;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  opacity: 0;
+  animation: history-rung-in .9s cubic-bezier(.25, 1, .5, 1) both;
+  animation-delay: var(--rung-delay);
+}
+@keyframes history-rung-in { to { opacity: var(--rung-opacity); } }
+.segment-value,
+.day-total,
+.day-label,
+.chart-note {
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  text-anchor: middle;
+}
+.segment-value { font-size: 8px; font-weight: 800; text-anchor: start; }
+.day-total { fill: #1C1C1A; font-size: 10.5px; font-weight: 800; }
+.day-label { fill: #8F8E88; font-size: 7.5px; font-weight: 700; }
+.chart-note { fill: #B0AFA9; font-size: 7px; font-weight: 600; letter-spacing: .08em; }
+.chart-source { margin: 10px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+
+@media (prefers-reduced-motion: reduce) {
+  .history-rung { animation: none; opacity: var(--rung-opacity); }
+}
 
 .records-section { padding-top: 64px; }
 .records-header > span { color: var(--muted); font-size: 11px; }
@@ -418,6 +504,17 @@ function clearFilters() {
 .search-field input { width: 100%; min-width: 0; border: 0; outline: 0; padding: 9px; color: var(--ink); background: transparent; font-size: 12px; }
 .search-field button { display: grid; width: 28px; height: 28px; place-items: center; border: 0; padding: 0; color: var(--muted); background: transparent; }
 .history-list { display: grid; gap: 16px; }
+.load-more-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  background: var(--surface);
+}
 .history-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; background: var(--surface); }
 .card-header,
 .card-title,
@@ -531,8 +628,6 @@ function clearFilters() {
   .stats-band { grid-template-columns: 1fr; }
   .stats-band article { border-right: 0; border-bottom: 1px solid var(--line); padding: 20px; }
   .stats-band article:last-child { border-bottom: 0; }
-  .history-chart { grid-template-columns: repeat(7, minmax(38px, 1fr)); gap: 5px; overflow-x: auto; padding-right: 0; padding-left: 0; }
-  .bar { width: 9px; }
   .record-tools { align-items: stretch; flex-direction: column; }
   .filter-group { display: grid; grid-template-columns: repeat(3, 1fr); }
   .search-field { width: 100%; }

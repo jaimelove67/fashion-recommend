@@ -1,5 +1,67 @@
 # 执行记录
 
+## 2026-08-04（审计缺口收尾）
+
+- 完成工作区只读审计：git status 显示 41 个修改/新增文件；task_plan/findings/progress 已完整读取；surefire 报告确认后端 60 项测试全通过（10 个测试类，0 失败/0 错误/0 跳过），前端 E2E spec 4 项。
+- 实现离线评估协议（Task A）：`scripts/evaluation/evaluate_recommendations.py`（纯标准库，默认只读本地 JSON，不联网、不调用百炼/任何模型 API）+ `fixture_wardrobe.json`（8 件衣物、6 条 LLM 结果，meta.kind=fixture 明确标注不为实验结论）+ `test_evaluate_recommendations.py`（25 项 unittest）。
+- 评估脚本 seed=20260804 实际控制 baseline 子集抽样与 LLM 结果抽样；`--baseline-trials`、`--sample-size`、`--temperature`、`--report` 均为本地计算参数。
+- 反例测试 debug 发现两处真实问题：规则引擎可输出 5 件（五大类别各一件），2-4 边界属于 LLM 输入边界；`final_recommendation` 必须与校验共用同一边界，否则重复 ID 非法结果会产出重复最终推荐。均已修复并通过测试。
+- 运行 `python -m unittest discover -s scripts/evaluation -p "test_*.py"`：25 项全部通过；`evaluate_recommendations.py --pretty` 输出真实指标（llm_valid_rate=0.3333、fallback_reasons 含四类原因、rule_engine_validity=1.0 等）。
+- 新增 `docs/evaluation-protocol.md`（协议 v1：数据集格式、输入边界、指标定义、seed 语义、运行命令、对抗用例、fixture 与真实实验区分），README 增加最小入口。
+- 局部修订 `build_graduation_doc.py`（Task B）：修正 JWT/Redis/pgvector/MyBatis-Plus/Spring AI/管理员/抖音/Jsoup/旧表名/“待实测”；改为 Session+CSRF、Flyway V1-V3、Spring JDBC、60 项后端测试、4 项 E2E、推荐审计 generationAudit、configured-demo 离线天气；重绘架构图与 ER 图（新 6 表 app_users/wardrobe_items/recommendations/recommendation_items/recommendation_feedback/style_profiles）。
+- 重新生成 `docx/基于大语言模型的智能穿搭推荐系统_毕业设计成果.docx`（181 段落、17 表格）；结构 QA 通过：ZIP 可打开、关键术语存在、错误术语在声称实现上下文中消失、生成器可重复运行（逐条目哈希一致）。
+- ER 图标签宽度检查发现 `recommendation_feedback` 在 font 27 下溢出 300px 盒子，降为 font 22 后全部 label 适配。
+- 视觉渲染 QA（要求使用 render_docx.py）：失败于 `ModuleNotFoundError: No module named 'pdf2image'`，且本机无 LibreOffice/soffice、无 Poppler；按要求记录确切失败信息并明确“未完成视觉渲染 QA”，只做结构 QA，不假装通过。
+- 更新 task_plan/findings/progress 只追加本阶段事实；未改动 build 脚本之外的无关文件；未触碰 Docker 容器与数据卷。
+
+## 2026-08-04（阶段九：答辩交付缺口收敛）
+
+- 完成当前项目只读审计：核对 README 与配置、Compose、pom.xml、frontend 依赖与迁移文件口径。
+- 首次 Claude CLI 大批次执行因 8 美元预算上限退出，未产生任何文件修改；本轮改为小批次并逐项落地。
+- 开始阶段九第 1 项（配置口径）：收敛 Actuator 暴露、移除未使用的 Prometheus 依赖与 pgvector 口径、固定前端 vite 依赖版本，并同步开发边界文档。
+- 第二次 Claude CLI 批处理同样因 8 美元预算上限退出，但已产生配置口径改动（Actuator 收敛、移除 pgvector/Prometheus 口径、固定前端 vite 版本）。
+- 阶段九第 1 项完成：`frontend/package.json` 与 `package-lock.json` 根 `dependencies` 均固定 `vite@8.1.4`、`@vitejs/plugin-vue@6.0.7`；Actuator 仅暴露 health/info，仓库不再声称 pgvector 或 Prometheus 指标地址。
+- 开始阶段九第 2 项（推荐审计元数据）：新增 Flyway V3 迁移与审计领域对象，让推荐来源可核对、可脱敏。
+- 第 2 项落地：百炼客户端解析真实响应 id、model 与 usage 三类 token，定义稳定 prompt 版本常量；服务层用 `TransactionTemplate` 把写操作与外部天气/LLM 调用隔离，并保存稳定枚举式 fallback 原因。
+- API 新增嵌套 `generationAudit` 返回审计元数据，engine 仍保留在顶层，旧前端只读 engine 不受影响。
+- 第 2 项测试：新增合法 LLM 元数据落库与返回、无 key/请求异常/非法 ID/同类别 fallback 原因、V2->V3 迁移保留旧数据且新列为空、usage 缺失时成功但 token 为空等用例。
+- 开始阶段九第 3 项（离线天气）：新增默认关闭的静态天气快照 fallback，让答辩在无网络时也能演示天气驱动的推荐但不冒充实时天气。
+- 第 3 项落地：`app.weather.configured-demo-enabled`（默认 `false`）与静态快照字段；仅当两个真实 provider 都失败且请求城市匹配配置城市时返回 `source=configured-demo`，前端标注“配置演示天气/非实时”；NOT_FOUND 仍返回 404；配置校验 fail-fast。
+- 第 3 项测试：`WeatherServiceTest` 新增默认关闭 503、开启且城市匹配返回 configured-demo、城市不匹配 503、NOT_FOUND 404、配置非法反例等用例，并保持现有构造器测试兼容。
+- 验证：`npm run build`（vite 8.1.4，1785 模块）、`docker compose config -q`、`git diff --check` 通过；`mvn test`、`npm ci`、`npm audit` 因当前沙箱权限 allowlist 未放行，未能执行，待授权后补跑。
+
+### 编译错误修复与收敛（阶段九收尾）
+
+- 上一批改动引入编译错误：`BailianRecommendationClient.buildUserPrompt` 内 `new LlmRecommendationException("无法序列化推荐上下文", exception)` 只传了两个参数，其中第二个是 `Throwable`，不匹配该异常类仅有的 `(reason, message)` 与 `(reason, message, cause)` 两个构造器，无法通过 `mvn compile`。
+- 修复：改为传入稳定原因常量 `RecommendationFallbackReason.REQUEST_FAILED`（三参构造器），序列化推荐上下文失败按请求失败回退处理，不再让编译失败。
+- token usage 解析收紧：`integralNumber` 只接受非负整数；缺失或非整数（含 `isMissingNode`/`isNull`）继续返回 null，而负数 provider token 直接抛 `LlmRecommendationException(RESPONSE_INVALID)`，走稳定 fallback，避免负值命中 V3 迁移的 `chk_recommendations_*_tokens >= 0` CHECK 造成 500。`total_tokens` 保持真实 provider 值，不按 prompt+completion 擅自修正。
+- 修正 `RecommendationAudit` 错误 Javadoc：成功 LLM 的 model/token 字段携带真实 provider 元数据且 `fallbackReason` 为 null；仅规则 fallback 才只填充 `fallbackReason`。
+- 新增最小测试：usage 含负 `prompt_tokens` 时 `parseResponse` 抛 `LlmRecommendationException` 且 reason 为 `RESPONSE_INVALID`，负 token 响应不会被当作成功 LLM。
+- 依赖版本核对：`frontend/package.json` 与 `package-lock.json` 根 `dependencies` 均固定 `vite@8.1.4`、`@vitejs/plugin-vue@6.0.7`，一致。
+- 验证：`npm run build` 通过（vite 8.1.4，1785 模块）、`docker compose config -q` 通过、`git diff --check` 仅 LF->CRLF 提示、无空白错误。`mvn compile`/`mvn test`/`npm ci`/`npm audit` 因权限系统未放行本轮未能执行，待授权后补跑。
+
+## 2026-08-01（阶段八：审查缺口修复）
+
+- 完成当前项目代码审查：后端 37 项测试与前端生产构建通过，Compose 静态配置通过。
+- 确认六项待修复问题：LLM 类别约束、视觉超时、跨存储删除一致性、历史分页/N+1、输入长度约束、PostCSS 高危依赖。
+- 保留用户已有的 `frontend/src/views/HistoryView.vue` 修改和新增技术文档，不纳入本轮无关改动。
+- 开始第 1 项：为 LLM 输出补充类别互异校验和反例测试。
+- 第 1 项完成：LLM 同类别输出会整体回退规则引擎；`RecommendationControllerTest` 13/13 通过。
+- 开始第 2 项：让视觉识别客户端消费百炼连接/读取超时，并补延迟响应反例。
+- 第 2 项完成：本地慢响应服务证明 50ms 读取超时生效，视觉超时测试 1/1 通过。
+- 第 3 项采用数据库先删、MinIO 后清理的最小策略，优先保证用户可见数据不引用已删除对象。
+- 第 3 项反例通过：MinIO 清理失败时接口仍成功且数据库记录已删除；日志收敛为错误摘要。
+- 历史分页首次编译因 `JdbcTemplate.query` lambda 重载歧义失败，已显式指定 `RowCallbackHandler` 后继续。
+- 第 4 项完成：历史接口默认 20 条、最大 50 条，返回总数和 hasNext；反馈和衣物均按页批量读取。控制器测试 15/15、前端构建通过。
+- 开始第 5 项：把反馈与风格档案 DTO 长度约束对齐数据库和页面输入边界。
+- 输入长度反例首次发送了错误的 JSON 根节点；已修正构造方式，并补齐错误 JSON 的标准 400 响应。
+- 第 5 项完成：超长风格档案和反馈字段均在持久化前返回统一 400，针对性测试通过。
+- 开始第 6 项：仅更新 PostCSS 传递依赖和锁文件，不升级应用框架主版本。
+- 第 6 项完成：PostCSS 升级到 8.5.25，`npm audit --audit-level=high` 为 0 vulnerabilities，前端构建通过。
+- outbox 首次完整回归发现任务断言误放在无图片删除测试，已移到 MinIO 失败反例并新增调度器成功重试测试。
+- 对抗事务提交失败场景后，删除流程调整为事务内只删除记录并持久化清理任务，MinIO 副作用全部交给提交后的定时调度器。
+- 阶段八完成：后端 `mvn test` 44/44 通过，前端构建和 `npm audit --audit-level=high` 通过，Compose 静态配置和 `git diff --check` 通过。Docker Desktop 未启动，未重复执行真实容器 E2E。
+
 ## 2026-07-22（阶段七收尾恢复）
 
 - 从现有规划文件恢复上下文，核对认证、Flyway、趋势适配器、视觉授权和前端会话实现已经落盘。
@@ -22,6 +84,14 @@
 - Maven Docker 容器完整后端测试通过：8 个套件、37 项测试、0 失败、0 错误、0 跳过。
 - 应用内浏览器完成桌面首页、衣橱、上传弹窗和 390x844 移动布局验收；页面身份、非空内容、控制台、交互和截图证据全部通过。
 - 阶段七验收条件全部满足；准备仅暂存本轮修复文件，明确排除并保留独立的 `HistoryView.vue` 工作区改动。
+
+## 2026-08-01
+
+- Docker Desktop 恢复后，从当前工作区代码成功重建 backend/frontend 镜像，并仅替换应用容器；PostgreSQL 与 MinIO 持久卷保持不变。
+- 新后端健康检查为 UP，启动日志确认现有 PostgreSQL 从 V1 成功迁移到 V2。
+- Flyway 历史包含 baseline、V1 与 V2 三条成功记录；`image_cleanup_tasks` 主键和到期任务索引均已在真实 PostgreSQL 中确认。
+- 当前 Docker 栈 Playwright E2E 4/4 通过，覆盖登录会话、衣物新增、推荐保存、反馈持久化、未授权访问、无 AI 同意上传和移动端视口。
+- 阶段八最终验证闭环完成；未改动用户独立的 DOCX Markdown，也未暂存或提交任何文件。
 
 ## 2026-07-22
 

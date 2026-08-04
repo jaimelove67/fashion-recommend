@@ -16,6 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.springframework.test.web.client.ExpectedCount.once;
@@ -44,6 +45,9 @@ class WeatherServiceTest {
     private MockRestServiceServer geocodingServer;
     private MockRestServiceServer forecastServer;
     private SimpleMeterRegistry meterRegistry;
+    private WttrWeatherClient primaryClient;
+    private OpenMeteoWeatherClient fallbackClient;
+    private Cache<String, WeatherSnapshot> cache;
     private WeatherService weatherService;
 
     @BeforeEach
@@ -59,15 +63,15 @@ class WeatherServiceTest {
         RestClient.Builder forecastBuilder = RestClient.builder().baseUrl("https://forecast.test");
         forecastServer = MockRestServiceServer.bindTo(forecastBuilder).build();
 
-        WttrWeatherClient primary = new WttrWeatherClient(wttrBuilder.build(), objectMapper);
-        OpenMeteoWeatherClient fallback = new OpenMeteoWeatherClient(
+        primaryClient = new WttrWeatherClient(wttrBuilder.build(), objectMapper);
+        fallbackClient = new OpenMeteoWeatherClient(
                 geocodingBuilder.build(), forecastBuilder.build(), objectMapper);
-        Cache<String, WeatherSnapshot> cache = Caffeine.newBuilder()
+        cache = Caffeine.newBuilder()
                 .maximumSize(20)
                 .recordStats()
                 .build();
         meterRegistry = new SimpleMeterRegistry();
-        weatherService = new WeatherService(primary, fallback, cache, meterRegistry);
+        weatherService = new WeatherService(primaryClient, fallbackClient, cache, meterRegistry);
     }
 
     @AfterEach
@@ -166,6 +170,113 @@ class WeatherServiceTest {
                 .tag("provider", "wttr.in").timer().count());
         assertEquals(1L, meterRegistry.get("fashion.weather.provider.duration")
                 .tag("provider", "open-meteo").timer().count());
+    }
+
+    @Test
+    void keeps503WhenConfiguredDemoIsDisabledByDefault() {
+        // weatherService is built with the disabled() default configured demo in setUp().
+        expectWttrTimeout();
+        geocodingServer.expect(once(), requestTo(startsWith("https://geocoding.test/v1/search")))
+                .andRespond(withServiceUnavailable());
+
+        ResponseStatusException failure = assertThrows(
+                ResponseStatusException.class, () -> weatherService.current("Changsha"));
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, failure.getStatusCode());
+    }
+
+    @Test
+    void servesConfiguredDemoSnapshotWhenEnabledAndRequestedCityMatches() {
+        weatherService = enabledConfiguredDemoWeatherService("长沙", 25.0);
+        expectWttrTimeout();
+        geocodingServer.expect(once(), requestTo(startsWith("https://geocoding.test/v1/search")))
+                .andRespond(withServiceUnavailable());
+
+        WeatherSnapshot result = weatherService.current("  长沙  ");
+
+        assertEquals("长沙", result.city());
+        assertEquals(25.0, result.temperatureC());
+        assertEquals(27.0, result.apparentTemperatureC());
+        assertEquals(0.0, result.precipitationMm());
+        assertEquals(1, result.weatherCode());
+        assertEquals(8.0, result.windSpeedKmh());
+        assertEquals("configured-demo", result.source());
+    }
+
+    @Test
+    void keeps503WhenConfiguredDemoEnabledButCityDoesNotMatch() {
+        weatherService = enabledConfiguredDemoWeatherService("长沙", 25.0);
+        expectWttrTimeout();
+        geocodingServer.expect(once(), requestTo(startsWith("https://geocoding.test/v1/search")))
+                .andRespond(withServiceUnavailable());
+
+        ResponseStatusException failure = assertThrows(
+                ResponseStatusException.class, () -> weatherService.current("北京"));
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, failure.getStatusCode());
+    }
+
+    @Test
+    void doesNotMaskNotFoundWithConfiguredDemoEvenWhenEnabled() {
+        weatherService = enabledConfiguredDemoWeatherService("No Such City", 25.0);
+        wttrServer.expect(once(), requestTo(startsWith("https://wttr.test/")))
+                .andRespond(withResourceNotFound());
+        geocodingServer.expect(once(), requestTo(startsWith("https://geocoding.test/v1/search")))
+                .andRespond(withSuccess("{\"results\":[]}", MediaType.APPLICATION_JSON));
+
+        ResponseStatusException failure = assertThrows(
+                ResponseStatusException.class, () -> weatherService.current("No Such City"));
+
+        assertEquals(HttpStatus.NOT_FOUND, failure.getStatusCode());
+    }
+
+    @Test
+    void configValidationRejectsBlankCityWhenEnabled() {
+        assertThrows(IllegalArgumentException.class, () ->
+                ConfiguredWeatherSnapshot.from(true, "  ", 25.0, 27.0, 0.0, 1, 8.0));
+        assertThrows(IllegalArgumentException.class, () ->
+                ConfiguredWeatherSnapshot.from(true, null, 25.0, 27.0, 0.0, 1, 8.0));
+    }
+
+    @Test
+    void configValidationRejectsMissingOrNonFiniteNumbersWhenEnabled() {
+        assertThrows(IllegalArgumentException.class, () ->
+                ConfiguredWeatherSnapshot.from(true, "长沙", null, 27.0, 0.0, 1, 8.0));
+        assertThrows(IllegalArgumentException.class, () ->
+                ConfiguredWeatherSnapshot.from(true, "长沙", 25.0, 27.0, 0.0, null, 8.0));
+        assertThrows(IllegalArgumentException.class, () ->
+                ConfiguredWeatherSnapshot.from(true, "长沙", Double.NaN, 27.0, 0.0, 1, 8.0));
+        assertThrows(IllegalArgumentException.class, () ->
+                ConfiguredWeatherSnapshot.from(true, "长沙", Double.POSITIVE_INFINITY, 27.0, 0.0, 1, 8.0));
+    }
+
+    @Test
+    void configValidationRejectsUnreasonableTemperatureWhenEnabled() {
+        assertThrows(IllegalArgumentException.class, () ->
+                ConfiguredWeatherSnapshot.from(true, "长沙", 200.0, 27.0, 0.0, 1, 8.0));
+        assertThrows(IllegalArgumentException.class, () ->
+                ConfiguredWeatherSnapshot.from(true, "长沙", -200.0, 27.0, 0.0, 1, 8.0));
+    }
+
+    @Test
+    void configValidationRejectsNegativePrecipitationOrWindWhenEnabled() {
+        assertThrows(IllegalArgumentException.class, () ->
+                ConfiguredWeatherSnapshot.from(true, "长沙", 25.0, 27.0, -0.5, 1, 8.0));
+        assertThrows(IllegalArgumentException.class, () ->
+                ConfiguredWeatherSnapshot.from(true, "长沙", 25.0, 27.0, 0.0, 1, -8.0));
+    }
+
+    @Test
+    void configValidationIsSkippedEntirelyWhenDisabled() {
+        ConfiguredWeatherSnapshot snapshot = ConfiguredWeatherSnapshot.from(
+                false, null, null, null, null, null, null);
+
+        assertFalse(snapshot.enabled());
+    }
+
+    private WeatherService enabledConfiguredDemoWeatherService(String city, double temperatureC) {
+        return new WeatherService(primaryClient, fallbackClient, cache, meterRegistry,
+                ConfiguredWeatherSnapshot.from(true, city, temperatureC, 27.0, 0.0, 1, 8.0));
     }
 
     private void expectWttrSuccess() {

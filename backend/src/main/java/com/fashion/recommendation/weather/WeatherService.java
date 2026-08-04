@@ -28,6 +28,7 @@ public class WeatherService {
     private final OpenMeteoWeatherClient fallbackClient;
     private final Cache<String, WeatherSnapshot> cache;
     private final MeterRegistry meterRegistry;
+    private final ConfiguredWeatherSnapshot configuredWeather;
 
     @Autowired
     public WeatherService(
@@ -35,8 +36,23 @@ public class WeatherService {
             OpenMeteoWeatherClient fallbackClient,
             MeterRegistry meterRegistry,
             @Value("${app.weather.cache-ttl:15m}") Duration cacheTtl,
-            @Value("${app.weather.cache-max-size:500}") long cacheMaxSize) {
-        this(primaryClient, fallbackClient, buildCache(cacheTtl, cacheMaxSize), meterRegistry);
+            @Value("${app.weather.cache-max-size:500}") long cacheMaxSize,
+            @Value("${app.weather.configured-demo-enabled:false}") boolean configuredDemoEnabled,
+            @Value("${app.weather.configured-city:}") String configuredCity,
+            @Value("${app.weather.configured-temperature-c:}") Double configuredTemperatureC,
+            @Value("${app.weather.configured-apparent-temperature-c:}") Double configuredApparentTemperatureC,
+            @Value("${app.weather.configured-precipitation-mm:}") Double configuredPrecipitationMm,
+            @Value("${app.weather.configured-weather-code:}") Integer configuredWeatherCode,
+            @Value("${app.weather.configured-wind-speed-kmh:}") Double configuredWindSpeedKmh) {
+        this(primaryClient, fallbackClient, buildCache(cacheTtl, cacheMaxSize), meterRegistry,
+                ConfiguredWeatherSnapshot.from(
+                        configuredDemoEnabled,
+                        configuredCity,
+                        configuredTemperatureC,
+                        configuredApparentTemperatureC,
+                        configuredPrecipitationMm,
+                        configuredWeatherCode,
+                        configuredWindSpeedKmh));
     }
 
     WeatherService(
@@ -44,10 +60,20 @@ public class WeatherService {
             OpenMeteoWeatherClient fallbackClient,
             Cache<String, WeatherSnapshot> cache,
             MeterRegistry meterRegistry) {
+        this(primaryClient, fallbackClient, cache, meterRegistry, ConfiguredWeatherSnapshot.disabled());
+    }
+
+    WeatherService(
+            WttrWeatherClient primaryClient,
+            OpenMeteoWeatherClient fallbackClient,
+            Cache<String, WeatherSnapshot> cache,
+            MeterRegistry meterRegistry,
+            ConfiguredWeatherSnapshot configuredWeather) {
         this.primaryClient = primaryClient;
         this.fallbackClient = fallbackClient;
         this.cache = CaffeineCacheMetrics.monitor(meterRegistry, cache, "weather-current");
         this.meterRegistry = meterRegistry;
+        this.configuredWeather = configuredWeather;
     }
 
     public WeatherSnapshot current(String city) {
@@ -77,6 +103,11 @@ public class WeatherService {
                     OpenMeteoWeatherClient.PROVIDER, fallbackFailure.outcome().metricValue());
             if (fallbackFailure.outcome() == WeatherProviderException.Outcome.NOT_FOUND) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "未找到该城市的实时天气");
+            }
+            if (configuredWeather.enabled() && configuredWeather.matches(city)) {
+                log.warn("Both weather providers failed; serving configured demo weather for city={}, source=configured-demo",
+                        city);
+                return configuredWeather.toSnapshot();
             }
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "天气服务暂时不可用，请稍后重试");
         }

@@ -15,10 +15,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.springframework.web.client.RestClient;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 class BailianRecommendationClientTest {
     private ObjectMapper objectMapper;
@@ -28,7 +31,23 @@ class BailianRecommendationClientTest {
     void setUp() {
         objectMapper = new ObjectMapper().findAndRegisterModules();
         client = new BailianRecommendationClient(null, objectMapper, "/compatible-mode/v1/chat/completions",
-                "test-key", "qwen-plus-test");
+                "test-key", "qwen-plus-test", true);
+    }
+
+    @Test
+    void disabledFlagBlocksCallsEvenWhenKeyIsPresent() {
+        RestClient restClient = mock(RestClient.class);
+        BailianRecommendationClient disabled = new BailianRecommendationClient(
+                restClient, objectMapper, "/compatible-mode/v1/chat/completions",
+                "present-key", "qwen-plus-test", false);
+
+        LlmRecommendationException exception = assertThrows(
+                LlmRecommendationException.class, () -> disabled.recommend(context()));
+
+        assertEquals(RecommendationFallbackReason.LLM_DISABLED, exception.reason());
+        // A key alone must never be able to trigger a call: the disabled client must not touch the
+        // HTTP stack at all.
+        verifyNoInteractions(restClient);
     }
 
     @Test
@@ -69,7 +88,72 @@ class BailianRecommendationClientTest {
         assertEquals("极简通勤", direct.summary());
         assertEquals("适合当前天气", direct.reason());
         assertEquals(List.of(11L, 12L), direct.itemIds());
-        assertEquals(direct, wrapped);
+        // Direct parse (no provider envelope) must not fabricate audit metadata.
+        assertEquals(null, direct.promptVersion());
+
+        // A successful provider response records the stable prompt version on the wrapped result.
+        assertEquals(direct.summary(), wrapped.summary());
+        assertEquals(direct.reason(), wrapped.reason());
+        assertEquals(direct.itemIds(), wrapped.itemIds());
+        assertEquals(BailianRecommendationClient.PROMPT_VERSION, wrapped.promptVersion());
+        assertEquals("recommendation-v1", wrapped.promptVersion());
+    }
+
+    @Test
+    void parsesProviderIdModelAndUsageFromWrappedResponse() throws Exception {
+        String content = """
+                {"summary":"极简通勤","reason":"适合当前天气","itemIds":[11,12]}
+                """;
+        var response = objectMapper.createObjectNode();
+        response.put("id", "chatcmpl-abc123");
+        response.put("model", "qwen-plus");
+        response.putArray("choices").addObject().putObject("message").put("content", content);
+        response.putObject("usage").put("prompt_tokens", 617).put("completion_tokens", 226).put("total_tokens", 843);
+
+        LlmRecommendationResult result = client.parseResponse(response.toString());
+
+        assertEquals("chatcmpl-abc123", result.providerCallId());
+        assertEquals("qwen-plus", result.modelName());
+        assertEquals("recommendation-v1", result.promptVersion());
+        assertEquals(617, result.promptTokens());
+        assertEquals(226, result.completionTokens());
+        assertEquals(843, result.totalTokens());
+    }
+
+    @Test
+    void succeedsWithNullTokensWhenUsageIsMissing() throws Exception {
+        String content = """
+                {"summary":"极简通勤","reason":"适合当前天气","itemIds":[11,12]}
+                """;
+        var response = objectMapper.createObjectNode();
+        response.put("id", "chatcmpl-xyz");
+        response.put("model", "qwen-plus");
+        response.putArray("choices").addObject().putObject("message").put("content", content);
+
+        LlmRecommendationResult result = client.parseResponse(response.toString());
+
+        assertEquals("chatcmpl-xyz", result.providerCallId());
+        assertEquals("qwen-plus", result.modelName());
+        assertEquals(null, result.promptTokens());
+        assertEquals(null, result.completionTokens());
+        assertEquals(null, result.totalTokens());
+    }
+
+    @Test
+    void rejectsNegativeUsageTokensAsInvalidResponse() throws Exception {
+        String content = """
+                {"summary":"极简通勤","reason":"适合当前天气","itemIds":[11,12]}
+                """;
+        var response = objectMapper.createObjectNode();
+        response.put("id", "chatcmpl-abc123");
+        response.put("model", "qwen-plus");
+        response.putArray("choices").addObject().putObject("message").put("content", content);
+        response.putObject("usage").put("prompt_tokens", -1).put("completion_tokens", 226).put("total_tokens", 225);
+
+        LlmRecommendationException exception = assertThrows(
+                LlmRecommendationException.class, () -> client.parseResponse(response.toString()));
+
+        assertEquals(RecommendationFallbackReason.RESPONSE_INVALID, exception.reason());
     }
 
     @ParameterizedTest(name = "rejects constrained JSON violation: {0}")

@@ -27,7 +27,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info
 
 app:
   auth:
@@ -37,6 +37,9 @@ app:
   bailian:
     api-key: ${DASHSCOPE_API_KEY:}
     model: ${BAILIAN_MODEL:qwen-plus}
+    # Recommendation LLM is opt-in. Default off so automated tests / E2E never make paid calls even
+    # when a key is present; set BAILIAN_ENABLED=true explicitly for production/demo model use.
+    enabled: ${BAILIAN_ENABLED:false}
     vision-enabled: ${BAILIAN_VISION_ENABLED:false}
     vision-model: ${BAILIAN_VISION_MODEL:qwen-vl-plus}
     endpoint: ${BAILIAN_ENDPOINT:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
@@ -56,9 +59,20 @@ app:
     read-timeout: ${WEATHER_READ_TIMEOUT:3s}
     cache-ttl: ${WEATHER_CACHE_TTL:15m}
     cache-max-size: ${WEATHER_CACHE_MAX_SIZE:500}
+    # Offline presentation fallback: default off. Only when both real providers fail AND the
+    # requested city matches configured-city does it return a static snapshot (source=configured-demo).
+    # It is never real-time weather; enable only in .env for a defense/presentation run.
+    configured-demo-enabled: ${WEATHER_CONFIGURED_DEMO_ENABLED:false}
+    configured-city: ${WEATHER_CONFIGURED_CITY:}
+    configured-temperature-c: ${WEATHER_CONFIGURED_TEMPERATURE_C:}
+    configured-apparent-temperature-c: ${WEATHER_CONFIGURED_APPARENT_TEMPERATURE_C:}
+    configured-precipitation-mm: ${WEATHER_CONFIGURED_PRECIPITATION_MM:}
+    configured-weather-code: ${WEATHER_CONFIGURED_WEATHER_CODE:}
+    configured-wind-speed-kmh: ${WEATHER_CONFIGURED_WIND_SPEED_KMH:}
   storage:
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
     access-key: ${MINIO_ROOT_USER:fashion_minio_admin}
     secret-key: ${MINIO_ROOT_PASSWORD:fashion_2404}
     bucket: ${MINIO_BUCKET:garments-private}
     max-file-size: ${MINIO_MAX_FILE_SIZE:10485760}
+    cleanup-interval: ${MINIO_CLEANUP_INTERVAL:60s}

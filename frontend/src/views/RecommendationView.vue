@@ -129,7 +129,7 @@ function imageFailed(key) {
               <strong>{{ app.state.weather.city }}</strong>
               <span>{{ app.state.weather.temperatureC }}°C · 体感 {{ app.state.weather.apparentTemperatureC }}°C · 降水 {{ app.state.weather.precipitationMm }} mm</span>
             </p>
-            <small>{{ app.state.weather.source }}</small>
+            <small>{{ app.weatherSourceLabel(app.state.weather.source) }}</small>
           </div>
           <p v-else class="weather-empty"><MapPin :size="17" aria-hidden="true" />填写城市后可先读取实时天气</p>
 
@@ -203,7 +203,7 @@ function imageFailed(key) {
             <span>天气快照</span>
             <p>
               {{ app.state.currentRecommendation.weather.temperatureC }}°C · 体感 {{ app.state.currentRecommendation.weather.apparentTemperatureC }}°C ·
-              风速 {{ app.state.currentRecommendation.weather.windSpeedKmh }} km/h · {{ app.state.currentRecommendation.weather.source }}
+              风速 {{ app.state.currentRecommendation.weather.windSpeedKmh }} km/h · {{ app.weatherSourceLabel(app.state.currentRecommendation.weather.source) }}
             </p>
           </div>
         </div>

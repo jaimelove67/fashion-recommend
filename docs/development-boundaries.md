@@ -21,7 +21,9 @@
 
 ## 规则推荐 fallback
 
-未配置百炼 Key、模型超时、响应无法解析、字段越界、衣物 ID 重复或引用当前衣橱之外的单品时，系统进入规则推荐。响应和持久化记录的 `engine` 明确区分 `llm` 与 `development-rule-v1`，不会把规则结果冒充模型结果。
+推荐大模型是显式启用（opt-in）的：`BAILIAN_ENABLED` 默认为 `false`，只有显式设置 `BAILIAN_ENABLED=true` 且配置了 `DASHSCOPE_API_KEY` 时才会调用 qwen-plus。因此即使 `.env` 里存在真实 Key，自动化 E2E 和任何其他运行方式默认也不会发起付费模型调用——Key 单独存在不足以触发调用，这是防止测试误产生外部费用的硬边界。未启用、未配置 Key、模型超时、响应无法解析、字段越界、衣物 ID 重复或引用当前衣橱之外的单品时，系统进入规则推荐。响应和持久化记录的 `engine` 明确区分 `llm` 与 `development-rule-v1`，不会把规则结果冒充模型结果。
+
+每次生成都会持久化审计元数据：合法 LLM 结果保存真实 provider 元数据（provider call ID、模型名、prompt 版本与三类 token），规则降级只保存稳定的枚举式 `fallback_reason`（如 `llm-disabled`、`missing-api-key`、`request-failed`、`response-invalid`、`result-invalid`、`duplicate-item-ids`、`foreign-item-ids`、`same-category`），不保存异常原文。API 通过嵌套 `generationAudit` 返回这些字段，`engine` 仍保留在顶层。规则降级时 provider 元数据（model name、prompt version、provider call ID 与三类 token）保持为空，但 `fallback_reason` 非空；启用 V3 审计列之前的历史记录，所有审计字段（含 `fallback_reason`）仍保持为空，不伪造模型元数据。
 
 规则引擎只使用当前用户已完善的衣物，且至少需要两个不同类别。条件不成立时返回 422，不生成虚假方案。生产环境可保留 fallback，但应监控可用率、耗时、校验失败原因和降级率，并向用户区分智能生成与基础搭配。
 
@@ -41,20 +43,26 @@
 
 未同意时服务端完全跳过识别服务，即使视觉开关已经开启。用户可直接填写名称、类别和颜色，记录保存为 `MANUAL_CORRECTED`；识别关闭、失败或返回不完整时进入 `NEEDS_MANUAL_REVIEW`，待确认衣物不会参与推荐。
 
-生产化还需要保存同意与模型调用审计、限制配额、明确图片保留期限、支持删除请求并监控识别失败。
+生产化还需要保存同意与模型调用审计、限制配额、明确图片保留期限、支持删除请求并监控识别失败。当前图片删除已采用数据库清理任务队列，MinIO 失败时由后台重试；生产环境仍应补充任务告警、死信处理和对象生命周期策略。
 
 ## 数据库迁移与基础设施
 
 结构由 Flyway 管理，运行期 `schema.sql` 初始化已关闭。旧数据库通过 baseline version 0 接管，再执行 V1 的兼容补列与索引语句；迁移测试验证原数据保留和二次运行幂等。后续结构变化必须新增版本迁移，不能修改已经执行的 V1。
 
+推荐审计元数据由 V3 迁移加入 `recommendations` 的可空列（model_name、prompt_version、provider_call_id、prompt_tokens、completion_tokens、total_tokens、generation_latency_ms、fallback_reason），并带非负 CHECK 约束；迁移兼容 H2/PostgreSQL 与旧 V2 数据，旧行新列为空。
+
 Redis 已从 Compose 和依赖中删除，因为当前业务没有消费者。天气和趋势仅使用有明确调用方的进程内 Caffeine 缓存；需要跨实例缓存时，应先定义一致性、失效和监控要求，再引入外部缓存。
+
+当前不使用 pgvector：数据库只用标准 PostgreSQL 类型，迁移与查询中没有 vector 列或向量检索。监控保持默认关闭：Actuator 仅暴露 `health` 与 `info`，不提供 Prometheus 或 metrics 指标端点；需要在生产环境观测时，再按调度要求显式开放并接入采集端。
 
 ## 答辩说明口径
 
 - “身份来自 Spring Security Session，客户端伪造用户请求头不会改变当前用户。”
 - “规则引擎是明确标记的降级结果，不冒充大模型输出。”
+- “文本推荐大模型默认关闭；Key 单独存在不会触发调用，只有显式开启 `BAILIAN_ENABLED=true` 才会调用，自动化 E2E 因此绝不会产生付费模型调用。”
 - “趋势源通过严格契约接入授权数据；不可用时 `demoMode` 主动标记开发样本。”
 - “视觉识别默认不调用，服务端开关和用户本次明确同意缺一不可。”
+- “离线天气演示默认关闭，只有在 `.env` 显式启用且两个真实 provider 都失败时才返回静态快照，`source=configured-demo`，前端明确标注‘配置演示天气/非实时’，绝不冒充实时天气；城市未找到（NOT_FOUND）仍返回 404，不会被静态快照掩盖。”
 
 ## 代码证据
 
@@ -62,4 +70,6 @@ Redis 已从 Compose 和依赖中删除，因为当前业务没有消费者。�
 - 数据隔离：wardrobe、recommendation、style 控制器与对应仓储查询。
 - 趋势：`ConfiguredJsonTrendSourceAdapter.java`、`TrendService.java`。
 - 视觉同意：`WardrobeController.java`、`WardrobeService.java`、`WardrobeView.vue`。
-- 迁移与反例测试：`V1__baseline_schema.sql`、`AuthenticationIntegrationTest.java`、`FlywayMigrationTest.java`、`RecommendationControllerTest.java`。
+- 推荐审计元数据：`V3__recommendation_audit.sql`、`RecommendationAudit.java`、`RecommendationFallbackReason.java`、`BailianRecommendationClient.java`、`RecommendationService.java`。
+- 迁移与反例测试：`V1__baseline_schema.sql`、`AuthenticationIntegrationTest.java`、`FlywayMigrationTest.java`、`RecommendationControllerTest.java`、`BailianRecommendationClientTest.java`。
+- 离线天气演示：`ConfiguredWeatherSnapshot.java`、`WeatherService.java`、`WeatherServiceTest.java`、`frontend/src/composables/useFashionApp.js`。

@@ -8,19 +8,33 @@
 flowchart TD
     A["用户提交场合、城市和风格要求"] --> B["后端读取天气、风格档案和当前用户衣橱"]
     B --> C["构造 LlmRecommendationContext"]
-    C --> D{"已配置 DASHSCOPE_API_KEY？"}
+    C --> D{"BAILIAN_ENABLED=true？"}
     D -- "否" --> R["规则引擎选择 2-4 件可组合衣物"]
-    D -- "是" --> E["发送 system prompt + 结构化 user JSON"]
-    E --> F["百炼 qwen-plus 返回 json_object"]
-    F --> G{"字段、长度、数量和 ID 校验通过？"}
-    G -- "否" --> R
-    G -- "是" --> H["保存推荐，engine=llm"]
-    R --> I["保存推荐，engine=development-rule-v1"]
-    H --> J["前端展示单品、理由、天气和生成来源"]
-    I --> J
+    D -- "是" --> E{"已配置 DASHSCOPE_API_KEY？"}
+    E -- "否" --> R
+    E -- "是" --> F["发送 system prompt + 结构化 user JSON"]
+    F --> G["百炼 qwen-plus 返回 json_object"]
+    G --> H{"字段、长度、数量和 ID 校验通过？"}
+    H -- "否" --> R
+    H -- "是" --> I["保存推荐，engine=llm"]
+    R --> J["保存推荐，engine=development-rule-v1"]
+    I --> K["前端展示单品、理由、天气和生成来源"]
+    J --> K
 ~~~
 
 流程的关键不是“调用成功就直接展示”，而是模型结果必须先通过服务端约束。外部服务不可用或内容不可信时，系统保留业务可用性，同时通过 engine 明确标记来源。
+
+## 推荐审计元数据
+
+每次成功生成都会把真实的 provider 元数据持久化到 `recommendations`，并通过响应中的嵌套 `generationAudit` 返回：
+
+- `engine`：`llm` 或 `development-rule-v1`，仍保留在响应顶层，旧前端只读该字段不受影响。
+- `modelName` / `promptVersion` / `providerCallId`：只来自真实成功响应，绝不伪造；`promptVersion` 为固定常量 `recommendation-v1`。
+- `promptTokens` / `completionTokens` / `totalTokens`：来自响应 `usage`；usage 缺失时这三项为空，但推荐仍成功。
+- `generationLatencyMs`：覆盖天气、模型与规则选择的完整生成耗时，非负。
+- `fallbackReason`：仅规则降级时写入稳定的枚举式原因（`llm-disabled`、`missing-api-key`、`request-failed`、`response-invalid`、`result-invalid`、`duplicate-item-ids`、`foreign-item-ids`、`same-category`），不保存异常原文。合法 LLM 生成为空。
+
+规则降级时 provider 元数据（modelName、promptVersion、providerCallId 与三类 token）保持为空，但 `fallbackReason` 非空；只有实际调用成功响应才能拥有 providerCallId 与 token。启用 V3 审计列之前的历史记录，所有审计字段（含 `fallbackReason`）仍保持为空。
 
 ## Prompt 约束
 

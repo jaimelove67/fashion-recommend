@@ -13,6 +13,7 @@ import com.fashion.recommendation.weather.WeatherService;
 import com.fashion.recommendation.weather.WeatherSnapshot;
 import java.net.SocketTimeoutException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.client.ResourceAccessException;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -36,6 +38,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -52,6 +55,9 @@ class RecommendationControllerTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @MockBean
     private WeatherService weatherService;
@@ -118,9 +124,10 @@ class RecommendationControllerTest {
                         .with(user(userId))
                         .header("X-User-Id", "another-user"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(1))
-                .andExpect(jsonPath("$.data[0].saved").value(true))
-                .andExpect(jsonPath("$.data[0].feedback.rating").value(5));
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].saved").value(true))
+                .andExpect(jsonPath("$.data.content[0].feedback.rating").value(5));
 
         mockMvc.perform(get("/api/v1/recommendations/" + recommendationId)
                         .with(user("another-user"))
@@ -136,6 +143,40 @@ class RecommendationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items.length()").value(3))
                 .andExpect(jsonPath("$.data.items[0].name").value("米白衬衫"));
+    }
+
+    @Test
+    void paginatesRecommendationHistoryAndRejectsUnboundedPageSizes() throws Exception {
+        String userId = "recommendation-page-user";
+        createItem(userId, "白色T恤", "上装", "白色");
+        createItem(userId, "黑色长裤", "下装", "黑色");
+        for (int index = 0; index < 3; index++) {
+            mockMvc.perform(post("/api/v1/recommendations")
+                            .with(user(userId))
+                            .with(csrf())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"occasion":"通勤","city":"长沙"}
+                                    """))
+                    .andExpect(status().isOk());
+        }
+
+        mockMvc.perform(get("/api/v1/me/recommendations?page=0&size=2").with(user(userId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(2))
+                .andExpect(jsonPath("$.data.totalElements").value(3))
+                .andExpect(jsonPath("$.data.page").value(0))
+                .andExpect(jsonPath("$.data.size").value(2))
+                .andExpect(jsonPath("$.data.hasNext").value(true));
+
+        mockMvc.perform(get("/api/v1/me/recommendations?page=1&size=2").with(user(userId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.hasNext").value(false));
+
+        mockMvc.perform(get("/api/v1/me/recommendations?page=0&size=51").with(user(userId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
     }
 
     @Test
@@ -228,6 +269,37 @@ class RecommendationControllerTest {
     }
 
     @Test
+    void commitsDatabaseDeletionAndQueuesImageCleanupWithoutCallingStorageInTheTransaction() throws Exception {
+        String userId = "delete-image-cleanup-user";
+        given(imageStorage.store(anyString(), any())).willReturn(new StoredImage("wardrobe/delete-image-cleanup-user/a.png", "image/png"));
+        given(imageStorage.read(anyString())).willReturn(new com.fashion.recommendation.storage.StoredImageData(
+                new byte[] {1}, "image/png"));
+
+        var upload = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart(
+                        "/api/v1/me/wardrobe/upload")
+                        .file(new MockMultipartFile("image", "shirt.png", "image/png", new byte[] {1, 2, 3}))
+                        .param("name", "待删衬衫")
+                        .param("category", "上装")
+                        .param("color", "白色")
+                        .with(user(userId))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andReturn();
+        long itemId = readData(upload).path("id").asLong();
+        mockMvc.perform(delete("/api/v1/me/wardrobe/" + itemId)
+                        .with(user(userId))
+                        .with(csrf()))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/me/wardrobe").with(user(userId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(0));
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM image_cleanup_tasks WHERE object_key = ?",
+                Integer.class, "wardrobe/delete-image-cleanup-user/a.png"));
+        org.mockito.Mockito.verify(imageStorage, org.mockito.Mockito.never()).delete(anyString());
+    }
+
+    @Test
     void persistsStylePreferencesAndIgnoresClientTemperature() throws Exception {
         String userId = "profile-user";
         mockMvc.perform(post("/api/v1/me/style-profile/refresh")
@@ -258,6 +330,32 @@ class RecommendationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.temperatureC").value(26.0))
                 .andExpect(jsonPath("$.data.reason").value(org.hamcrest.Matchers.containsString("复古、通勤")));
+    }
+
+    @Test
+    void rejectsOversizedFeedbackAndStyleProfileFieldsBeforePersistence() throws Exception {
+        String oversizedName = "名".repeat(81);
+        var oversizedProfile = objectMapper.createObjectNode().put("displayName", oversizedName);
+        oversizedProfile.putArray("stylePreferences").add("极简");
+        mockMvc.perform(post("/api/v1/me/style-profile/refresh")
+                        .with(user("validation-user"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(oversizedProfile.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+
+        mockMvc.perform(post("/api/v1/me/recommendations/999999/feedback")
+                        .with(user("validation-user"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("rating", 5)
+                                .put("feedbackType", "x".repeat(81))
+                                .put("comment", "x".repeat(501))
+                                .toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
     }
 
     @Test
@@ -308,6 +406,91 @@ class RecommendationControllerTest {
     }
 
     @Test
+    void persistsAndReturnsLlmAuditMetadata() throws Exception {
+        String userId = "llm-audit-user";
+        long topId = createItem(userId, "米白衬衫", "上装", "暖白");
+        long bottomId = createItem(userId, "深蓝直筒裤", "下装", "深蓝");
+        given(llmRecommendationClient.recommend(any(LlmRecommendationContext.class))).willReturn(Optional.of(
+                new LlmRecommendationResult("深蓝复古穿搭", "色彩呼应风格档案与当前天气。", List.of(topId, bottomId),
+                        "chatcmpl-abc123", "qwen-plus-test", "recommendation-v1", 617, 226, 843)));
+
+        var result = mockMvc.perform(post("/api/v1/recommendations")
+                        .with(user(userId))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"occasion":"约会","city":"长沙"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.engine").value("llm"))
+                .andExpect(jsonPath("$.data.generationAudit.engine").value("llm"))
+                .andExpect(jsonPath("$.data.generationAudit.fallbackReason").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.data.generationAudit.modelName").value("qwen-plus-test"))
+                .andExpect(jsonPath("$.data.generationAudit.promptVersion").value("recommendation-v1"))
+                .andExpect(jsonPath("$.data.generationAudit.providerCallId").value("chatcmpl-abc123"))
+                .andExpect(jsonPath("$.data.generationAudit.promptTokens").value(617))
+                .andExpect(jsonPath("$.data.generationAudit.completionTokens").value(226))
+                .andExpect(jsonPath("$.data.generationAudit.totalTokens").value(843))
+                .andExpect(jsonPath("$.data.generationAudit.generationLatencyMs").isNumber())
+                .andReturn();
+        long recommendationId = readData(result).path("id").asLong();
+
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT model_name, prompt_version, provider_call_id, prompt_tokens, completion_tokens, total_tokens, "
+                        + "generation_latency_ms, fallback_reason FROM recommendations WHERE id = ?",
+                recommendationId);
+        assertEquals("qwen-plus-test", row.get("model_name"));
+        assertEquals("recommendation-v1", row.get("prompt_version"));
+        assertEquals("chatcmpl-abc123", row.get("provider_call_id"));
+        assertEquals(617, ((Number) row.get("prompt_tokens")).intValue());
+        assertEquals(226, ((Number) row.get("completion_tokens")).intValue());
+        assertEquals(843, ((Number) row.get("total_tokens")).intValue());
+        assertTrue(((Number) row.get("generation_latency_ms")).longValue() >= 0);
+        assertNull(row.get("fallback_reason"));
+    }
+
+    @Test
+    void recordsFallbackReasonWhenLlmIsNotConfigured() throws Exception {
+        String userId = "llm-no-key-user";
+        createItem(userId, "针织衫", "上装", "酒红");
+        createItem(userId, "半身裙", "下装", "深蓝");
+
+        mockMvc.perform(post("/api/v1/recommendations")
+                        .with(user(userId))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"occasion":"约会","city":"长沙"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.engine").value("development-rule-v1"))
+                .andExpect(jsonPath("$.data.generationAudit.fallbackReason").value("missing-api-key"))
+                .andExpect(jsonPath("$.data.generationAudit.modelName").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.data.generationAudit.providerCallId").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.data.generationAudit.promptTokens").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
+    void recordsFallbackReasonWhenLlmThrows() throws Exception {
+        String userId = "llm-throw-user";
+        createItem(userId, "针织衫", "上装", "酒红");
+        createItem(userId, "半身裙", "下装", "深蓝");
+        given(llmRecommendationClient.recommend(any(LlmRecommendationContext.class)))
+                .willThrow(new ResourceAccessException("LLM timeout", new SocketTimeoutException("read timed out")));
+
+        mockMvc.perform(post("/api/v1/recommendations")
+                        .with(user(userId))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"occasion":"约会","city":"长沙"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.engine").value("development-rule-v1"))
+                .andExpect(jsonPath("$.data.generationAudit.fallbackReason").value("request-failed"));
+    }
+
+    @Test
     void rejectsExistingItemFromAnotherUsersWardrobeAndFallsBackAsAWhole() throws Exception {
         String userId = "llm-id-validation-user";
         long topId = createItem(userId, "白色T恤", "上装", "白色");
@@ -327,6 +510,7 @@ class RecommendationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.engine").value("development-rule-v1"))
                 .andExpect(jsonPath("$.data.summary").value(org.hamcrest.Matchers.not("不应接受的推荐")))
+                .andExpect(jsonPath("$.data.generationAudit.fallbackReason").value("foreign-item-ids"))
                 .andReturn();
 
         JsonNode items = readData(result).path("items");
@@ -334,6 +518,29 @@ class RecommendationControllerTest {
         List<Long> currentUserItemIds = List.of(topId, bottomId, shoeId);
         items.forEach(item -> assertTrue(currentUserItemIds.contains(item.path("id").asLong())));
         assertFalse(items.findValuesAsText("id").contains(Long.toString(foreignItemId)));
+    }
+
+    @Test
+    void rejectsLlmResultWhenAllSelectedItemsShareOneCategory() throws Exception {
+        String userId = "llm-category-validation-user";
+        long firstTopId = createItem(userId, "白色T恤", "上装", "白色");
+        long secondTopId = createItem(userId, "灰色卫衣", "上装", "灰色");
+        createItem(userId, "黑色长裤", "下装", "黑色");
+        given(llmRecommendationClient.recommend(any(LlmRecommendationContext.class))).willReturn(Optional.of(
+                new LlmRecommendationResult("不完整的搭配", "只包含两件上装。", List.of(firstTopId, secondTopId))));
+
+        mockMvc.perform(post("/api/v1/recommendations")
+                        .with(user(userId))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"occasion":"通勤","city":"长沙"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.engine").value("development-rule-v1"))
+                .andExpect(jsonPath("$.data.summary").value(org.hamcrest.Matchers.not("不完整的搭配")))
+                .andExpect(jsonPath("$.data.generationAudit.fallbackReason").value("same-category"))
+                .andExpect(jsonPath("$.data.items.length()").value(3));
     }
 
     @Test

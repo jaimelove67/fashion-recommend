@@ -117,6 +117,15 @@ test('adds a garment, generates an outfit, saves it, and persists feedback', asy
     expect(recommendationBody.data.items.length).toBeGreaterThanOrEqual(2)
     const recommendationId = recommendationBody.data.id
 
+    // The recommendation LLM is opt-in and defaults to off, so E2E must never make a paid model
+    // call. Assert generationAudit shows rule fallback (llm-disabled) rather than provider metadata.
+    expect(recommendationBody.data.engine).toBe('development-rule-v1')
+    expect(recommendationBody.data.generationAudit).toBeTruthy()
+    expect(recommendationBody.data.generationAudit.fallbackReason).toBe('llm-disabled')
+    expect(recommendationBody.data.generationAudit.modelName).toBeNull()
+    expect(recommendationBody.data.generationAudit.promptVersion).toBeNull()
+    expect(recommendationBody.data.generationAudit.providerCallId).toBeNull()
+
     await expect(page.getByText(`方案 #${recommendationId}`, { exact: true })).toBeVisible()
     await expect(page.getByText(recommendationBody.data.summary, { exact: true })).toBeVisible()
 
@@ -151,7 +160,7 @@ test('adds a garment, generates an outfit, saves it, and persists feedback', asy
     const historyResponse = await context.request.get('/api/v1/me/recommendations')
     expect(historyResponse.ok()).toBeTruthy()
     const historyBody = await historyResponse.json()
-    const savedRecord = historyBody.data.find((item) => item.id === recommendationId)
+    const savedRecord = historyBody.data.content.find((item) => item.id === recommendationId)
     expect(savedRecord).toMatchObject({ id: recommendationId, saved: true, feedback: { rating: 5 } })
 
     await testInfo.attach('e2e-result.json', {

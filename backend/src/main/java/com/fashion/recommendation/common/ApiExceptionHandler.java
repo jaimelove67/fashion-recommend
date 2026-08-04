@@ -4,6 +4,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestControllerAdvice
@@ -22,5 +23,10 @@ public class ApiExceptionHandler {
                 .map(error -> error.getField() + "参数不合法")
                 .orElse("请求参数不合法");
         return ResponseEntity.badRequest().body(new ApiResponse<>(400, message, null));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnreadableBody(HttpMessageNotReadableException exception) {
+        return ResponseEntity.badRequest().body(new ApiResponse<>(400, "请求体格式不合法", null));
     }
 }

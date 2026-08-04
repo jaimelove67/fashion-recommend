@@ -8,7 +8,7 @@
 
 - 前端：Vue 3、Vite、Lucide Vue，入口位于 frontend/。
 - 后端：Java 17、Spring Boot 3.4.2、Spring Web、Spring Security、JDBC、Validation、Flyway、Actuator，入口位于 backend/。
-- 数据与存储：PostgreSQL 16（使用 pgvector 镜像）、MinIO 私有对象存储、Caffeine 进程内缓存。
+- 数据与存储：PostgreSQL 16、MinIO 私有对象存储、Caffeine 进程内缓存。
 - 智能能力：阿里云百炼兼容 OpenAI Chat Completions 协议；推荐模型和视觉识别默认可关闭。
 - 本地编排：Docker Compose，包含 PostgreSQL、MinIO，以及可选的前后端应用服务。
 
@@ -39,7 +39,8 @@ docker compose ps
 - 后端 API：<http://localhost:8088>
 - MinIO 控制台：<http://localhost:9001>
 - 后端健康检查：<http://localhost:8088/actuator/health>
-- Prometheus 指标：<http://localhost:8088/actuator/prometheus>
+
+安全策略保持默认不对外开放：Actuator 仅暴露 `health` 与 `info` 两个端点，不提供 Prometheus 或 metrics 指标端点。
 
 停止服务：
 
@@ -121,16 +122,16 @@ mvn spring-boot:run
 
 ## 当前能力边界
 
-- 未配置 DASHSCOPE_API_KEY 时，推荐使用可测试的开发期规则引擎 development-rule-v1。
-- 配置百炼 Key 后，推荐会尝试调用 qwen-plus；请求超时、响应不合规或模型返回了非衣橱单品时，会回退到规则引擎。
+- 推荐大模型是显式启用（opt-in）的：`BAILIAN_ENABLED` 默认为 `false`，即使配置了 `DASHSCOPE_API_KEY` 也不会发起任何付费模型调用，因此自动化测试与 E2E 默认只走规则引擎。只有显式设置 `BAILIAN_ENABLED=true` 且配置了 Key 时，推荐才会调用 qwen-plus。调用被禁用时审计 `fallback_reason` 为 `llm-disabled`；未配置 Key 为 `missing-api-key`；请求超时、响应不合规、结果越界或模型返回了非衣橱单品等其他失败则保留各自的稳定原因（`request-failed`、`response-invalid`、`result-invalid`、`duplicate-item-ids`、`foreign-item-ids`、`same-category`）。
+- 每次生成都会持久化审计元数据：合法 LLM 结果保存真实 provider 元数据（provider call ID、模型名、prompt 版本与三类 token），规则降级只保存稳定的枚举式 fallback 原因，不保存异常原文。API 通过嵌套 `generationAudit` 返回这些字段，`engine` 仍保留在顶层。旧历史与降级路径保持为空，不伪造模型元数据。
 - BAILIAN_VISION_ENABLED 默认为 false。即使服务端已启用，仍需用户在每次上传时明确勾选 AI 识别；未同意、未启用或识别失败时，系统不会调用或不会采纳视觉模型结果，并要求人工确认不完整信息。
 - “风潮”仅在 `TREND_JSON_URL` 返回符合严格契约的授权数据时标记 `demoMode=false`；未配置、请求失败或数据不合规时回退到明确标注的三条开发样本，不代表实时平台热度。
 - 个人数据接口要求 Spring Security Session 认证，服务端从认证上下文取得用户身份；客户端自定义用户请求头不会改变身份。
-- 衣橱、推荐历史、反馈和个人风格档案均保存在 PostgreSQL 中。
+- 衣橱、推荐历史、反馈和个人风格档案均保存在 PostgreSQL 中。推荐历史接口按页返回，默认每页 20 条、最大 50 条；图片删除在数据库事务内写入清理任务，由后台调度器异步重试 MinIO 清理，避免对象存储瞬时故障阻塞业务删除。
 
 ## 数据库迁移
 
-数据库结构由 Flyway 管理，运行时 SQL 初始化已关闭。当前基线迁移为 `backend/src/main/resources/db/migration/V1__baseline_schema.sql`：新数据库直接执行 V1；已有表但没有 Flyway 历史的旧数据库会先以版本 0 建立基线，再执行 V1。V1 使用兼容旧结构的建表、补列和建索引语句，迁移测试覆盖了保留既有衣物数据和重复启动不重复执行。
+数据库结构由 Flyway 管理，运行时 SQL 初始化已关闭。V1 是兼容旧结构的基线迁移，V2 增加图片清理任务表，V3 为推荐增加审计元数据列：新数据库依次执行 V1、V2、V3；已有表但没有 Flyway 历史的旧数据库会先以版本 0 建立基线，再依次执行。迁移测试覆盖既有衣物数据保留、V2/V3 升级（旧推荐行保留且审计列为空）和重复启动不重复执行。
 
 `baseline-on-migrate=true` 只用于接管本项目旧数据库，`clean-disabled=true` 禁止 Flyway 清库。已执行的迁移文件不应修改；后续结构变化应新增 V2、V3 等迁移。迁移不能替代备份，升级包含重要数据的环境前仍应先备份 PostgreSQL。
 
@@ -160,6 +161,7 @@ mvn spring-boot:run
 | MINIO_ROOT_USER / MINIO_ROOT_PASSWORD | fashion_minio_admin / fashion_2404 | MinIO 管理账号 |
 | MINIO_BUCKET | garments-private | 私有图片桶名称 |
 | MINIO_MAX_FILE_SIZE | 10485760 | 最大图片大小，单位为字节 |
+| MINIO_CLEANUP_INTERVAL | 60s | 已删除图片对象的后台清理重试间隔 |
 
 应用和模型变量：
 
@@ -169,7 +171,8 @@ mvn spring-boot:run
 | AUTH_REGISTRATION_ENABLED | true | 是否允许创建本地账号 |
 | SESSION_TIMEOUT | 30m | 服务端 Session 有效期 |
 | SESSION_COOKIE_SECURE | false | HTTPS 部署时应设置为 true |
-| DASHSCOPE_API_KEY | 空 | 百炼 API Key；为空时使用规则推荐 |
+| DASHSCOPE_API_KEY | 空 | 百炼 API Key；还需显式开启 BAILIAN_ENABLED 才会调用推荐模型 |
+| BAILIAN_ENABLED | false | 是否启用文本推荐大模型（默认关闭，避免自动化测试产生付费调用） |
 | BAILIAN_MODEL | qwen-plus | 文本推荐模型 |
 | BAILIAN_VISION_ENABLED | false | 是否启用图片视觉识别 |
 | BAILIAN_VISION_MODEL | qwen-vl-plus | 视觉识别模型 |
@@ -179,6 +182,8 @@ mvn spring-boot:run
 授权趋势源变量：`TREND_JSON_URL`、`TREND_PLATFORM`、`TREND_CONNECT_TIMEOUT`、`TREND_READ_TIMEOUT`、`TREND_CACHE_TTL`。`TREND_JSON_URL` 为空时使用开发样本。数据源必须返回只含 `items` 的 JSON 对象；每条记录必须且只能包含 `id`、`platform`、`title`、`topicTags`、`heatScore`、`publishedAt`、`sourceUrl`、`imageUrl`。条目数为 1-50，热度为 0-100 整数，时间为 ISO-8601，链接为 HTTP(S)，`imageUrl` 可为 `null`。任一约束失败时整批拒绝并降级，不会把部分脏数据标记为实时趋势。
 
 天气变量：WEATHER_PRIMARY_BASE_URL、WEATHER_FALLBACK_GEOCODING_BASE_URL、WEATHER_FALLBACK_FORECAST_BASE_URL、WEATHER_CONNECT_TIMEOUT、WEATHER_READ_TIMEOUT、WEATHER_CACHE_TTL、WEATHER_CACHE_MAX_SIZE。默认使用 wttr.in，失败后回退到 Open-Meteo，并在进程内缓存天气结果。
+
+离线答辩演示（默认关闭）：WEATHER_CONFIGURED_DEMO_ENABLED 默认 `false`，仅当两个真实天气 provider 都失败且请求城市与 WEATHER_CONFIGURED_CITY 一致时，才返回静态快照，`source` 为 `configured-demo`，前端明确标注“配置演示天气/非实时”。这是静态演示数据，不是实时天气，绝不能冒充实时天气；启用时需在 `.env` 显式填全 WEATHER_CONFIGURED_CITY、WEATHER_CONFIGURED_TEMPERATURE_C、WEATHER_CONFIGURED_APPARENT_TEMPERATURE_C、WEATHER_CONFIGURED_PRECIPITATION_MM、WEATHER_CONFIGURED_WEATHER_CODE、WEATHER_CONFIGURED_WIND_SPEED_KMH，任一字段缺失、非有限、温度不合理或降水风速为负都会导致应用启动失败（fail-fast）。城市未找到（NOT_FOUND）不会被静态快照掩盖，仍返回 404。
 
 直接运行后端时还可以使用 SERVER_PORT、CORS_ALLOWED_ORIGINS、SPRING_DATASOURCE_URL、SPRING_DATASOURCE_USERNAME、SPRING_DATASOURCE_PASSWORD、MINIO_ENDPOINT 覆盖 application.yml 中的默认配置。
 
@@ -225,6 +230,17 @@ git diff --check
 git status --short
 ~~~
 
+## 研究评估（离线、可复现）
+
+推荐结果输入边界与规则引擎的评估协议默认离线运行，只读取本地文件并计算，不联网、不调用百炼或任何模型 API：
+
+~~~powershell
+python scripts/evaluation/evaluate_recommendations.py
+python -m unittest discover -s scripts/evaluation -p "test_*.py"
+~~~
+
+指标定义、数据集格式、输入边界、固定 seed 与对抗性用例见 [推荐评估协议](docs/evaluation-protocol.md)。仓库内的 `fixture_wardrobe.json` 仅为演示 fixture，不作为实验结论。
+
 ## 常见问题
 
 ### 页面能打开，但推荐失败
@@ -237,7 +253,7 @@ git status --short
 
 ### 没有百炼 API Key 是否无法使用
 
-不会。推荐会使用开发期规则引擎；只有需要真实文本推荐或视觉识别时才需要配置 DASHSCOPE_API_KEY。视觉识别另外受 BAILIAN_VISION_ENABLED 控制。
+不会。推荐会使用开发期规则引擎；只有需要真实文本推荐或视觉识别时才需要配置 DASHSCOPE_API_KEY，并且文本推荐还需另外显式设置 `BAILIAN_ENABLED=true`。视觉识别另外受 BAILIAN_VISION_ENABLED 控制。
 
 ### 端口被占用
 

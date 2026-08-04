@@ -10,6 +10,7 @@ import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
@@ -19,16 +20,19 @@ public class WardrobeService {
     private final WardrobeRepository wardrobeRepository;
     private final ImageStorage imageStorage;
     private final GarmentRecognitionService recognitionService;
+    private final ImageCleanupRepository imageCleanupRepository;
     private final long maxFileSize;
 
     public WardrobeService(
             WardrobeRepository wardrobeRepository,
             ImageStorage imageStorage,
             GarmentRecognitionService recognitionService,
+            ImageCleanupRepository imageCleanupRepository,
             @Value("${app.storage.max-file-size:10485760}") long maxFileSize) {
         this.wardrobeRepository = wardrobeRepository;
         this.imageStorage = imageStorage;
         this.recognitionService = recognitionService;
+        this.imageCleanupRepository = imageCleanupRepository;
         this.maxFileSize = maxFileSize;
     }
 
@@ -97,14 +101,15 @@ public class WardrobeService {
         return imageStorage.read(item.imageObjectKey());
     }
 
+    @Transactional
     public void delete(String userId, Long itemId) {
         WardrobeItem item = wardrobeRepository.findByIdForUser(itemId, userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "衣物不存在或不属于当前用户"));
-        if (item.imageObjectKey() != null) {
-            imageStorage.delete(item.imageObjectKey());
-        }
         if (!wardrobeRepository.delete(itemId, userId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "衣物不存在或不属于当前用户");
+        }
+        if (item.imageObjectKey() != null) {
+            imageCleanupRepository.enqueue(item.imageObjectKey());
         }
     }
 

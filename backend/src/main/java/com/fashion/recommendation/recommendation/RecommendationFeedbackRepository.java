@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Collections;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -68,5 +69,28 @@ public class RecommendationFeedbackRepository {
                         recommendationId, userId)
                 .stream()
                 .findFirst();
+    }
+
+    public Map<Long, RecommendationFeedback> findByRecommendationIds(String userId, java.util.List<Long> recommendationIds) {
+        Map<Long, RecommendationFeedback> feedback = new LinkedHashMap<>();
+        if (recommendationIds.isEmpty()) {
+            return feedback;
+        }
+        String placeholders = String.join(",", Collections.nCopies(recommendationIds.size(), "?"));
+        java.util.List<Object> parameters = new java.util.ArrayList<>();
+        parameters.add(userId);
+        parameters.addAll(recommendationIds);
+        jdbcTemplate.query(
+                "SELECT recommendation_id, rating, feedback_type, comment, updated_at FROM recommendation_feedback "
+                        + "WHERE user_id = ? AND recommendation_id IN (" + placeholders + ")",
+                (org.springframework.jdbc.core.RowCallbackHandler) rs -> feedback.put(
+                        rs.getLong("recommendation_id"),
+                        new RecommendationFeedback(
+                                rs.getInt("rating"),
+                                rs.getString("feedback_type"),
+                                rs.getString("comment"),
+                                rs.getTimestamp("updated_at").toInstant())),
+                parameters.toArray());
+        return feedback;
     }
 }
