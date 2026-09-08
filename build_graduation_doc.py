@@ -245,7 +245,7 @@ def build():
         ("1.2.3 智能搭配推荐","用户输入城市、出行场合和可选风格要求后，系统读取天气与个人衣橱，使用规则先过滤明显不适配组合，再请求大语言模型生成结构化方案。结果包括推荐单品、推荐理由和摘要；模型结果必须通过字段、数量、所属衣橱和类别多样性校验，失败时回退到明确标记的规则引擎。"),
         ("1.2.4 搭配收藏与反馈","用户可收藏方案、提交满意度评分与简短反馈，并查看带分页的历史推荐。反馈用于调整后续排序，不直接把用户原始文本作为模型长期训练数据。"),
         ("1.2.5 风潮趋势聚合","风潮页面优先展示已配置的授权 JSON 趋势源，页面区分“全局风潮”与“我的风格”两个区域。全局风潮只聚合标题或话题、热度、原始链接和采集时间；后端仅通过配置的授权数据源获取信息，不绕过登录、验证码、访问限制或反爬措施。未配置或数据不合规时返回明确标注的开发样本，不冒充实时平台热度。"),
-        ("1.2.6 个人风格分析","用户完成基础信息、风格偏好、色彩倾向和衣橱标签后，系统调用阿里云百炼平台的通义千问 API 生成结构化个人风格档案。档案包含推荐风格、可尝试风格、适配颜色、推荐单品和简短理由；风潮页面读取该档案并与全局趋势分区展示，不将全局热度直接视为个人偏好。")]:
+        ("1.2.6 个人风格分析","用户完成基础信息、风格偏好、色彩倾向和衣橱标签后，系统使用当前已实现的确定性 development fallback 生成并持久化结构化个人风格档案。档案包含推荐风格、可尝试风格、适配颜色、推荐单品和简短理由；风潮页面读取该档案并与全局趋势分区展示，不将全局热度直接视为个人偏好。百炼风格分析属于后续生产化扩展，不作为当前已实现能力。")]:
         heading(doc,title,3); text(doc,body)
     heading(doc,"1.3 项目风险分析",2)
     text(doc,"项目风险主要集中在模型输出不稳定、衣物标签质量、第三方模型接口可用性以及个人信息保护。系统采用“结构化输出约束 + 业务规则二次校验 + 降级提示”的方式控制风险。")
@@ -319,7 +319,7 @@ def build():
     heading(doc,"3.2.5 档案页面",3); text(doc,"档案页展示已保存的搭配方案，支持按时间和场景筛选，并允许复用场景重新生成。页面不展示模型内部思维链，只展示面向用户的简短理由与规则命中说明。")
     heading(doc,"3.2.6 设定页面",3); text(doc,"设定页用于维护偏好、常用场景和隐私选项；用户可管理收藏反馈，并随时删除自己的反馈数据。")
     heading(doc,"3.2.7 风潮趋势页面",3)
-    text(doc,"风潮页面分为“全局风潮”和“我的风格”两个区域。全局风潮优先展示已配置的授权 JSON 趋势源，按来源平台和主题标签展示趋势卡片，卡片包括标题或话题、热度、来源、发布时间或采集时间和原文跳转链接；页面必须标注“聚合自公开来源”，不复制受限全文、不展示个人账号资料，也不将其他平台内容伪装为本站原创。我的风格区域读取已保存的 LLM 风格档案，展示当前推荐风格、推荐搭配、建议单品、颜色搭配和可尝试风格。趋势源不可用或数据不合规时，返回明确标注的开发样本，不把内置样本冒充实时平台数据。")
+    text(doc,"风潮页面分为“全局风潮”和“我的风格”两个区域。全局风潮优先展示已配置的授权 JSON 趋势源，按来源平台和主题标签展示趋势卡片，卡片包括标题或话题、热度、来源、发布时间或采集时间和原文跳转链接；页面必须标注“聚合自公开来源”，不复制受限全文、不展示个人账号资料，也不将其他平台内容伪装为本站原创。我的风格区域读取已保存的本地确定性风格档案，展示当前推荐风格、推荐搭配、建议单品、颜色搭配和可尝试风格。趋势源不可用或数据不合规时，返回明确标注的开发样本，不把内置样本冒充实时平台数据。")
     heading(doc,"3.3 类设计",2)
     text(doc,"后端按控制层、应用服务层、领域对象与基础设施层分离。RecommendationService 负责协调场景解析、天气读取、候选检索、规则校验和模型调用；WardrobeService 只负责衣物业务；LlmRecommendationClient 隔离具体模型供应商差异。这样的划分避免让控制器承担业务流程，也使模型服务可替换。")
     heading(doc,"3.3.1 衣橱管理业务类设计",3)
@@ -343,7 +343,7 @@ def build():
     text(doc,"有效实时源经过页面筛选后即使结果为空，仍保持 demoMode=false，避免把“没有匹配项”误报为数据源故障。项目不会在没有授权时抓取第三方平台或编造实时热度。采集日志只记录来源、时间、HTTP 状态和条数，不记录用户个人资料或完整正文。")
     heading(doc,"3.3.5 个人风格档案设计",3)
     text(doc,"PersonalStyleProfileService 在用户首次完善基础信息或主动刷新时调用百炼通义千问 API。输入仅包含用户主动填写的风格偏好、色彩倾向、常用场合、预算敏感度和手动衣橱标签；输出必须满足 StyleProfileSchema，包含 styleTags、tryStyleTags、colorSuggestions、itemSuggestions 和 reasonSummary。模型不得编造用户未提供的体型、身份或消费能力，也不得将风潮热度当作用户偏好。")
-    text(doc,"用户资料和衣橱标签变化后，将 sourceProfileHash 与已保存档案比对；不一致时标记档案过期。页面读取已保存档案，不在每次进入风潮页时调用模型。模型调用超时或返回非法 JSON 时保留上一份有效档案并标记 styleProfileStale=true；首次生成失败则返回可理解的补充信息提示。")
+    text(doc,"当前实现把用户资料和偏好列表归一化后生成确定性档案并保存，页面读取已保存档案，不在每次进入风潮页时调用模型。档案状态来自服务端保存结果；未来接入外部模型时，才需要增加 sourceProfileHash、超时、非法 JSON、旧档案保留和 stale 标记等治理逻辑。")
     heading(doc,"3.3.6 全系统后端代码包图",3)
     text(doc,"系统代码包以 Controller 接收 HTTP 请求，Service 承担业务编排，Repository 访问 PostgreSQL，recognition/recommendation 包封装模型能力，security 包维护认证授权。包之间通过接口和 DTO 传递数据，避免前端对象直接映射数据库实体。")
     heading(doc,"3.4 顺序图设计",2)
@@ -362,7 +362,7 @@ def build():
     text(doc,"接口遵循 REST 风格，统一前缀为 /api/v1，使用 HTTPS 传输。成功响应返回 code、message 和 data；业务异常使用可枚举错误码；文件上传接口限制 MIME 类型、尺寸和鉴权。")
     caption(doc,"表3.7 核心接口描述")
     add_table(doc,["接口","方法","地址","关键入参","说明"],[
-        ["登录","POST","/api/v1/auth/login","username, password","表单登录，创建服务端 Session。"],["注册","POST","/api/v1/auth/register","username, password","创建本地账号并返回用户信息。"],["新增衣物","POST","/api/v1/me/wardrobe","name, category, color","保存用户衣物及标签。"],["上传衣物图片","POST","/api/v1/me/wardrobe/upload","image, allowAiRecognition","multipart 上传图片到 MinIO 私有桶。"],["查询衣橱","GET","/api/v1/me/wardrobe","无","仅返回当前用户数据。"],["查询天气","GET","/api/v1/weather/current","city","后端调用 wttr.in/Open-Meteo，返回 WeatherSnapshot。"],["查询风潮","GET","/api/v1/trends","platform, topic","返回授权趋势源或明确标注的开发样本。"],["查询个人风格","GET","/api/v1/me/style-profile","无","返回已保存的风格档案及是否过期。"],["刷新个人风格","POST","/api/v1/me/style-profile/refresh","无","调用百炼 API 生成新档案。"],["生成推荐","POST","/api/v1/recommendations","occasion, city, styleHint","生成并保存结构化方案。"],["保存推荐","POST","/api/v1/me/recommendations/{id}/save","无","把推荐标记为已收藏。"],["提交反馈","POST","/api/v1/me/recommendations/{id}/feedback","rating, comment","保存个人反馈。"],["查询历史","GET","/api/v1/me/recommendations","page, size","分页返回当前用户推荐历史。"]],[2.4,1.5,3.4,4.3,3.8])
+        ["登录","POST","/api/v1/auth/login","username, password","表单登录，创建服务端 Session。"],["注册","POST","/api/v1/auth/register","username, password","创建本地账号并返回用户信息。"],["新增衣物","POST","/api/v1/me/wardrobe","name, category, color","保存用户衣物及标签。"],["上传衣物图片","POST","/api/v1/me/wardrobe/upload","image, allowAiRecognition","multipart 上传图片到 MinIO 私有桶。"],["查询衣橱","GET","/api/v1/me/wardrobe","无","仅返回当前用户数据。"],["查询天气","GET","/api/v1/weather/current","city","后端调用 wttr.in/Open-Meteo，返回 WeatherSnapshot。"],["查询风潮","GET","/api/v1/trends","platform, topic","返回授权趋势源或明确标注的开发样本。"],["查询个人风格","GET","/api/v1/me/style-profile","无","返回已保存的确定性风格档案及状态。"],["刷新个人风格","POST","/api/v1/me/style-profile/refresh","无","按用户输入重新生成并保存本地 development fallback 档案。"],["生成推荐","POST","/api/v1/recommendations","occasion, city, styleHint","生成并保存结构化方案。"],["保存推荐","POST","/api/v1/me/recommendations/{id}/save","无","把推荐标记为已收藏。"],["提交反馈","POST","/api/v1/me/recommendations/{id}/feedback","rating, comment","保存个人反馈。"],["查询历史","GET","/api/v1/me/recommendations","page, size","分页返回当前用户推荐历史。"]],[2.4,1.5,3.4,4.3,3.8])
     heading(doc,"3.5.1 用户登录与注册模块",3)
     text(doc,"登录接口为 POST /api/v1/auth/login（Spring Security 表单登录），注册接口为 POST /api/v1/auth/register（JSON）。密码只可通过 HTTPS 传输，响应中不得返回 passwordHash。认证状态保存在服务端 Session，浏览器只持有 HttpOnly Cookie；写请求先取得 GET /api/v1/auth/csrf 的 CSRF Token 再随请求头发送。")
     heading(doc,"3.5.2 我的衣橱管理模块",3)
@@ -374,19 +374,19 @@ def build():
     heading(doc,"3.5.5 风潮趋势模块",3)
     text(doc,"趋势查询接口为 GET /api/v1/trends?platform={platform}&topic={topic}。响应项包含 platform、title、topicTags、heatScore、publishedAt、fetchedAt、sourceUrl 和 demoMode，不返回受限全文或个人资料。platform 仅接受已配置来源；未配置、请求失败或数据不合规时返回明确标注的开发样本并设置 demoMode=true，不触发临时抓取，避免用户请求放大对第三方的访问压力。")
     heading(doc,"3.5.6 个人风格档案模块",3)
-    text(doc,"GET /api/v1/me/style-profile 返回当前登录用户的已保存档案；POST /api/v1/me/style-profile/refresh 仅在用户主动触发时调用百炼 API。响应包含 styleTags、tryStyleTags、colorSuggestions、itemSuggestions、reasonSummary、generatedAt 和 stale。用户资料不完整时返回 422 和 STYLE_PROFILE_INCOMPLETE；百炼服务异常时首次生成返回 503，已有有效档案则返回 200 且 stale=true。")
+    text(doc,"GET /api/v1/me/style-profile 返回当前登录用户的已保存档案；POST /api/v1/me/style-profile/refresh 按用户输入重新生成并保存确定性 development fallback。响应包含 styleTags、tryStyleTags、colorSuggestions、itemSuggestions、reasonSummary、generatedAt 和 stale；当前 stale 固定为 false，未接入外部风格模型。")
     heading(doc,"3.6 项目测试",2)
-    text(doc,"测试围绕真实业务约束设计，全部为仓库内自动化测试的真实执行结果：后端 Maven 测试 61 项全部通过，前端 Playwright E2E 4 项通过。测试覆盖认证、跨用户隔离、CSRF、Flyway 迁移、LLM 结果校验与降级、推荐审计、图片删除清理、历史分页、输入长度、天气与离线天气降级、趋势源校验等边界。")
+    text(doc,"测试围绕真实业务约束设计，覆盖认证、跨用户隔离、CSRF、Flyway 迁移、LLM 结果校验与降级、推荐审计、图片删除清理、历史分页、输入长度、天气与离线天气降级、趋势源校验等边界。测试结论必须以当前执行记录为准：本轮主机回归已验证后端 Maven 测试与离线评估；Docker 未运行，因此前端 Playwright E2E 本轮标记为未执行，不把历史结果冒充为当前证据。")
     heading(doc,"3.6.1 后端自动化测试",3)
     caption(doc,"表3.8 后端测试结果（mvn test）")
     add_table(doc,["测试类","覆盖要点","测试数","结果"],[
         ["AuthenticationIntegrationTest","未认证 401、登录/退出会话、CSRF","2","通过"],["FlywayMigrationTest","旧库 baseline 升级、V2/V3 迁移、重复执行幂等","2","通过"],["BailianGarmentRecognitionServiceTest","识别结果解析与授权","1","通过"],["BailianRecommendationClientTest","JSON 解析、usage 解析、负 token 反例","12","通过"],["RecommendationControllerTest","推荐闭环、fallback、跨用户 404、分页、输入长度","19","通过"],["ConfiguredJsonTrendSourceAdapterTest","授权源整批校验、缓存","5","通过"],["TrendServiceTest","实时源优先、开发样本降级","2","通过"],["TrendControllerTest","趋势接口契约","1","通过"],["ImageCleanupSchedulerTest","删除任务调度与重试","2","通过"],["WeatherServiceTest","provider 降级、离线天气、配置校验","15","通过"]],[2.6,4.6,1.6,1.6])
-    text(doc,"合计 61 项测试，0 失败、0 错误、0 跳过。",False)
+    text(doc,"后端测试数量与结果以本轮 Surefire 报告为准；本轮执行记录为 62 项测试，0 失败、0 错误、0 跳过。若代码修复新增测试，应重新生成本文档后更新该数字。",False)
     heading(doc,"3.6.2 前端 E2E 测试",3)
     caption(doc,"表3.9 前端 E2E 测试结果（npm run test:e2e）")
     add_table(doc,["E2E 用例","覆盖要点","结果"],[
-        ["添加衣物、生成推荐、保存、提交反馈","注册登录 -> 新增衣物 -> 生成推荐 -> 收藏 -> 反馈持久化复核","通过"],["未认证拒绝与会话清理","匿名访问个人接口 401；退出后清空会话","通过"],["无 AI 同意上传","未勾选识别时上传并补齐必填字段","通过"],["移动端视口","390x844 布局，登录、导航、上传弹窗不溢出","通过"]],[4.2,8.2,1.6])
-    text(doc,"E2E 使用独立测试用户，通过真实页面完成闭环，并从后端历史接口复核 saved=true。",False)
+        ["添加衣物、生成推荐、保存、提交反馈","注册登录 -> 新增衣物 -> 生成推荐 -> 收藏 -> 反馈持久化复核","本轮未执行"],["未认证拒绝与会话清理","匿名访问个人接口 401；退出后清空会话","本轮未执行"],["无 AI 同意上传","未勾选识别时上传并补齐必填字段","本轮未执行"],["移动端视口","390x844 布局，登录、导航、上传弹窗不溢出","本轮未执行"]],[4.2,8.2,1.6])
+    text(doc,"本轮因 Docker Desktop 未运行未执行 Playwright；历史记录中曾有 4 项通过，但不作为本轮验收结论。",False)
     heading(doc,"3.6.3 测试覆盖的业务边界",3)
     text(doc,"推荐结果必须来自当前用户衣橱、ID 唯一且类别互异；LLM 结果非法时回退到明确标记的规则引擎，不将规则结果冒充模型结果。每次生成持久化审计元数据：合法 LLM 结果保存真实 provider 元数据（provider call ID、模型名、prompt 版本与三类 token），规则降级只保存稳定的枚举式 fallback 原因。图片删除采用事务内写清理任务、后台调度器重试的方式，避免删除记录与对象存储不一致。离线天气演示默认关闭，仅在两个真实 provider 都失败且城市匹配配置城市时返回静态快照，不冒充实时天气。")
     heading(doc,"4 设计总结",1)
@@ -397,7 +397,7 @@ def build():
     bullet(doc,"创建 MinIO 私有桶 garments-private，并配置仅由后端访问。")
     heading(doc,"4.1.2 部署应用并启动服务",3)
     bullet(doc,"在服务器目录中配置 .env：POSTGRES_DB、POSTGRES_USER、POSTGRES_PASSWORD、MINIO_ROOT_USER、MINIO_ROOT_PASSWORD、DASHSCOPE_API_KEY、BAILIAN_MODEL、SESSION_COOKIE_SECURE 等。wttr.in 与 Open-Meteo 默认调用不需要 WEATHER_API_KEY；如需替换天气服务，只新增 WEATHER_PRIMARY_BASE_URL 等配置，不改动推荐业务类。趋势源通过 TREND_JSON_URL 配置授权 JSON 地址，禁止配置用户账号、密码或绕过访问限制的参数。")
-    bullet(doc,"执行 docker compose --profile app up --build -d，检查 frontend、backend、postgres、minio 容器均为 healthy。")
+    bullet(doc,"执行 docker compose --profile app up --build -d，检查 postgres、minio 的健康检查与 backend 的 /actuator/health；frontend 通过 HTTP 页面和 API 代理可访问性验证。Compose 未为 frontend/backend 声明 healthcheck，不应把它们写成 healthy。")
     bullet(doc,"访问 /actuator/health 验证后端健康状态；未配置 LLM Key 时推荐接口明确使用规则引擎并返回 engine=development-rule-v1。")
     heading(doc,"4.1.3 访问程序",3)
     text(doc,"在可访问服务器的浏览器中打开 https://{domain}/。首次使用时注册账号，上传至少三件已标注衣物，再进入“开始搭配”提交场景。正式部署必须启用 HTTPS、反向代理限流和数据库定期备份。")

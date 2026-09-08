@@ -274,6 +274,21 @@ class WeatherServiceTest {
         assertFalse(snapshot.enabled());
     }
 
+    @Test
+    void primaryNotFoundIsNotMaskedByConfiguredDemoWhenFallbackFails() {
+        weatherService = enabledConfiguredDemoWeatherService("长沙", 25.0);
+        wttrServer.expect(once(), requestTo(startsWith("https://wttr.test/")))
+                .andRespond(withResourceNotFound());
+        geocodingServer.expect(once(), requestTo(startsWith("https://geocoding.test/v1/search")))
+                .andRespond(withServiceUnavailable());
+
+        ResponseStatusException failure = assertThrows(
+                ResponseStatusException.class, () -> weatherService.current("长沙"));
+
+        assertEquals(HttpStatus.NOT_FOUND, failure.getStatusCode());
+        assertEquals("未找到该城市的实时天气", failure.getReason());
+    }
+
     private WeatherService enabledConfiguredDemoWeatherService(String city, double temperatureC) {
         return new WeatherService(primaryClient, fallbackClient, cache, meterRegistry,
                 ConfiguredWeatherSnapshot.from(true, city, temperatureC, 27.0, 0.0, 1, 8.0));

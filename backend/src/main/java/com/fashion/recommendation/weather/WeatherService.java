@@ -91,25 +91,27 @@ public class WeatherService {
         } catch (WeatherProviderException primaryFailure) {
             log.warn("Primary weather provider failed; using fallback, provider={}, outcome={}",
                     WttrWeatherClient.PROVIDER, primaryFailure.outcome().metricValue());
-        }
-
-        try {
-            WeatherSnapshot result = observeProvider(OpenMeteoWeatherClient.PROVIDER, () -> fallbackClient.current(city));
-            meterRegistry.counter(FALLBACKS, "outcome", "success").increment();
-            return result;
-        } catch (WeatherProviderException fallbackFailure) {
-            meterRegistry.counter(FALLBACKS, "outcome", "failure").increment();
-            log.warn("Fallback weather provider failed, provider={}, outcome={}",
-                    OpenMeteoWeatherClient.PROVIDER, fallbackFailure.outcome().metricValue());
-            if (fallbackFailure.outcome() == WeatherProviderException.Outcome.NOT_FOUND) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "未找到该城市的实时天气");
+            try {
+                WeatherSnapshot result = observeProvider(OpenMeteoWeatherClient.PROVIDER, () -> fallbackClient.current(city));
+                meterRegistry.counter(FALLBACKS, "outcome", "success").increment();
+                return result;
+            } catch (WeatherProviderException fallbackFailure) {
+                meterRegistry.counter(FALLBACKS, "outcome", "failure").increment();
+                log.warn("Fallback weather provider failed, provider={}, outcome={}",
+                        OpenMeteoWeatherClient.PROVIDER, fallbackFailure.outcome().metricValue());
+                if (fallbackFailure.outcome() == WeatherProviderException.Outcome.NOT_FOUND) {
+                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "未找到该城市的实时天气");
+                }
+                if (primaryFailure.outcome() == WeatherProviderException.Outcome.NOT_FOUND) {
+                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "未找到该城市的实时天气");
+                }
+                if (configuredWeather.enabled() && configuredWeather.matches(city)) {
+                    log.warn("Both weather providers failed; serving configured demo weather for city={}, source=configured-demo",
+                            city);
+                    return configuredWeather.toSnapshot();
+                }
+                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "天气服务暂时不可用，请稍后重试");
             }
-            if (configuredWeather.enabled() && configuredWeather.matches(city)) {
-                log.warn("Both weather providers failed; serving configured demo weather for city={}, source=configured-demo",
-                        city);
-                return configuredWeather.toSnapshot();
-            }
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "天气服务暂时不可用，请稍后重试");
         }
     }
 

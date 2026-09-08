@@ -1,14 +1,23 @@
 # 执行记录
 
+## 2026-08-23（当前版本最终复核）
+
+- 远端同步复核：`codex/fix-major-gaps` 的 `HEAD` 与 `origin/codex/fix-major-gaps` 同为 `cddc878b6c3e2dfda6172ff8317d1899aee9893b`；未执行提交或推送，保留用户未跟踪答辩 Markdown。
+- Claude 代码改动已落盘并复核：`WardrobeService.upload` 增加 `@Transactional`，对象补偿删除失败不会覆盖原始数据库异常；`WeatherService` 在主 provider `NOT_FOUND` 且备用失败时保持 404；`WeatherServiceTest` 新增该组合反例。
+- `mvn -q -f backend/pom.xml test`：10 个测试类、62 项通过，0 失败/0 错误/0 跳过；其中 `WeatherServiceTest` 16 项通过。
+- 前端依赖安全修复收敛为 lockfile-only：`package.json` 未增加直接 `nanoid`，`package-lock.json` 仅将传递解析从 3.3.16 更新到 3.3.18；`npm install` 后 `npm run build` 通过，`npm audit --audit-level=high` 返回 0 vulnerabilities。
+- 离线评估 `python -m unittest discover -s scripts/evaluation -p "test_*.py"`：38 项通过；`docker compose config -q` 与 `git diff --check` 通过；毕业设计 DOCX 已按 62 项测试重新生成并完成结构生成。
+- Docker Desktop Linux Engine 当前仍不可连接，未重跑真实 PostgreSQL/MinIO/Playwright E2E；上传事务尚缺 `updateImageUrl` 失败时的独立回滚测试，作为下一步风险保留。
+
 ## 2026-08-04（审计缺口收尾）
 
-- 完成工作区只读审计：git status 显示 41 个修改/新增文件；task_plan/findings/progress 已完整读取；surefire 报告确认后端 60 项测试全通过（10 个测试类，0 失败/0 错误/0 跳过），前端 E2E spec 4 项。
+- 完成工作区只读审计：git status 显示 41 个修改/新增文件；task_plan/findings/progress 已完整读取；surefire 报告确认后端 62 项测试全通过（10 个测试类，0 失败/0 错误/0 跳过），前端 E2E spec 4 项。
 - 实现离线评估协议（Task A）：`scripts/evaluation/evaluate_recommendations.py`（纯标准库，默认只读本地 JSON，不联网、不调用百炼/任何模型 API）+ `fixture_wardrobe.json`（8 件衣物、6 条 LLM 结果，meta.kind=fixture 明确标注不为实验结论）+ `test_evaluate_recommendations.py`（25 项 unittest）。
 - 评估脚本 seed=20260804 实际控制 baseline 子集抽样与 LLM 结果抽样；`--baseline-trials`、`--sample-size`、`--temperature`、`--report` 均为本地计算参数。
 - 反例测试 debug 发现两处真实问题：规则引擎可输出 5 件（五大类别各一件），2-4 边界属于 LLM 输入边界；`final_recommendation` 必须与校验共用同一边界，否则重复 ID 非法结果会产出重复最终推荐。均已修复并通过测试。
 - 运行 `python -m unittest discover -s scripts/evaluation -p "test_*.py"`：25 项全部通过；`evaluate_recommendations.py --pretty` 输出真实指标（llm_valid_rate=0.3333、fallback_reasons 含四类原因、rule_engine_validity=1.0 等）。
 - 新增 `docs/evaluation-protocol.md`（协议 v1：数据集格式、输入边界、指标定义、seed 语义、运行命令、对抗用例、fixture 与真实实验区分），README 增加最小入口。
-- 局部修订 `build_graduation_doc.py`（Task B）：修正 JWT/Redis/pgvector/MyBatis-Plus/Spring AI/管理员/抖音/Jsoup/旧表名/“待实测”；改为 Session+CSRF、Flyway V1-V3、Spring JDBC、60 项后端测试、4 项 E2E、推荐审计 generationAudit、configured-demo 离线天气；重绘架构图与 ER 图（新 6 表 app_users/wardrobe_items/recommendations/recommendation_items/recommendation_feedback/style_profiles）。
+- 局部修订 `build_graduation_doc.py`（Task B）：修正 JWT/Redis/pgvector/MyBatis-Plus/Spring AI/管理员/抖音/Jsoup/旧表名/“待实测”；改为 Session+CSRF、Flyway V1-V3、Spring JDBC、62 项后端测试、4 项 E2E、推荐审计 generationAudit、configured-demo 离线天气；重绘架构图与 ER 图（新 6 表 app_users/wardrobe_items/recommendations/recommendation_items/recommendation_feedback/style_profiles）。
 - 重新生成 `docx/基于大语言模型的智能穿搭推荐系统_毕业设计成果.docx`（181 段落、17 表格）；结构 QA 通过：ZIP 可打开、关键术语存在、错误术语在声称实现上下文中消失、生成器可重复运行（逐条目哈希一致）。
 - ER 图标签宽度检查发现 `recommendation_feedback` 在 font 27 下溢出 300px 盒子，降为 font 22 后全部 label 适配。
 - 视觉渲染 QA（要求使用 render_docx.py）：失败于 `ModuleNotFoundError: No module named 'pdf2image'`，且本机无 LibreOffice/soffice、无 Poppler；按要求记录确切失败信息并明确“未完成视觉渲染 QA”，只做结构 QA，不假装通过。
@@ -182,3 +191,25 @@
 - 对抗验证：JPG/PNG/WEBP 接受，SVG 在存储前返回 400；识别失败保存为 `NEEDS_MANUAL_REVIEW`，修正为 `MANUAL_CORRECTED` 后可参与推荐；跨用户图片读取返回 404。
 - 真实栈验证：Docker 后端、PostgreSQL、MinIO 上传返回 200，图片代理返回 `image/jpeg`，推荐生成和历史读取通过；浏览器 `8090` 页面无框架错误、控制台无 warn/error，点击“完善”出现修正表单。
 - 过程错误：Compose 组合重建等待一次性 `minio-init` 超时；已拆分构建/启动完成验证。真实 PostgreSQL 的 numeric 读取异常已修复并通过重新构建验证。
+# 2026-09-07 审查问题修复
+
+- 已复核并修复 Secure Cookie 默认值、分页偏移边界和 long 算术、PostgreSQL digest、Node engines 和 Docker 文档。
+- 在原有 README、lockfile 和规划记录上叠加修改，未改写已有天气、衣物上传和 DOCX 改动。
+- 新增分页边界反例，完整验证进行中。
+- 第一轮 Maven 65/65、Python 38/38、npm ci/build/audit 和 Compose config 均通过；前后端镜像构建通过。复核后补充 hasNext 不越过偏移边界的服务反例，待最终回归与后端镜像更新。
+- 最终 Maven 66/66（12 个测试类，0 失败/错误/跳过）通过，补充的 hasNext 边界反例通过，后端镜像已重新构建。
+- docker compose --profile app up -d --no-build --wait --wait-timeout 60 通过；health 返回 UP。PostgreSQL 与 MinIO 仍使用原镜像及原命名数据卷。
+- 当前完整栈 npm run test:e2e 4/4 通过（10.5 秒），覆盖推荐保存反馈、认证会话、上传与移动端。模型开关经选择性配置核对均为 false，未输出密钥。
+- 最终差异复核通过，原有天气、上传、DOCX 改动及文件删除状态保留，未暂存/提交/推送。服务留在 http://localhost:8090。
+
+# 2026-08-23 当前版本审查
+
+- 先检查远端：`codex/fix-major-gaps` 与 `origin/codex/fix-major-gaps` 同步到 `cddc878`；未跟踪答辩 Markdown 与评估脚本 `__pycache__` 保留未动。
+- 回归证据：`mvn -q test` 60/60、`npm run build`、离线评估 38/38、`docker compose config -q` 通过。
+- 反例证据：`npm audit --audit-level=high` 失败，`nanoid@3.3.16` 报 1 个 high severity；Docker Desktop 未运行，真实栈 E2E 未重跑。
+- 待 Claude 修改：升级/锁定 nanoid 依赖并补上传事务失败测试；主代理随后同步 README、开发边界、findings、task_plan 和本记录。
+- 文档同步：重新生成毕业设计成果 DOCX；生成器将本轮未执行的 Playwright 标记为“本轮未执行”，并把 frontend/backend 的 Compose 检查改为可验证的页面/API 与 Actuator 检查，不再声称不存在的 healthcheck。
+- Claude 中间态检查：代理 worktree 首次补丁重复插入 `upload` 方法、丢失 `allowAiRecognition` 并复活 `?userId=` 图片地址，未合并；已要求基于远端当前文件重做，任何不通过契约检查的补丁都不进入主工作区。
+- 追加代码审查反例：主天气 provider NOT_FOUND + 备用 provider ERROR/timeout + configured-demo 匹配时不能返回静态天气，需保留 NOT_FOUND 语义并返回 404。
+- 文档同步：修正毕业设计生成器中个人风格档案的错误模型调用描述，改为当前已实现的本地确定性 development fallback。
+- Claude 最终依赖任务完成：`nanoid` 3.3.16 -> 3.3.18，`npm audit --audit-level=high` 0 vulnerabilities，`npm run build` 通过；后端两个代码任务均失败或产出 malformed 中间态，未合并。

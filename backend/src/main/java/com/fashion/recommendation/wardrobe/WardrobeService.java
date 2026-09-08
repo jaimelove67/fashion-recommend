@@ -44,6 +44,7 @@ public class WardrobeService {
         return wardrobeRepository.create(userId, request);
     }
 
+    @Transactional
     public WardrobeItem upload(
             String userId,
             MultipartFile image,
@@ -82,7 +83,11 @@ public class WardrobeService {
             wardrobeRepository.updateImageUrl(item.id(), userId, imageUrl);
             return wardrobeRepository.findByIdForUser(item.id(), userId).orElseThrow();
         } catch (RuntimeException exception) {
-            imageStorage.delete(stored.objectKey());
+            try {
+                imageStorage.delete(stored.objectKey());
+            } catch (Exception ignoreDeleteFailure) {
+                // deletion failure does not replace original DB failure
+            }
             throw exception;
         }
     }

@@ -1,5 +1,26 @@
 # 当前发现
 
+## 2026-08-23 最终复核补充
+
+- 当前工作区代码已可编译：上传事务边界和天气 `NOT_FOUND` 降级语义由 Claude CLI 修改，天气组合反例已由 `WeatherServiceTest` 覆盖并通过。
+- 依赖修复已回到最小范围：仅锁文件 `node_modules/nanoid` 解析为 3.3.18，未在 `package.json` 增加直接依赖；构建与 high/critical 审计均通过。
+- Surefire 当前真实总数为 62 项（10 个报告相加），不是历史记录中的 60/61；生成器、进度和当前发现已同步为 62。
+- 剩余可验证缺口只有上传失败事务的独立测试，以及 Docker Desktop 恢复后的完整栈 E2E；不能把历史 E2E 结果写成本轮通过。
+
+## 2026-08-23 当前版本审查
+
+- 仓库同步状态：当前分支 `codex/fix-major-gaps` 的 `HEAD=cddc878b6c3e2dfda6172ff8317d1899aee9893b` 与 `origin/codex/fix-major-gaps` 一致；工作区仍有两个未跟踪项：答辩技术文档 Markdown 与 `scripts/evaluation/__pycache__/`，它们不属于已上传提交。
+- 可复现回归：后端 `mvn -q test` 通过，Surefire 汇总为 62 项测试、0 失败；前端 `npm run build` 通过（Vite 8.1.4，1785 modules）；离线评估测试 38 项通过；`docker compose config -q` 通过。
+- 当前阻断：`frontend` 的 `npm audit --audit-level=high` 报告 `nanoid@3.3.16` 1 个 high severity，路径为 `vite -> postcss -> nanoid`，修复前不能继续声称依赖审计为 0。
+- 依赖修复结果：Claude 将 `nanoid` 显式 pin 到 `^3.3.18`，lockfile 解析为 3.3.18；`npm audit --audit-level=high` 已返回 0 vulnerabilities，前端构建通过。该 pin 是为传递依赖安全修复增加的直接依赖声明，后续可评估改用 npm overrides 以减少 manifest 直接依赖。
+- 当前环境限制：`docker compose ps` 无法连接 `dockerDesktopLinuxEngine`，Docker Desktop 未运行；本轮不能据此宣称真实 PostgreSQL/MinIO/浏览器 E2E 已重跑。
+- 代码反例：`WardrobeService.upload` 先调用对象存储，再分别执行 `wardrobeRepository.create` 与 `updateImageUrl`，方法未声明事务；若第二步失败，catch 会删除对象但数据库记录可能已经提交，形成引用不存在对象的半成品记录。应补事务边界和失败测试。
+- 文档反例：`build_graduation_doc.py` 原先把后端 61 项与 Playwright 4 项写成当前“全部通过”，并要求四类 Compose 容器均为 healthy；本轮 Docker 未运行，且 Compose 只为 PostgreSQL/MinIO 声明 healthcheck，已改为区分“本轮未执行”和历史证据。
+- 天气反例：若 wttr.in 返回 `NOT_FOUND`、Open-Meteo 随后超时/错误，而配置演示天气已启用且城市匹配，`WeatherService` 现有逻辑只检查第二个 provider 的结果，可能错误返回 `configured-demo`；应保留任一 provider 已确认城市不存在的事实并返回 404，补充该组合测试。
+- 文档反例：`build_graduation_doc.py` 原先把个人风格档案描述为“调用百炼 API、失败 stale”，但当前 `PersonalStyleProfileService` 只做本地确定性 development fallback；已改为当前实现，并把外部风格模型列为后续扩展。
+- 代码修复执行结果：Claude 已在 `WardrobeService.upload` 加入事务边界，并让补偿删除失败不覆盖原始异常；Claude 已修复天气主 provider `NOT_FOUND` 与备用错误组合不得降级为 configured-demo。新增天气反例测试已通过；上传失败回滚尚未有独立测试，需在 Docker/测试隔离环境补充。
+- 处理边界：上述依赖与上传一致性由 Claude 子代理修改；本主代理只同步审查文档、规划记录和最终验证，不改写未跟踪的用户答辩 Markdown。
+
 ## 2026-08-04 审计缺口收尾发现
 
 - 推荐审计元数据与 V3 迁移、配置演示天气、Prometheus/pgvector 口径修正均为既有 dirty worktree 变更，已保留未动；surefire 报告（20:13）确认后端 60 项测试全通过，E2E spec 4 项。
@@ -156,6 +177,16 @@
 - `PersonalStyleProfileService` 使用 `ConcurrentHashMap`，重启后数据丢失。
 - `docker-compose.yml` 已经提供 PostgreSQL、Redis、MinIO，但后端尚未配置数据库依赖和表结构。
 - 当前后端只有趋势控制器测试，缺少衣橱和推荐链路测试。
+
+## 2026-09-07 修复决策
+
+- 后端未配置时 Secure Cookie 为 true；本地 Compose/.env.example 与源码启动命令显式使用 false，HTTPS 部署必须覆盖本地默认值。
+- 分页仓储已用 long 计算 OFFSET，但服务层 hasNext 曾先做 int 加法；现在用 long 完成下一页计算，并要求 page * size <= 1,000,000，阻止无界深分页。
+- 固定本地 postgres:16-alpine 已解析的 digest，避免重建时意外切换数据库镜像。完整栈启动已通过，镜像 ID 与原容器一致，原数据卷保留。
+- Node engines 与 Vite 8 对齐为 ^20.19.0 || >=22.12.0；保留既有 nanoid 3.3.18 锁文件修复。
+- Docker 文档与当前服务、loopback 端口和 health/info 暴露范围同步。
+- 对抗复核补充：总记录数超过偏移边界时，hasNext 也必须停止，不能引导前端访问会返回 400 的下一页；用模拟 1,000,051 条记录的服务测试覆盖。
+- 最终验证：Maven 66/66、离线评估 38/38、Playwright 4/4、前端构建、零漏洞审计和 Compose 配置/重建/健康检查均通过。Cookie 的生产默认值与本地覆盖经过配置测试，本轮实际部署验证为本地 HTTP。
 
 ## 第一性判断
 

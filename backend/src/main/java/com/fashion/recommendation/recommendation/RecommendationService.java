@@ -24,6 +24,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class RecommendationService {
+    private static final long MAX_HISTORY_OFFSET = 1_000_000L;
+
     private static final Logger log = LoggerFactory.getLogger(RecommendationService.class);
     private static final String LLM_ENGINE = "llm";
     private static final String RULE_ENGINE = "development-rule-v1";
@@ -96,7 +98,8 @@ public class RecommendationService {
     }
 
     public RecommendationPage list(String userId, int page, int size) {
-        if (page < 0 || size < 1 || size > 50) {
+        long offset = (long) page * size;
+        if (page < 0 || size < 1 || size > 50 || offset > MAX_HISTORY_OFFSET) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "分页参数不合法");
         }
         List<RecommendationRecord> records = recommendationRepository.findPageByUserId(userId, page, size);
@@ -112,8 +115,9 @@ public class RecommendationService {
                         itemsByRecommendation.getOrDefault(record.id(), List.of())))
                 .toList();
         long totalElements = recommendationRepository.countByUserId(userId);
+        long nextOffset = ((long) page + 1L) * size;
         return new RecommendationPage(content, totalElements, page, size,
-                (long) (page + 1) * size < totalElements);
+                nextOffset <= MAX_HISTORY_OFFSET && nextOffset < totalElements);
     }
 
     public Recommendation save(String userId, Long recommendationId) {

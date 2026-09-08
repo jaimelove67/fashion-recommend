@@ -18,7 +18,7 @@
 
 - Java 17+
 - Maven 3.9+
-- Node.js 20+ 和 npm
+- Node.js `^20.19.0 || >=22.12.0` 和 npm（Vite 8 的运行时要求）
 
 ## 启动项目
 
@@ -63,6 +63,7 @@ docker compose up -d
 
 ~~~powershell
 Set-Location backend
+$env:SESSION_COOKIE_SECURE = "false" # Local HTTP only
 mvn spring-boot:run
 ~~~
 
@@ -89,7 +90,7 @@ mvn spring-boot:run
 
 密码使用 BCrypt 存储。Spring Security 将认证状态保存在服务端 Session 中，浏览器只接收 HttpOnly、SameSite=Lax 的 `JSESSIONID` Cookie，前端不保存可伪造的用户 ID 或认证 Token。个人接口从认证上下文取得用户名；匿名访问返回 401，退出登录会使当前 Session 失效并清除会话数据。
 
-前端在同源请求中携带 Cookie，并从 `GET /api/v1/auth/csrf` 取得 CSRF Token；所有 POST、PUT、DELETE 请求发送服务端返回的 `X-XSRF-TOKEN` 请求头。令牌过期导致 403 时前端只刷新一次令牌并重试。生产部署应启用 HTTPS，并设置 `SESSION_COOKIE_SECURE=true`。
+前端在同源请求中携带 Cookie，并从 `GET /api/v1/auth/csrf` 取得 CSRF Token；所有 POST、PUT、DELETE 请求发送服务端返回的 `X-XSRF-TOKEN` 请求头。令牌过期导致 403 时前端只刷新一次令牌并重试。后端默认启用 Secure Cookie；本地 HTTP 的 Compose 配置和 `.env.example` 显式使用 `SESSION_COOKIE_SECURE=false`，源码启动时也需在终端设置该变量。生产部署应启用 HTTPS，并显式设置 `SESSION_COOKIE_SECURE=true`，尤其不能沿用本地 Compose 的 false 默认值。
 
 ## 准备答辩演示数据
 
@@ -127,7 +128,7 @@ mvn spring-boot:run
 - BAILIAN_VISION_ENABLED 默认为 false。即使服务端已启用，仍需用户在每次上传时明确勾选 AI 识别；未同意、未启用或识别失败时，系统不会调用或不会采纳视觉模型结果，并要求人工确认不完整信息。
 - “风潮”仅在 `TREND_JSON_URL` 返回符合严格契约的授权数据时标记 `demoMode=false`；未配置、请求失败或数据不合规时回退到明确标注的三条开发样本，不代表实时平台热度。
 - 个人数据接口要求 Spring Security Session 认证，服务端从认证上下文取得用户身份；客户端自定义用户请求头不会改变身份。
-- 衣橱、推荐历史、反馈和个人风格档案均保存在 PostgreSQL 中。推荐历史接口按页返回，默认每页 20 条、最大 50 条；图片删除在数据库事务内写入清理任务，由后台调度器异步重试 MinIO 清理，避免对象存储瞬时故障阻塞业务删除。
+- 衣橱、推荐历史、反馈和个人风格档案均保存在 PostgreSQL 中。推荐历史接口按页返回，页码从 0 开始，默认每页 20 条、最大 50 条；`page * size` 不得超过 1,000,000，越界返回 400，限制深分页查询成本。到达此边界时 `hasNext=false`，`totalElements` 仍为该用户的实际记录总数。图片删除在数据库事务内写入清理任务，由后台调度器异步重试 MinIO 清理，避免对象存储瞬时故障阻塞业务删除。
 
 ## 数据库迁移
 
@@ -170,7 +171,7 @@ mvn spring-boot:run
 | BACKEND_PORT / FRONTEND_PORT | 8088 / 8090 | Docker 应用的主机端口 |
 | AUTH_REGISTRATION_ENABLED | true | 是否允许创建本地账号 |
 | SESSION_TIMEOUT | 30m | 服务端 Session 有效期 |
-| SESSION_COOKIE_SECURE | false | HTTPS 部署时应设置为 true |
+| SESSION_COOKIE_SECURE | false（本地 HTTP 示例） | 生产 HTTPS 必须设置为 true；未设置时后端默认 true |
 | DASHSCOPE_API_KEY | 空 | 百炼 API Key；还需显式开启 BAILIAN_ENABLED 才会调用推荐模型 |
 | BAILIAN_ENABLED | false | 是否启用文本推荐大模型（默认关闭，避免自动化测试产生付费调用） |
 | BAILIAN_MODEL | qwen-plus | 文本推荐模型 |
@@ -202,7 +203,10 @@ mvn test
 Set-Location frontend
 npm ci
 npm run build
+npm audit --audit-level=high
 ~~~
+
+`npm audit` 只接受当前锁文件真实结果；若报告 high 或 critical，先修复依赖并重新生成 `package-lock.json`，不要把历史审计结果当作当前通过证明。
 
 Compose 文件校验：
 

@@ -271,5 +271,58 @@
 
 - 评估脚本默认离线，seed 实际控制抽样；输出只含真实计算结果或明确未执行状态。
 - 反例覆盖缺字段、重复 ID、衣橱外 ID、同类别、空数据；规则引擎契约与 LLM 输入边界分开定义。
-- DOCX 不再出现 JWT、Redis、管理员后台、pgvector、旧表名与“待实测”；改为 Session+CSRF、Flyway V1-V3、后端 60 项测试、4 项 E2E、推荐审计字段与离线演示天气边界。
+- DOCX 不再出现 JWT、Redis、管理员后台、pgvector、旧表名与“待实测”；改为 Session+CSRF、Flyway V1-V3、后端 62 项测试、4 项 E2E、推荐审计字段与离线演示天气边界。
 - 记录只追加不重写；所有失败命令与原因写入记录。
+
+---
+
+# 阶段十一：当前版本交付审查与最小修复
+
+## 目标
+
+在不覆盖未跟踪用户文档的前提下，复核远端同步、依赖审计、后端事务一致性和可运行性；代码改动由 Claude 子代理实施，主代理负责文档同步与最终验证。
+
+## 阶段
+
+- [completed] 1. 确认 `codex/fix-major-gaps` 与远端同提交，并记录未跟踪项
+- [completed] 2. 运行后端、前端、离线评估和 Compose 静态回归
+- [completed] 3. 修复 `nanoid` 高危依赖；Claude 已为图片上传增加事务边界和补偿清理保护，并修复天气 NOT_FOUND 组合降级语义
+- [completed] 4. 同步 README、开发边界、答辩/评估口径及规划记录
+- [pending] 5. 在 Docker 可用后重跑完整栈 E2E；不可用时保留明确环境限制
+- [completed] 6. 最终检查远端差异、工作区和剩余风险
+
+## 当前反例
+
+- `npm audit --audit-level=high` 已通过，`nanoid` 解析为 3.3.18；当前直接依赖声明略宽于传递依赖修复的最小范围。
+- `WardrobeService.upload` 已加入 `@Transactional`，对象补偿删除失败不会覆盖原始数据库异常；仍缺少 `updateImageUrl` 失败时的独立回滚测试。
+- `WeatherService` 已覆盖主 provider `NOT_FOUND`、备用错误且配置演示开启的 404 反例。
+- `docker compose ps` 当前无法连接 Docker Desktop Linux Engine，真实 E2E 尚未重跑。
+
+---
+
+# 阶段十二：2026-09-07 审查问题修复
+
+## 目标
+
+修复本轮五项审查问题，保留已有未提交业务代码和文档，验证实际请求与本地完整栈。
+
+- [completed] 1. 核对当前配置、调用链、既有改动和本地 PostgreSQL 镜像 digest
+- [completed] 2. 后端 Secure Cookie 默认开启，并为本地 HTTP 显式配置 false
+- [completed] 3. 限制历史查询偏移量为 1,000,000，使用 long 运算，补边界与整数最大值测试
+- [completed] 4. 固定 PostgreSQL digest，统一 Node engines 和部署文档
+- [completed] 5. 执行后端、前端、离线评估、Compose 和 E2E 验证
+- [completed] 6. 复核差异并记录实际结果
+
+## 阶段十二验证结果
+
+- Maven 12 个测试类、66 项测试通过，0 失败/错误/跳过；含 Cookie 配置、分页整数最大值、偏移边界及 hasNext 上限反例。
+- npm ci、生产构建与依赖审计通过，0 vulnerabilities；Python 离线评估 38 项通过。
+- Compose 配置、前后端镜像重建及完整栈启动通过，后端 health 为 UP。
+- PostgreSQL 使用固定 digest 启动，与原容器镜像一致；PostgreSQL/MinIO 原命名数据卷保留。
+- Playwright 4/4 通过，应用地址 http://localhost:8090。付费模型开关保持关闭。
+- 保留原有未提交业务和 DOCX 改动，未暂存、提交或推送；未执行生产 HTTPS 部署验证。
+
+## 本轮恢复错误
+
+- 初次读取聚合输出截断，改为按路径和关键行读取。
+- 猜测的 SecurityConfig.java 与 E2E spec 路径不存在，改用 rg --files 定位。

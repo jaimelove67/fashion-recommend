@@ -2,7 +2,7 @@ name: fashion-recommendation
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-fashion_recommendation}
       POSTGRES_USER: ${POSTGRES_USER:-fashion}
@@ -68,6 +68,7 @@ services:
       MINIO_CLEANUP_INTERVAL: ${MINIO_CLEANUP_INTERVAL:-60s}
       AUTH_REGISTRATION_ENABLED: ${AUTH_REGISTRATION_ENABLED:-true}
       SESSION_TIMEOUT: ${SESSION_TIMEOUT:-30m}
+      # Local loopback HTTP only; HTTPS deployments must override this to true.
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       BAILIAN_MODEL: ${BAILIAN_MODEL:-qwen-plus}

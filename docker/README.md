@@ -1,22 +1,25 @@
 # Local Docker Environment
 
-This stack provides the local infrastructure required before the Spring Boot and Vue applications exist.
+This stack provides the local PostgreSQL and MinIO infrastructure, plus optional Spring Boot and Vue application containers.
 
 | Service | Host address | Purpose |
 | --- | --- | --- |
-| PostgreSQL 16 + pgvector | `localhost:5433` | Application data and vector search |
-| Redis 7.4 | `localhost:6380` | Cache, rate limits, and trend snapshots |
+| PostgreSQL 16 | `localhost:5433` | Application data |
 | MinIO API | `http://localhost:9000` | Private garment object storage |
 | MinIO Console | `http://localhost:9001` | Local object-storage administration |
+| Backend (`app` profile) | `http://localhost:8088` | Spring Boot API and health check |
+| Frontend (`app` profile) | `http://localhost:8090` | Vue application with same-origin API proxy |
 
-The host ports are intentionally different from common defaults: the existing Windows Redis 3.2 service continues to use `6379` during migration.
+All published ports bind to `127.0.0.1`. PostgreSQL, MinIO, and the MinIO client are pinned by image digest; update the digests deliberately when applying upstream fixes. `minio-init` creates the private bucket once and exits with code 0 on success.
 
 Use `docker compose up -d` to start the stack and `docker compose down` to stop it. `docker compose down -v` also deletes all local development data.
 
 Copy `.env.example` to `.env` only when replacing the development defaults. Do not use the example passwords on a cloud server.
 
-Run `docker compose --profile app up --build -d` to additionally build the Spring Boot API and Vue application. The containerized application is then available at `http://localhost:8090`; it proxies `/api` to the API container. Set `DASHSCOPE_API_KEY` only in a local `.env` or the cloud deployment secret store.
+Run `docker compose --profile app up --build -d` to additionally build the Spring Boot API and Vue application. The containerized application is then available at `http://localhost:8090`; it proxies `/api` to the API container. Set `DASHSCOPE_API_KEY` only in a local `.env` or the cloud deployment secret store. Model calls remain disabled unless their corresponding `BAILIAN_ENABLED` or `BAILIAN_VISION_ENABLED` switch is enabled; vision also requires consent for each upload.
+
+This loopback HTTP configuration explicitly defaults `SESSION_COOKIE_SECURE` to `false`. For HTTPS deployment, set it to `true` and replace the development passwords. Running the backend outside Compose defaults to secure session cookies; local HTTP source runs need an explicit `SESSION_COOKIE_SECURE=false` environment variable.
 
 Weather requests use `wttr.in` first and fall back to Open-Meteo. Successful snapshots are cached in-process for 15 minutes by default; provider URLs, timeouts, TTL, and maximum cache size can be overridden with the `WEATHER_*` variables documented in `.env.example`.
 
-Operational metrics are available on the loopback-bound backend at `http://localhost:8088/actuator/metrics` and `http://localhost:8088/actuator/prometheus`. Provider metrics use the `fashion.weather.*` prefix, and cache metrics use the `weather-current` cache tag.
+The backend exposes only `health` and `info` through Actuator. Check health at `http://localhost:8088/actuator/health`. Prometheus and metrics endpoints are not enabled in this local stack.

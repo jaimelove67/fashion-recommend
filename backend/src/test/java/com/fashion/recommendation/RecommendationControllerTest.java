@@ -180,6 +180,31 @@ class RecommendationControllerTest {
     }
 
     @Test
+    void boundsHistoryOffsetAndRejectsOverflowingPages() throws Exception {
+        String userId = "history-offset-boundary-user";
+        mockMvc.perform(get("/api/v1/me/recommendations?page=20000&size=50").with(user(userId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(0))
+                .andExpect(jsonPath("$.data.hasNext").value(false));
+
+        mockMvc.perform(get("/api/v1/me/recommendations?page=20001&size=50").with(user(userId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+
+        mockMvc.perform(get("/api/v1/me/recommendations?page=2147483647&size=1").with(user(userId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+
+        mockMvc.perform(get("/api/v1/me/recommendations?page=2147483647&size=50").with(user(userId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+
+        mockMvc.perform(get("/api/v1/me/recommendations?page=-1&size=20").with(user(userId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+    }
+
+    @Test
     void refusesRecommendationWhenWardrobeCannotFormAnOutfit() throws Exception {
         mockMvc.perform(post("/api/v1/recommendations")
                         .with(user("empty-wardrobe-user"))
