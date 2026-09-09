@@ -21,7 +21,7 @@ class TrendServiceTest {
 
         assertTrue(result.demoMode());
         assertEquals("douyin-development-sample", result.primarySource());
-        assertEquals(3, result.items().size());
+        assertEquals(10, result.items().size());
     }
 
     @Test

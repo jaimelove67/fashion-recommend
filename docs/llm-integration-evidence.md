@@ -55,7 +55,7 @@ flowchart TD
 }
 ~~~
 
-视觉识别使用独立 prompt，只允许 name、category、color、style 四个字符串字段，category 只能是上装、下装、鞋履、外套或配饰。视觉能力默认关闭，详见开发期边界文档。
+视觉识别使用独立 prompt，只允许 name、category、color、style 四个字符串字段，category 只能是上装、下装、鞋履、外套或配饰。视觉能力仍默认关闭，详见开发期边界文档；文本推荐则默认优先使用 LLM。
 
 ## 真实调用记录
 

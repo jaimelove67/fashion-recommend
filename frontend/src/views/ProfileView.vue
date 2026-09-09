@@ -33,6 +33,7 @@ const scoreBand = computed(() => {
 const colorSuggestions = computed(() => props.app.state.profile?.colorSuggestions || [])
 const styleReferences = computed(() => props.app.state.trends.slice(0, 4))
 const averageRating = computed(() => props.app.recommendationStats.averageRating)
+const scoreLabel = computed(() => props.app.state.trendMeta?.scoreLabel || '热度')
 
 function formatDate(value) {
   if (!value) return '时间未记录'
@@ -265,7 +266,7 @@ onDeactivated(() => {
               <span v-else><TrendingUp :size="28" /></span>
             </div>
             <div class="reference-copy">
-              <small>{{ trend.platform }} · 热度 {{ trend.heatScore }}</small>
+              <small>{{ trend.platform }} · {{ scoreLabel }} {{ trend.heatScore }}</small>
               <strong>{{ trend.title }}</strong>
               <p>{{ (trend.topicTags || []).slice(0, 3).join(' · ') || '暂无标签' }}</p>
             </div>

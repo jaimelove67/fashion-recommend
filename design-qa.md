@@ -75,3 +75,45 @@ The implementation intentionally uses product-specific copy instead of copying r
 - P3: Add a real user/profile image only after the backend or product contract supplies one.
 
 final result: passed
+
+## 2026-09-08 自动轮播节奏最终复核
+
+- 行为目标：风潮画廊每 1000ms 自动切换一次；鼠标悬浮任意图片时暂停，移出后恢复。
+- 实现证据：`frontend/src/views/TrendView.vue` 的定时器为 `setInterval(..., 1000)`，并通过 `.gallery-card` 事件委托处理 `mouseover`/`mouseout`；键盘聚焦、页面隐藏和 reduced-motion 保护仍然有效。
+- 交互证据：无悬停等待 1.3 秒后焦点发生变化；悬浮图片等待 1.3 秒前后图片标题一致；移出图片等待 1.3 秒后焦点再次变化。
+- 工程证据：前端生产构建通过，Docker 前端容器健康启动，浏览器控制台 0 个错误；本轮仅改变轮播节奏和暂停边界，不改变已通过的桌面/移动视觉布局。
+
+final result: passed
+
+## 2026-09-08 Top 10 画廊视觉与自动轮播精修
+
+- Source visual truth: `C:/Users/jaime/AppData/Local/Temp/codex-clipboard-abbc4c01-d752-4199-921f-d966608019a2.png` (2159 × 1200 px).
+- Implementation evidence: desktop stage `C:/other/新建文件夹/毕设/基于大模型（LLM）的智能穿搭推荐/.playwright-cli/element-2026-09-08T09-01-44-749Z.png` (1241 × 404 px at 1440 × 900 CSS px, device scale factor 1); mobile stage `C:/other/新建文件夹/毕设/基于大模型（LLM）的智能穿搭推荐/.playwright-cli/element-2026-09-08T08-57-33-152Z.png` (343 × 381 px at 390 × 844 CSS px, device scale factor 1). Combined focused comparison: `C:/other/新建文件夹/毕设/基于大模型（LLM）的智能穿搭推荐/.playwright-cli/compare-gallery-final2.png`.
+- State: authenticated `demo-user`, trend feed in explicit development-sample mode, gallery at its automatic-rotation state. The source stage was cropped from the reference's x=69..1834 and y=219..897 region before being normalized to the desktop evidence height; the implementation was captured as the component region.
+
+### Fidelity surfaces
+
+- Typography: “风潮穿搭精选” keeps the existing serif display treatment and the small uppercase `DAILY TOP 10` label; no large position counter remains.
+- Spacing and layout: the dedicated pale stage fill, rounded panel, bottom caption, hint, arrows, and numeric tabs are removed. Desktop gaps measure about 30–46px; mobile gaps measure about 22–39px without root overflow.
+- Colors and tokens: the stage is transparent (`rgba(0, 0, 0, 0)`), letting the page surface show through; card borders and shadows remain restrained so the image row remains dominant.
+- Imagery: the same three repository fashion images remain the known development-asset constraint and are framed with `object-fit: cover`; no CSS-drawn imagery or placeholder shape was introduced.
+- Copy and content: the heading is now “风潮穿搭精选”; below-stage caption, interaction hint, `01 / 10`, and 01–10 navigation are absent as requested. The development-mode note remains above the gallery to keep the data boundary honest.
+- Icons and accessibility: arrow icons/buttons are removed. Image cards retain accessible names and click behavior; the stage keeps keyboard shortcuts, and reduced-motion disables autoplay while preserving access to the cards.
+
+### Comparison history
+
+- Initial refinement pass: removed the requested chrome and transparentized the stage; desktop capture showed the intended wider gaps, but the first mobile capture (`element-2026-09-08T08-56-20-656Z.png`) exposed card overlap.
+- Fix pass: calculated mobile offset from the rendered card width plus 16px; rebuilt the container and recaptured the final mobile evidence above. The final desktop/mobile captures show no actionable P0/P1/P2 mismatch.
+- Interaction pass: after a 5-second wait, the active image changed from “同色系丹宁的干净轮廓” to “黑色乐福鞋的利落收尾”, confirming autoplay; the static screenshot was captured while hovering the stage so the transition could settle. DOM checks confirmed zero arrows, captions, dots, or hints, and browser console reported 0 errors.
+
+final result: passed
+
+## 2026-09-08 Top 10 弧形画廊复核（精修前基线，已被后续结果取代）
+
+- Comparison target: `C:/Users/jaime/AppData/Local/Temp/codex-clipboard-73954b98-3246-43a6-9633-6907d8bcab84.png`.
+- Desktop evidence: `.playwright-cli/element-2026-09-08T08-41-56-366Z.png`; mobile evidence: `.playwright-cli/element-2026-09-08T08-43-10-044Z.png`.
+- The earlier baseline followed the reference's pale stage, portrait image cards, raised center, lowered/rotated outer cards, and photo-only visual treatment. Its controls and captions were intentionally removed in the later refinement above per the new user request.
+- Interaction evidence: next button moved `01 / 10` to `02 / 10`; keyboard `ArrowRight` moved it to `03 / 10`; all 10 cards and 10 tabs remained exposed to the accessibility tree.
+- Responsive evidence: at 390px, the stage measured 342.67px × 380px and the document did not exceed its layout width; no browser page errors were emitted.
+
+final result: passed

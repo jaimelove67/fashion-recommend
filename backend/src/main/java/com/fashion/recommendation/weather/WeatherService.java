@@ -85,6 +85,15 @@ public class WeatherService {
         return cache.get(cacheKey, ignored -> loadFresh(normalizedCity));
     }
 
+    public WeatherSnapshot currentAt(double latitude, double longitude) {
+        if (!Double.isFinite(latitude) || !Double.isFinite(longitude)
+                || latitude < -90.0 || latitude > 90.0 || longitude < -180.0 || longitude > 180.0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "定位坐标不合法");
+        }
+        String cacheKey = String.format(Locale.ROOT, "location:%.4f:%.4f", latitude, longitude);
+        return cache.get(cacheKey, ignored -> loadFreshAt(latitude, longitude));
+    }
+
     private WeatherSnapshot loadFresh(String city) {
         try {
             return observeProvider(WttrWeatherClient.PROVIDER, () -> primaryClient.current(city));
@@ -112,6 +121,16 @@ public class WeatherService {
                 }
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "天气服务暂时不可用，请稍后重试");
             }
+        }
+    }
+
+    private WeatherSnapshot loadFreshAt(double latitude, double longitude) {
+        try {
+            return observeProvider(OpenMeteoWeatherClient.PROVIDER,
+                    () -> fallbackClient.current(latitude, longitude, "当前位置"));
+        } catch (WeatherProviderException failure) {
+            log.warn("Location weather provider failed, outcome={}", failure.outcome().metricValue());
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "无法读取当前位置天气，请稍后重试");
         }
     }
 

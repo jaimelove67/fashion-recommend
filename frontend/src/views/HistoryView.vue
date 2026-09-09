@@ -270,7 +270,7 @@ function clearFilters() {
 
           <div v-if="expandedId === item.id" class="record-details">
             <div><span>推荐理由</span><p>{{ item.reason }}</p></div>
-            <div><span>生成来源</span><p>{{ item.engine }}</p></div>
+            <div><span>生成来源</span><p>{{ app.engineLabel(item.engine) }}<small v-if="item.generationAudit?.modelName"> · {{ item.generationAudit.modelName }}</small><small v-if="item.generationAudit?.fallbackReason"> · {{ app.fallbackReasonLabel(item.generationAudit.fallbackReason) }}</small></p></div>
             <div v-if="item.weather">
               <span>天气快照</span>
               <p>{{ item.weather.temperatureC }}°C · 体感 {{ item.weather.apparentTemperatureC }}°C · 降水 {{ item.weather.precipitationMm }} mm · 风速 {{ item.weather.windSpeedKmh }} km/h · {{ app.weatherSourceLabel(item.weather.source) }}</p>

@@ -23,6 +23,6 @@ class TrendControllerTest {
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.primarySource").value("douyin-development-sample"))
                 .andExpect(jsonPath("$.data.demoMode").value(true))
-                .andExpect(jsonPath("$.data.items.length()").value(3));
+                .andExpect(jsonPath("$.data.items.length()").value(10));
     }
 }

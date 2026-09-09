@@ -39,9 +39,8 @@ app:
   bailian:
     api-key: ${DASHSCOPE_API_KEY:}
     model: ${BAILIAN_MODEL:qwen-plus}
-    # Recommendation LLM is opt-in. Default off so automated tests / E2E never make paid calls even
-    # when a key is present; set BAILIAN_ENABLED=true explicitly for production/demo model use.
-    enabled: ${BAILIAN_ENABLED:false}
+    # Recommendation LLM is the primary engine. Set BAILIAN_ENABLED=false only for offline tests.
+    enabled: ${BAILIAN_ENABLED:true}
     vision-enabled: ${BAILIAN_VISION_ENABLED:false}
     vision-model: ${BAILIAN_VISION_MODEL:qwen-vl-plus}
     endpoint: ${BAILIAN_ENDPOINT:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
@@ -50,6 +49,10 @@ app:
   trends:
     endpoint: ${TREND_JSON_URL:}
     platform: ${TREND_PLATFORM:configured-feed}
+    web-urls: ${TREND_WEB_URLS:}
+    web-platform: ${TREND_WEB_PLATFORM:web-scrape}
+    web-max-page-chars: ${TREND_WEB_MAX_PAGE_CHARS:1000000}
+    web-max-articles-per-page: ${TREND_WEB_MAX_ARTICLES_PER_PAGE:10}
     connect-timeout: ${TREND_CONNECT_TIMEOUT:3s}
     read-timeout: ${TREND_READ_TIMEOUT:5s}
     cache-ttl: ${TREND_CACHE_TTL:15m}

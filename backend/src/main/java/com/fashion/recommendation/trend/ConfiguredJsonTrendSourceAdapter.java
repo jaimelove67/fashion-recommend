@@ -13,15 +13,18 @@ import java.util.List;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 
 @Component
+@Order(10)
 public class ConfiguredJsonTrendSourceAdapter implements TrendSourceAdapter {
-    private static final Set<String> ITEM_FIELDS = Set.of(
+    private static final Set<String> REQUIRED_ITEM_FIELDS = Set.of(
             "id", "platform", "title", "topicTags", "heatScore", "publishedAt", "sourceUrl", "imageUrl");
+    private static final Set<String> OPTIONAL_ITEM_FIELDS = Set.of("summary");
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
@@ -95,7 +98,10 @@ public class ConfiguredJsonTrendSourceAdapter implements TrendSourceAdapter {
     }
 
     private TrendItem parseItem(JsonNode node, Instant fetchedAt) {
-        if (!node.isObject() || !fieldNames(node).equals(ITEM_FIELDS)) {
+        Set<String> fields = fieldNames(node);
+        if (!node.isObject() || !fields.containsAll(REQUIRED_ITEM_FIELDS)
+                || fields.stream().anyMatch(field -> !REQUIRED_ITEM_FIELDS.contains(field)
+                && !OPTIONAL_ITEM_FIELDS.contains(field))) {
             throw new TrendSourceException("趋势条目字段不符合约束");
         }
         String id = requiredText(node, "id", 120);
@@ -110,7 +116,7 @@ public class ConfiguredJsonTrendSourceAdapter implements TrendSourceAdapter {
         String sourceUrl = requiredHttpUrl(node, "sourceUrl");
         String imageUrl = optionalHttpUrl(node, "imageUrl");
         return new TrendItem(id, itemPlatform, title, tags, heatScore, publishedAt, fetchedAt,
-                sourceUrl, false, imageUrl);
+                sourceUrl, false, imageUrl, optionalText(node, "summary", 600));
     }
 
     private static Set<String> fieldNames(JsonNode node) {
@@ -140,6 +146,14 @@ public class ConfiguredJsonTrendSourceAdapter implements TrendSourceAdapter {
             throw new TrendSourceException("趋势字段 " + field + " 不合法");
         }
         return value.textValue().trim();
+    }
+
+    private static String optionalText(JsonNode node, String field, int maxLength) {
+        JsonNode value = node.path(field);
+        if (value.isMissingNode() || value.isNull()) {
+            return null;
+        }
+        return requiredText(node, field, maxLength);
     }
 
     private static String requiredHttpUrl(JsonNode node, String field) {

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowRight, ArrowUpRight, Flame, Layers3, LoaderCircle, RefreshCw, Sparkles, Tag, TrendingUp } from '@lucide/vue'
 
 const props = defineProps({
@@ -14,6 +14,7 @@ const trends = computed(() => state.value.trends || [])
 const trendMeta = computed(() => state.value.trendMeta || {})
 const trendStats = computed(() => props.app.trendStats || {})
 const profile = computed(() => state.value.profile)
+const scoreLabel = computed(() => trendMeta.value.scoreLabel || '热度')
 
 const tags = computed(() => [
   '全部',
@@ -39,6 +40,19 @@ const selectedRank = computed(() => {
 })
 
 const heroImage = computed(() => selectedTrend.value?.imageUrl || fallbackLooks[0])
+const topTenTrends = computed(() => [...trends.value]
+  .sort((a, b) => (Number(b.heatScore) || 0) - (Number(a.heatScore) || 0)
+    || String(a.id || '').localeCompare(String(b.id || '')))
+  .slice(0, 10))
+const galleryIndex = ref(0)
+const galleryShift = ref(126)
+const galleryStage = ref(null)
+const galleryTrend = computed(() => topTenTrends.value[galleryIndex.value] || topTenTrends.value[0] || null)
+const galleryReducedMotion = ref(false)
+const galleryPaused = ref(false)
+let galleryTimer = null
+let galleryMounted = false
+let galleryMediaQuery = null
 const visibleCards = computed(() => filteredTrends.value.slice(0, 3))
 const metricRail = computed(() => [
   {
@@ -49,7 +63,7 @@ const metricRail = computed(() => [
     icon: Layers3
   },
   {
-    label: '平均热度',
+    label: `平均${scoreLabel.value}`,
     value: trendStats.value.count ? trendStats.value.averageHeat : '—',
     unit: trendStats.value.count ? '分' : '',
     note: '仅基于当前返回项',
@@ -69,7 +83,7 @@ const selectedFacts = computed(() => {
   if (!item) return []
   return [
     {
-      label: '热度与位次',
+      label: `${scoreLabel.value}与位次`,
       value: item.heatScore ?? '—',
       note: selectedRank.value ? `当前样本第 ${selectedRank.value} 位` : '暂无位次'
     },
@@ -88,6 +102,62 @@ const selectedFacts = computed(() => {
 
 watch(tags, (nextTags) => {
   if (!nextTags.includes(activeTag.value)) activeTag.value = '全部'
+})
+
+watch(topTenTrends, (items) => {
+  const selectedIndex = items.findIndex((item) => item.id === state.value.selectedTrendId)
+  galleryIndex.value = selectedIndex >= 0 ? selectedIndex : 0
+  if (galleryMounted) {
+    updateGalleryShift()
+    startGalleryAutoplay()
+  }
+}, { immediate: true })
+
+watch(() => state.value.selectedTrendId, (selectedId) => {
+  const selectedIndex = topTenTrends.value.findIndex((item) => item.id === selectedId)
+  if (selectedIndex >= 0 && selectedIndex !== galleryIndex.value) galleryIndex.value = selectedIndex
+})
+
+function updateGalleryShift() {
+  if (typeof window === 'undefined') return
+  if (window.innerWidth <= 540) {
+    const stageWidth = galleryStage.value?.getBoundingClientRect().width || window.innerWidth
+    galleryShift.value = Math.round(Math.min(212, stageWidth * 0.58) + 16)
+    return
+  }
+  if (window.innerWidth <= 760) {
+    const stageWidth = galleryStage.value?.getBoundingClientRect().width || window.innerWidth
+    galleryShift.value = Math.round(Math.min(212, stageWidth * 0.58) + 16)
+    return
+  }
+  if (window.innerWidth <= 1100) {
+    const stageWidth = galleryStage.value?.getBoundingClientRect().width || window.innerWidth
+    const cardWidth = Math.min(238, Math.max(132, stageWidth * 0.155))
+    galleryShift.value = Math.round(cardWidth + 24)
+    return
+  }
+  const stageWidth = galleryStage.value?.getBoundingClientRect().width || window.innerWidth
+  const cardWidth = Math.min(238, Math.max(132, stageWidth * 0.155))
+  galleryShift.value = Math.round(cardWidth + 24)
+}
+
+onMounted(() => {
+  galleryMounted = true
+  updateGalleryShift()
+  window.addEventListener('resize', updateGalleryShift)
+  galleryMediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+  galleryReducedMotion.value = galleryMediaQuery.matches
+  galleryMediaQuery.addEventListener?.('change', handleGalleryMotionPreference)
+  document.addEventListener('visibilitychange', handleGalleryVisibility)
+  startGalleryAutoplay()
+})
+
+onBeforeUnmount(() => {
+  galleryMounted = false
+  stopGalleryAutoplay()
+  if (typeof window !== 'undefined') window.removeEventListener('resize', updateGalleryShift)
+  if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', handleGalleryVisibility)
+  galleryMediaQuery?.removeEventListener?.('change', handleGalleryMotionPreference)
 })
 
 function formatPlatform(value) {
@@ -122,6 +192,116 @@ function selectTrend(item) {
   if (item?.id) state.value.selectedTrendId = item.id
 }
 
+function fallbackFor(index = 0) {
+  return fallbackLooks[index % fallbackLooks.length]
+}
+
+function selectGalleryItem(index, syncTrend = true) {
+  const item = topTenTrends.value[index]
+  if (!item) return
+  galleryIndex.value = index
+  if (syncTrend) selectTrend(item)
+}
+
+function moveGallery(step, syncTrend = true) {
+  const total = topTenTrends.value.length
+  if (total < 2) return
+  const nextIndex = (galleryIndex.value + step + total) % total
+  selectGalleryItem(nextIndex, syncTrend)
+}
+
+function startGalleryAutoplay() {
+  stopGalleryAutoplay()
+  if (!galleryMounted || galleryPaused.value || galleryReducedMotion.value || document.hidden || topTenTrends.value.length < 2) return
+  galleryTimer = window.setInterval(() => moveGallery(1, false), 1000)
+}
+
+function stopGalleryAutoplay() {
+  if (galleryTimer) {
+    window.clearInterval(galleryTimer)
+    galleryTimer = null
+  }
+}
+
+function pauseGallery() {
+  galleryPaused.value = true
+  stopGalleryAutoplay()
+}
+
+function resumeGallery() {
+  if (galleryStage.value?.contains(document.activeElement)) return
+  galleryPaused.value = false
+  startGalleryAutoplay()
+}
+
+function galleryCardFromTarget(target) {
+  return target?.closest?.('.gallery-card')
+}
+
+function handleGalleryMouseOver(event) {
+  if (!galleryCardFromTarget(event.target) || galleryCardFromTarget(event.relatedTarget)) return
+  pauseGallery()
+}
+
+function handleGalleryMouseOut(event) {
+  if (!galleryCardFromTarget(event.target) || galleryCardFromTarget(event.relatedTarget)) return
+  resumeGallery()
+}
+
+function handleGalleryFocusout(event) {
+  if (!event.currentTarget.contains(event.relatedTarget)) resumeGallery()
+}
+
+function handleGalleryMotionPreference(event) {
+  galleryReducedMotion.value = event.matches
+  if (event.matches) stopGalleryAutoplay()
+  else startGalleryAutoplay()
+}
+
+function handleGalleryVisibility() {
+  if (document.hidden) stopGalleryAutoplay()
+  else startGalleryAutoplay()
+}
+
+function galleryCardStyle(index) {
+  const total = topTenTrends.value.length
+  if (!total) return {}
+  let offset = index - galleryIndex.value
+  const half = total / 2
+  if (offset > half) offset -= total
+  if (offset < -half) offset += total
+  const distance = Math.abs(offset)
+  return {
+    '--gallery-x': `${offset * galleryShift.value}px`,
+    '--gallery-y': `${distance * 7}px`,
+    '--gallery-depth': '0px',
+    '--gallery-rotation': `${offset * -7}deg`,
+    '--gallery-scale': Math.max(0.82, 1 - distance * 0.06),
+    opacity: distance <= 3 ? 1 : 0,
+    pointerEvents: distance <= 3 ? 'auto' : 'none',
+    zIndex: 20 - distance
+  }
+}
+
+function handleGalleryKeydown(event) {
+  if (event.key === 'ArrowLeft') {
+    event.preventDefault()
+    moveGallery(-1)
+  }
+  if (event.key === 'ArrowRight') {
+    event.preventDefault()
+    moveGallery(1)
+  }
+  if (event.key === 'Home') {
+    event.preventDefault()
+    selectGalleryItem(0)
+  }
+  if (event.key === 'End') {
+    event.preventDefault()
+    selectGalleryItem(topTenTrends.value.length - 1)
+  }
+}
+
 function handleImageError(event, fallback) {
   const image = event.currentTarget
   if (image.dataset.fallbackApplied) {
@@ -148,7 +328,7 @@ function useSuggestion(suggestion) {
           <span>当前内容用于界面与数据链路联调</span>
         </div>
         <h1 id="trend-title">风潮观察</h1>
-        <p>阅读后端已返回的公开趋势快照，看清标签、热度与时间，再决定它是否值得进入你的衣橱。</p>
+        <p>阅读后端已返回的公开趋势快照，看清标签、评分与时间，再决定它是否值得进入你的衣橱。</p>
         <div class="hero-update">
           <span>数据更新 {{ formatDateTime(trendMeta.fetchedAt) }}</span>
           <button
@@ -189,6 +369,56 @@ function useSuggestion(suggestion) {
       </article>
     </section>
 
+    <section class="trend-gallery-section" aria-labelledby="trend-gallery-title">
+      <header class="gallery-heading">
+        <div>
+          <p>DAILY TOP 10</p>
+          <h2 id="trend-gallery-title">风潮穿搭精选</h2>
+          <span>{{ trendMeta.demoMode ? '开发样本 · 接入抓取后每日更新' : `按${scoreLabel}降序排列 · 每日更新` }}</span>
+        </div>
+      </header>
+
+      <div
+        v-if="topTenTrends.length"
+        ref="galleryStage"
+        class="gallery-stage"
+        role="region"
+        aria-label="风潮穿搭自动轮播画廊"
+        aria-roledescription="自动轮播画廊"
+        aria-keyshortcuts="ArrowLeft ArrowRight Home End"
+        tabindex="0"
+        @keydown="handleGalleryKeydown"
+        @mouseover="handleGalleryMouseOver"
+        @mouseout="handleGalleryMouseOut"
+        @focusin="pauseGallery"
+        @focusout="handleGalleryFocusout"
+      >
+        <button
+          v-for="(item, index) in topTenTrends"
+          :key="item.id"
+          type="button"
+          class="gallery-card"
+          :class="{ active: galleryTrend?.id === item.id }"
+          :style="galleryCardStyle(index)"
+          :aria-label="`查看第 ${index + 1} 套：${item.title}`"
+          :aria-current="galleryTrend?.id === item.id ? 'true' : undefined"
+          @click="selectGalleryItem(index)"
+        >
+          <span class="gallery-card-image">
+            <img
+              :src="item.imageUrl || fallbackFor(index)"
+              :alt="item.title"
+              @error="handleImageError($event, fallbackFor(index + 1))"
+            />
+          </span>
+        </button>
+      </div>
+      <div v-else class="trend-state gallery-empty">
+        <strong>等待今日风潮样本</strong>
+        <span>抓取数据准备好后，这里会展示热度最高的 10 套穿搭。</span>
+      </div>
+    </section>
+
     <section class="trend-browser" aria-labelledby="trend-browser-title">
       <header class="browser-heading">
         <div>
@@ -226,13 +456,13 @@ function useSuggestion(suggestion) {
               :alt="selectedTrend.title"
               @error="handleImageError($event, fallbackLooks[0])"
             />
-            <span><Flame :size="16" />热度 {{ selectedTrend.heatScore ?? '—' }}</span>
+            <span><Flame :size="16" />{{ scoreLabel }} {{ selectedTrend.heatScore ?? '—' }}</span>
           </div>
           <div class="feature-copy">
             <div class="feature-number">NO. {{ String(selectedRank || 1).padStart(2, '0') }}</div>
             <p class="feature-source">{{ formatPlatform(selectedTrend.platform) }} · 发布于 {{ formatDateTime(selectedTrend.publishedAt) }}</p>
             <h2>{{ selectedTrend.title }}</h2>
-            <p class="feature-summary">这条趋势的可用信息来自标题、主题标签和后端热度字段。系统不会把热度直接当作个人偏好。</p>
+            <p class="feature-summary">{{ selectedTrend.summary || `这条趋势的可用信息来自标题、主题标签和${scoreLabel}字段。系统不会把评分直接当作个人偏好。` }}</p>
             <div class="feature-tags" aria-label="趋势标签">
               <span v-for="tagName in selectedTrend.topicTags || []" :key="tagName">{{ tagName }}</span>
               <span v-if="!(selectedTrend.topicTags || []).length">暂无标签</span>
@@ -263,7 +493,7 @@ function useSuggestion(suggestion) {
       <header class="list-heading">
         <div>
           <p>当前样本</p>
-          <h2 id="trend-list-title">三条趋势，三种穿法线索</h2>
+          <h2 id="trend-list-title">精选趋势，三种穿法线索</h2>
         </div>
       </header>
       <div class="trend-card-grid">
@@ -288,7 +518,7 @@ function useSuggestion(suggestion) {
               <span>NO. {{ String(index + 1).padStart(2, '0') }}</span>
             </span>
             <span class="card-copy">
-              <span class="card-meta"><span>{{ formatPlatform(item.platform) }}</span><span>热度 {{ item.heatScore ?? '—' }}</span></span>
+              <span class="card-meta"><span>{{ formatPlatform(item.platform) }}</span><span>{{ scoreLabel }} {{ item.heatScore ?? '—' }}</span></span>
               <strong>{{ item.title }}</strong>
               <span class="card-tags">{{ (item.topicTags || []).join(' / ') || '暂无标签' }}</span>
             </span>
@@ -511,6 +741,121 @@ function useSuggestion(suggestion) {
 .metric-rail small {
   flex: 0 0 auto;
   font-size: 12px;
+}
+
+.trend-gallery-section {
+  padding-top: 84px;
+}
+
+.gallery-heading {
+  display: block;
+}
+
+.gallery-heading p {
+  margin: 0 0 9px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.gallery-heading h2 {
+  margin: 0;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 36px;
+  font-weight: 500;
+  line-height: 1.15;
+}
+
+.gallery-heading > div > span {
+  display: block;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.gallery-stage {
+  position: relative;
+  height: clamp(300px, 28vw, 500px);
+  margin-top: 30px;
+  overflow: hidden;
+  color: var(--ink);
+  perspective: 1800px;
+  isolation: isolate;
+}
+
+.gallery-stage:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.gallery-card {
+  position: absolute;
+  top: 51%;
+  left: 50%;
+  width: clamp(132px, 15.5%, 238px);
+  aspect-ratio: 3 / 4;
+  display: block;
+  overflow: visible;
+  border: 0;
+  border-radius: 2px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  filter: saturate(0.92);
+  transform: translate3d(calc(-50% + var(--gallery-x)), calc(-50% + var(--gallery-y)), var(--gallery-depth)) rotateY(var(--gallery-rotation)) scale(var(--gallery-scale));
+  transform-origin: center 70%;
+  transform-style: preserve-3d;
+  transition: transform 720ms cubic-bezier(0.22, 0.75, 0.2, 1), opacity 320ms ease, filter 260ms ease;
+}
+
+.gallery-card:hover,
+.gallery-card:focus-visible,
+.gallery-card.active {
+  filter: saturate(1.04);
+  outline: 0;
+}
+
+.gallery-card.active {
+  filter: saturate(1.08) brightness(1.04);
+}
+
+.gallery-card-image {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+  border: 1px solid rgba(82, 92, 91, 0.16);
+  border-radius: inherit;
+  background: #dfe5e7;
+  box-shadow: 0 16px 28px rgba(41, 55, 63, 0.13);
+}
+
+.gallery-card.active .gallery-card-image {
+  border-color: rgba(54, 64, 62, 0.32);
+  box-shadow: 0 20px 34px rgba(41, 55, 63, 0.18);
+}
+
+.gallery-card-image img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  transition: transform 480ms ease;
+}
+
+.gallery-card:hover .gallery-card-image img,
+.gallery-card:focus-visible .gallery-card-image img {
+  transform: scale(1.045);
+}
+
+.gallery-empty {
+  margin-top: 30px;
+}
+
+.gallery-empty span {
+  color: var(--muted);
 }
 
 .trend-browser {
@@ -975,6 +1320,10 @@ function useSuggestion(suggestion) {
   .feature-copy h2 {
     font-size: 33px;
   }
+
+  .gallery-stage {
+    height: 360px;
+  }
 }
 
 @media (max-width: 760px) {
@@ -988,6 +1337,23 @@ function useSuggestion(suggestion) {
   .metric-rail,
   .fact-grid {
     grid-template-columns: 1fr;
+  }
+
+  .trend-gallery-section {
+    padding-top: 64px;
+  }
+
+  .gallery-heading h2 {
+    font-size: 31px;
+  }
+
+  .gallery-stage {
+    height: 420px;
+    margin-top: 24px;
+  }
+
+  .gallery-card {
+    width: min(58%, 212px);
   }
 
   .metric-rail article {
@@ -1051,9 +1417,22 @@ function useSuggestion(suggestion) {
 
   .browser-heading,
   .list-heading,
-  .profile-suggestions > header {
+  .profile-suggestions > header,
+  .gallery-heading {
     display: grid;
     align-items: start;
+  }
+
+  .gallery-heading h2 {
+    font-size: 29px;
+  }
+
+  .gallery-stage {
+    height: 380px;
+  }
+
+  .gallery-card {
+    width: 58%;
   }
 
   .browser-heading h2,
@@ -1101,7 +1480,9 @@ function useSuggestion(suggestion) {
 
 @media (prefers-reduced-motion: reduce) {
   .trend-card,
-  .card-image img {
+  .card-image img,
+  .gallery-card,
+  .gallery-card-image img {
     transition: none;
   }
 }

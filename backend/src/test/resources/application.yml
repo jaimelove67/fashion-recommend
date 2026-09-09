@@ -22,6 +22,10 @@ app:
   trends:
     endpoint: ""
     platform: configured-feed
+    web-urls: ""
+    web-platform: web-scrape
+    web-max-page-chars: 1000000
+    web-max-articles-per-page: 10
     connect-timeout: 100ms
     read-timeout: 100ms
     cache-ttl: 1m

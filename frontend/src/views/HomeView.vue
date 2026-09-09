@@ -12,6 +12,7 @@ const trends = computed(() => state.value.trends || [])
 const profile = computed(() => state.value.profile)
 const trendMeta = computed(() => state.value.trendMeta || {})
 const trendStats = computed(() => props.app.trendStats || {})
+const scoreLabel = computed(() => trendMeta.value.scoreLabel || '热度')
 const wardrobeStats = computed(() => props.app.wardrobeStats || {})
 const recommendationStats = computed(() => props.app.recommendationStats || {})
 const heroTrend = computed(() => props.app.topTrend || trends.value[0] || null)
@@ -49,7 +50,7 @@ const statRail = computed(() => [
     label: '风潮样本',
     value: trendStats.value.count ?? 0,
     unit: '条',
-    note: trendStats.value.count ? `平均热度 ${trendStats.value.averageHeat}` : '尚无可用数据',
+    note: trendStats.value.count ? `平均${scoreLabel.value} ${trendStats.value.averageHeat}` : '尚无可用数据',
     icon: TrendingUp
   }
 ])
@@ -179,7 +180,7 @@ function goToTrend(item) {
           <span class="preview-copy">
             <span class="preview-meta">
               <span>{{ item.platform || '来源未标记' }}</span>
-              <span>热度 {{ item.heatScore ?? '—' }}</span>
+              <span>{{ scoreLabel }} {{ item.heatScore ?? '—' }}</span>
             </span>
             <strong>{{ item.title }}</strong>
             <span class="preview-tags">{{ (item.topicTags || []).join(' / ') || '暂无标签' }}</span>

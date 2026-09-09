@@ -64,6 +64,10 @@ test('adds a garment, generates an outfit, saves it, and persists feedback', asy
 
   try {
     await registerThroughUi(page, username)
+    await page.getByRole('button', { name: '查看当地天气' }).click()
+    await expect(page.locator('.weather-panel')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.weather-panel')).toBeHidden()
     writeHeaders = await csrfHeaders(context.request)
 
     const supportingItems = [
@@ -117,8 +121,8 @@ test('adds a garment, generates an outfit, saves it, and persists feedback', asy
     expect(recommendationBody.data.items.length).toBeGreaterThanOrEqual(2)
     const recommendationId = recommendationBody.data.id
 
-    // The recommendation LLM is opt-in and defaults to off, so E2E must never make a paid model
-    // call. Assert generationAudit shows rule fallback (llm-disabled) rather than provider metadata.
+    // The E2E Compose override disables the recommendation LLM so this suite never makes a paid
+    // model call. Assert generationAudit shows rule fallback (llm-disabled) rather than provider metadata.
     expect(recommendationBody.data.engine).toBe('development-rule-v1')
     expect(recommendationBody.data.generationAudit).toBeTruthy()
     expect(recommendationBody.data.generationAudit.fallbackReason).toBe('llm-disabled')

@@ -44,11 +44,15 @@ class OpenMeteoWeatherClient {
 
     WeatherSnapshot current(String city) {
         Coordinates coordinates = geocode(city);
+        return current(coordinates.latitude(), coordinates.longitude(), city);
+    }
+
+    WeatherSnapshot current(double latitude, double longitude, String city) {
         try {
             String body = forecastClient.get()
                     .uri(uriBuilder -> uriBuilder.path("/v1/forecast")
-                            .queryParam("latitude", coordinates.latitude())
-                            .queryParam("longitude", coordinates.longitude())
+                            .queryParam("latitude", latitude)
+                            .queryParam("longitude", longitude)
                             .queryParam("current", CURRENT_FIELDS)
                             .queryParam("timezone", "Asia/Shanghai")
                             .build())

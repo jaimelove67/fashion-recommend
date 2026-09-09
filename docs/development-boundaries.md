@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | 本地账号与会话 | Spring Security、BCrypt、服务端 Session、CSRF | 匿名个人请求返回 401；伪造用户头无效 | OIDC/统一身份、找回密码、登录限流和审计 |
 | 规则推荐 fallback | `llm` 失败时显式返回 `development-rule-v1` | 只使用当前用户已完善衣物，不接受模型编造 ID | 模型网关、熔断告警、质量和降级率监控 |
-| 趋势数据源 | 可配置授权 JSON 源，失败时返回 `demoMode=true` 的开发样本 | 整批严格校验，不抓取或拼接不可信数据 | 授权源治理、签名、快照存档和运营审核 |
+| 趋势数据源 | 可配置授权 JSON 源或服务端配置的公开网页源，失败时返回 `demoMode=true` 的开发样本 | 严格校验并限制网页采集目标；不接受前端任意 URL，不把派生评分冒充平台热度 | 授权源治理、签名、快照存档、运营审核和 robots/条款审查 |
 | 视觉识别 | 服务端开关与本次上传用户同意同时成立才允许调用 | 默认不调用；信息不完整时人工确认 | 同意审计、配额、图片保留期限和删除策略 |
 
 ## 本地账号与 Session
@@ -21,17 +21,19 @@
 
 ## 规则推荐 fallback
 
-推荐大模型是显式启用（opt-in）的：`BAILIAN_ENABLED` 默认为 `false`，只有显式设置 `BAILIAN_ENABLED=true` 且配置了 `DASHSCOPE_API_KEY` 时才会调用 qwen-plus。因此即使 `.env` 里存在真实 Key，自动化 E2E 和任何其他运行方式默认也不会发起付费模型调用——Key 单独存在不足以触发调用，这是防止测试误产生外部费用的硬边界。未启用、未配置 Key、模型超时、响应无法解析、字段越界、衣物 ID 重复或引用当前衣橱之外的单品时，系统进入规则推荐。响应和持久化记录的 `engine` 明确区分 `llm` 与 `development-rule-v1`，不会把规则结果冒充模型结果。
+推荐大模型是首选引擎：`BAILIAN_ENABLED` 默认为 `true`，配置 `DASHSCOPE_API_KEY` 后优先调用 qwen-plus。未配置 Key、模型超时、响应无法解析、字段越界、衣物 ID 重复或引用当前衣橱之外的单品时，系统进入规则推荐。离线测试必须显式设置 `BAILIAN_ENABLED=false`。响应和持久化记录的 `engine` 明确区分 `llm` 与 `development-rule-v1`，不会把规则结果冒充模型结果。
 
 每次生成都会持久化审计元数据：合法 LLM 结果保存真实 provider 元数据（provider call ID、模型名、prompt 版本与三类 token），规则降级只保存稳定的枚举式 `fallback_reason`（如 `llm-disabled`、`missing-api-key`、`request-failed`、`response-invalid`、`result-invalid`、`duplicate-item-ids`、`foreign-item-ids`、`same-category`），不保存异常原文。API 通过嵌套 `generationAudit` 返回这些字段，`engine` 仍保留在顶层。规则降级时 provider 元数据（model name、prompt version、provider call ID 与三类 token）保持为空，但 `fallback_reason` 非空；启用 V3 审计列之前的历史记录，所有审计字段（含 `fallback_reason`）仍保持为空，不伪造模型元数据。
 
 规则引擎只使用当前用户已完善的衣物，且至少需要两个不同类别。条件不成立时返回 422，不生成虚假方案。生产环境可保留 fallback，但应监控可用率、耗时、校验失败原因和降级率，并向用户区分智能生成与基础搭配。
 
-## 授权趋势源与 demoMode
+## 授权趋势源、网页采集与 demoMode
 
 配置 `TREND_JSON_URL` 后，`ConfiguredJsonTrendSourceAdapter` 请求管理员提供的授权 JSON 源。根对象、字段集合、条目数量、重复 ID、标签、热度、ISO-8601 时间和 HTTP(S) URL 都经过整批校验；成功结果在进程内按 `TREND_CACHE_TTL` 缓存。
 
-未配置、请求失败或任一条目不合规时，`TrendService` 回退到三条内置开发样本并设置 `demoMode=true`。有效实时源经过页面筛选后即使结果为空，仍保持 `demoMode=false`，避免把“没有匹配项”误报为数据源故障。项目不会在没有授权时抓取第三方平台或编造实时热度。
+配置 `TREND_WEB_URLS` 后，`ConfiguredWebTrendSourceAdapter` 读取服务端配置的公开 HTTP(S) 页面。它抽取 OpenGraph/JSON-LD 和可见 HTML 中的标题、摘要、标签、发布时间、图片、文章链接，并标准化为趋势条目；页面列表中的多个 `article` 可拆成多个条目。网页没有统一可信的热度字段，适配器的 `scoreLabel` 为“来源页信号评分”，分数只由新鲜度和内容完整度派生，不能解释为平台实时热度。URL 数量、页面字符数和每页文章数有上限；localhost、内网/回环地址和带用户信息的 URL 会被拒绝，服务端不会提供前端任意 URL 抓取接口。
+
+JSON 适配器按 Spring 顺序优先于网页适配器；当 JSON 源没有返回可用结果时才尝试网页源。网页源允许多个页面部分成功，只有全部页面失败或没有可识别内容时才失败。两类源均未配置、请求失败或不可用时，`TrendService` 回退到 10 条内置开发样本并设置 `demoMode=true`；风潮页从中按 `heatScore` 取 Top 10 进入弧形画廊。有效源经过页面筛选后即使结果为空，仍保持 `demoMode=false`，避免把“没有匹配项”误报为数据源故障。配置网页前仍须确认来源授权、服务条款和 robots 规则；项目不绕过登录、验证码或访问控制，也不会在没有授权时抓取第三方平台。
 
 ## 逐次视觉识别同意
 
@@ -59,7 +61,7 @@ Redis 已从 Compose 和依赖中删除，因为当前业务没有消费者。�
 
 - “身份来自 Spring Security Session，客户端伪造用户请求头不会改变当前用户。”
 - “规则引擎是明确标记的降级结果，不冒充大模型输出。”
-- “文本推荐大模型默认关闭；Key 单独存在不会触发调用，只有显式开启 `BAILIAN_ENABLED=true` 才会调用，自动化 E2E 因此绝不会产生付费模型调用。”
+- “文本推荐默认优先使用大模型；没有 Key 或模型失败时才降级。自动化 E2E 通过 Compose 覆盖显式关闭模型，避免消耗付费额度。”
 - “趋势源通过严格契约接入授权数据；不可用时 `demoMode` 主动标记开发样本。”
 - “视觉识别默认不调用，服务端开关和用户本次明确同意缺一不可。”
 - “离线天气演示默认关闭，只有在 `.env` 显式启用且两个真实 provider 都失败时才返回静态快照，`source=configured-demo`，前端明确标注‘配置演示天气/非实时’，绝不冒充实时天气；城市未找到（NOT_FOUND）仍返回 404，不会被静态快照掩盖。”
@@ -68,7 +70,7 @@ Redis 已从 Compose 和依赖中删除，因为当前业务没有消费者。�
 
 - 认证与 CSRF：`security/SecurityConfig.java`、`auth/AuthController.java`、`frontend/src/composables/useFashionApp.js`。
 - 数据隔离：wardrobe、recommendation、style 控制器与对应仓储查询。
-- 趋势：`ConfiguredJsonTrendSourceAdapter.java`、`TrendService.java`。
+- 趋势：`ConfiguredJsonTrendSourceAdapter.java`、`ConfiguredWebTrendSourceAdapter.java`、`TrendService.java` 及对应适配器测试。
 - 视觉同意：`WardrobeController.java`、`WardrobeService.java`、`WardrobeView.vue`。
 - 推荐审计元数据：`V3__recommendation_audit.sql`、`RecommendationAudit.java`、`RecommendationFallbackReason.java`、`BailianRecommendationClient.java`、`RecommendationService.java`。
 - 迁移与反例测试：`V1__baseline_schema.sql`、`AuthenticationIntegrationTest.java`、`FlywayMigrationTest.java`、`RecommendationControllerTest.java`、`BailianRecommendationClientTest.java`。

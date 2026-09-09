@@ -6,4 +6,8 @@ public interface TrendSourceAdapter {
     String platform();
 
     List<TrendItem> fetchPublicSnapshots();
+
+    default String scoreLabel() {
+        return "授权源热度";
+    }
 }

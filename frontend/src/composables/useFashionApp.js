@@ -19,9 +19,46 @@ const COLOR_MAP = {
 }
 
 const FALLBACK_COLORS = ['#9da6a1', '#b29a7a', '#77878d', '#746f67', '#879276', '#8f7d86']
+const WEATHER_CITY_STORAGE_KEY = 'fashion.weather.city'
+const WEATHER_LOCATION_STORAGE_KEY = 'fashion.weather.location'
 
 function listFromCsv(value = '') {
   return value.split(/[，,、]/).map((item) => item.trim()).filter(Boolean)
+}
+
+function readLocalStorage(key) {
+  if (typeof window === 'undefined') return ''
+  try {
+    return window.localStorage.getItem(key) || ''
+  } catch {
+    return ''
+  }
+}
+
+function readStoredWeatherCity() {
+  return readLocalStorage(WEATHER_CITY_STORAGE_KEY)
+}
+
+function readStoredWeatherLocation() {
+  const value = readLocalStorage(WEATHER_LOCATION_STORAGE_KEY)
+  if (!value) return null
+  try {
+    const parsed = JSON.parse(value)
+    if (Number.isFinite(parsed.latitude) && Number.isFinite(parsed.longitude)) return parsed
+  } catch {
+    // Ignore malformed browser-only state and ask for location again.
+  }
+  return null
+}
+
+function writeLocalStorage(key, value) {
+  if (typeof window === 'undefined') return
+  try {
+    if (value === null) window.localStorage.removeItem(key)
+    else window.localStorage.setItem(key, value)
+  } catch {
+    // Weather preferences are optional and must not block the main application.
+  }
 }
 
 function startOfLocalDay(date) {
@@ -33,7 +70,7 @@ function createGarmentForm() {
 }
 
 function createRecommendationForm() {
-  return { occasion: '通勤', city: '', styleHint: '' }
+  return { occasion: '通勤', city: readStoredWeatherCity(), styleHint: '' }
 }
 
 function createProfileForm() {
@@ -61,7 +98,7 @@ export function useFashionApp() {
     authError: '',
     activeView: 'home',
     trends: [],
-    trendMeta: { primarySource: '', fetchedAt: null, demoMode: false },
+    trendMeta: { primarySource: '', fetchedAt: null, demoMode: false, scoreLabel: '热度' },
     selectedTrendId: null,
     wardrobe: [],
     history: [],
@@ -207,6 +244,12 @@ export function useFashionApp() {
     state.error = ''
   }
 
+  function clearWeather() {
+    state.weather = null
+    writeLocalStorage(WEATHER_CITY_STORAGE_KEY, null)
+    writeLocalStorage(WEATHER_LOCATION_STORAGE_KEY, null)
+  }
+
   async function loadPrivateData() {
     return Promise.allSettled([loadWardrobe(), loadHistory(), loadProfile()])
   }
@@ -294,7 +337,8 @@ export function useFashionApp() {
       state.trendMeta = {
         primarySource: feed.primarySource || '',
         fetchedAt: feed.fetchedAt || null,
-        demoMode: Boolean(feed.demoMode)
+        demoMode: Boolean(feed.demoMode),
+        scoreLabel: feed.scoreLabel || '热度'
       }
       if (!state.selectedTrendId || !state.trends.some((item) => item.id === state.selectedTrendId)) {
         state.selectedTrendId = state.trends[0]?.id || null
@@ -408,7 +452,11 @@ export function useFashionApp() {
     clearError()
     try {
       const weather = await request(`/api/v1/weather/current?city=${encodeURIComponent(state.recommendationForm.city)}`)
-      if (isCurrentSession(version)) state.weather = weather
+      if (isCurrentSession(version)) {
+        state.weather = weather
+        writeLocalStorage(WEATHER_CITY_STORAGE_KEY, state.recommendationForm.city.trim())
+        writeLocalStorage(WEATHER_LOCATION_STORAGE_KEY, null)
+      }
       return weather
     } catch (cause) {
       if (isCurrentSession(version)) state.weather = null
@@ -417,6 +465,60 @@ export function useFashionApp() {
     } finally {
       if (isCurrentSession(version)) state.weatherLoading = false
     }
+  }
+
+  function browserLocation() {
+    return new Promise((resolve, reject) => {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) {
+        reject(new Error('当前浏览器不支持定位'))
+        return
+      }
+      navigator.geolocation.getCurrentPosition(
+        ({ coords }) => resolve({ latitude: coords.latitude, longitude: coords.longitude }),
+        reject,
+        { enableHighAccuracy: false, maximumAge: 10 * 60 * 1000, timeout: 6000 }
+      )
+    })
+  }
+
+  async function loadLocalWeather(options = {}) {
+    if (state.authPhase !== 'authenticated' || state.weatherLoading) return null
+    const version = sessionVersion
+    state.weatherLoading = true
+    if (!options.silent) clearError()
+    try {
+      const coordinates = options.coordinates || readStoredWeatherLocation() || await browserLocation()
+      const query = new URLSearchParams({
+        latitude: coordinates.latitude.toFixed(4),
+        longitude: coordinates.longitude.toFixed(4)
+      })
+      const weather = await request(`/api/v1/weather/current?${query.toString()}`)
+      if (isCurrentSession(version)) {
+        state.weather = weather
+        writeLocalStorage(WEATHER_CITY_STORAGE_KEY, null)
+        writeLocalStorage(WEATHER_LOCATION_STORAGE_KEY, JSON.stringify(coordinates))
+      }
+      return weather
+    } catch (cause) {
+      if (isCurrentSession(version) && !options.silent) {
+        showError(new Error('无法获取当前位置天气，请输入城市后读取。'))
+      }
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.weatherLoading = false
+    }
+  }
+
+  async function loadStartupWeather() {
+    if (readStoredWeatherCity()) return loadWeather()
+    return loadLocalWeather({ silent: true })
+  }
+
+  async function refreshWeather() {
+    if (state.weather?.city === '当前位置' || !state.recommendationForm.city) {
+      return loadLocalWeather()
+    }
+    return loadWeather()
   }
 
   function resetGarmentForm() {
@@ -690,6 +792,38 @@ export function useFashionApp() {
     return source || '未知来源'
   }
 
+  function weatherConditionLabel(code) {
+    const value = Number(code)
+    if (value === 0) return '晴'
+    if ([1, 2, 3].includes(value)) return '多云'
+    if ([45, 48].includes(value)) return '雾'
+    if ([51, 53, 55, 56, 57].includes(value)) return '毛毛雨'
+    if ([61, 63, 65, 66, 67, 80, 81, 82].includes(value)) return '降雨'
+    if ([71, 73, 75, 77, 85, 86].includes(value)) return '降雪'
+    if (value >= 95) return '雷雨'
+    return '天气'
+  }
+
+  function engineLabel(engine) {
+    if (engine === 'llm') return '大模型生成'
+    if (engine === 'development-rule-v1') return '规则引擎降级'
+    return engine || '来源未知'
+  }
+
+  function fallbackReasonLabel(reason) {
+    const labels = {
+      'llm-disabled': '模型调用已关闭',
+      'missing-api-key': '未配置模型 Key',
+      'request-failed': '模型请求失败',
+      'response-invalid': '模型响应无法解析',
+      'result-invalid': '模型结果不符合约束',
+      'duplicate-item-ids': '模型返回了重复衣物',
+      'foreign-item-ids': '模型返回了衣橱外衣物',
+      'same-category': '模型返回的类别不够完整'
+    }
+    return labels[reason] || reason || ''
+  }
+
   async function ensureViewData(view) {
     if (view === 'trend' && !state.trends.length) await loadTrends()
     if (view === 'wardrobe' && !state.wardrobe.length) await loadWardrobe()
@@ -732,6 +866,7 @@ export function useFashionApp() {
       state.authPhase = 'authenticated'
       state.authError = ''
       await loadPrivateData()
+      await loadStartupWeather()
     } catch (cause) {
       resetPrivateState()
       state.authUser = null
@@ -760,18 +895,24 @@ export function useFashionApp() {
     historyTrend,
     colorFor,
     weatherSourceLabel,
+    weatherConditionLabel,
+    engineLabel,
+    fallbackReasonLabel,
     initialize,
     dispose,
     login,
     register,
     logout,
     clearError,
+    clearWeather,
     loadTrends,
     loadWardrobe,
     loadHistory,
     loadProfile,
     saveProfile,
     loadWeather,
+    loadLocalWeather,
+    refreshWeather,
     resetGarmentForm,
     selectImage,
     editGarment,

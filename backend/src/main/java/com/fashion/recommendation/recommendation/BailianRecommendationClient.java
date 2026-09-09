@@ -55,7 +55,7 @@ public class BailianRecommendationClient implements LlmRecommendationClient {
             @Value("${app.bailian.endpoint:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}") String endpoint,
             @Value("${app.bailian.api-key:}") String apiKey,
             @Value("${app.bailian.model:qwen-plus}") String model,
-            @Value("${app.bailian.enabled:false}") boolean enabled,
+            @Value("${app.bailian.enabled:true}") boolean enabled,
             @Value("${app.bailian.connect-timeout:3s}") Duration connectTimeout,
             @Value("${app.bailian.read-timeout:8s}") Duration readTimeout) {
         this(createRestClient(connectTimeout, readTimeout), objectMapper, endpoint, apiKey, model, enabled);
@@ -74,9 +74,8 @@ public class BailianRecommendationClient implements LlmRecommendationClient {
 
     @Override
     public Optional<LlmRecommendationResult> recommend(LlmRecommendationContext context) {
-        // Explicit enable/disable boundary. The recommendation LLM is opt-in: even when a key is
-        // configured, no external call happens unless BAILIAN_ENABLED is explicitly true. This makes
-        // automated E2E and any other runner default to rule fallback without making paid calls.
+        // Explicit enable/disable boundary. The recommendation LLM is the primary engine in normal
+        // runs; offline tests can explicitly disable it to avoid paid provider calls.
         if (!enabled) {
             throw new LlmRecommendationException(
                     RecommendationFallbackReason.LLM_DISABLED, "推荐大模型未启用");

@@ -98,6 +98,7 @@ function imageFailed(key) {
         <div>
           <p class="section-kicker">生成条件</p>
           <h2 id="generator-title">这次要去哪里？</h2>
+          <p class="engine-preference"><Sparkles :size="14" aria-hidden="true" />首选大模型生成，异常时自动降级为规则推荐</p>
         </div>
         <button class="quiet-button" type="button" :disabled="app.state.weatherLoading || !app.state.recommendationForm.city" @click="app.loadWeather">
           <LoaderCircle v-if="app.state.weatherLoading" class="spinning" :size="16" />
@@ -114,7 +115,7 @@ function imageFailed(key) {
           </label>
           <label>
             <span>城市</span>
-            <input v-model.trim="app.state.recommendationForm.city" required maxlength="80" placeholder="例如：长沙" />
+            <input v-model.trim="app.state.recommendationForm.city" required maxlength="80" placeholder="例如：长沙" @input="app.clearWeather" />
           </label>
           <label class="wide-field">
             <span>风格提示 <small>可选</small></span>
@@ -170,6 +171,19 @@ function imageFailed(key) {
           </span>
         </div>
 
+        <div class="engine-badge-row">
+          <span class="engine-badge" :class="{ fallback: app.state.currentRecommendation.engine !== 'llm' }">
+            <Sparkles :size="14" aria-hidden="true" />
+            {{ app.engineLabel(app.state.currentRecommendation.engine) }}
+          </span>
+          <span v-if="app.state.currentRecommendation.generationAudit?.modelName" class="engine-meta">
+            {{ app.state.currentRecommendation.generationAudit.modelName }}
+          </span>
+          <span v-if="app.state.currentRecommendation.generationAudit?.fallbackReason" class="engine-meta">
+            {{ app.fallbackReasonLabel(app.state.currentRecommendation.generationAudit.fallbackReason) }}
+          </span>
+        </div>
+
         <h3>{{ app.state.currentRecommendation.summary }}</h3>
 
         <ul class="outfit-list" aria-label="推荐衣物">
@@ -197,7 +211,7 @@ function imageFailed(key) {
           </div>
           <div>
             <span>生成来源</span>
-            <p>{{ app.state.currentRecommendation.engine }}</p>
+            <p>{{ app.engineLabel(app.state.currentRecommendation.engine) }}<small v-if="app.state.currentRecommendation.generationAudit?.modelName"> · {{ app.state.currentRecommendation.generationAudit.modelName }}</small></p>
           </div>
           <div v-if="app.state.currentRecommendation.weather">
             <span>天气快照</span>
@@ -428,6 +442,15 @@ function imageFailed(key) {
   letter-spacing: 0;
 }
 
+.engine-preference {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 9px 0 0;
+  color: var(--green);
+  font-size: 11px;
+}
+
 .quiet-button {
   display: inline-flex;
   min-height: 38px;
@@ -514,6 +537,20 @@ function imageFailed(key) {
 
 .result-topline > div { display: flex; flex-wrap: wrap; gap: 8px 15px; color: var(--muted); font-size: 11px; }
 .record-id { color: var(--accent); font-weight: 700; }
+.engine-badge-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
+.engine-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: var(--green);
+  background: var(--green-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+.engine-badge.fallback { color: var(--accent-strong); background: var(--accent-soft); }
+.engine-meta { color: var(--muted); font-size: 11px; }
 .saved-state {
   display: inline-flex;
   align-items: center;
@@ -578,6 +615,7 @@ function imageFailed(key) {
 .result-details > div + div { border-left: 1px solid var(--line); padding-left: 20px; }
 .result-details span { color: var(--accent); font-size: 11px; font-weight: 700; }
 .result-details p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.result-details p small { color: var(--muted); font-size: 11px; }
 .result-actions {
   display: flex;
   align-items: center;

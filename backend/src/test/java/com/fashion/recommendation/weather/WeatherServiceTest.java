@@ -111,6 +111,30 @@ class WeatherServiceTest {
     }
 
     @Test
+    void returnsOpenMeteoWeatherForBrowserLocationCoordinates() {
+        forecastServer.expect(once(), requestTo(startsWith("https://forecast.test/v1/forecast")))
+                .andExpect(queryParam("latitude", "28.2282"))
+                .andExpect(queryParam("longitude", "112.9388"))
+                .andExpect(queryParam("timezone", "Asia/Shanghai"))
+                .andRespond(withSuccess(OPEN_METEO_WEATHER, MediaType.APPLICATION_JSON));
+
+        WeatherSnapshot result = weatherService.currentAt(28.2282, 112.9388);
+
+        assertEquals("当前位置", result.city());
+        assertEquals(25.1, result.temperatureC());
+        assertEquals("open-meteo", result.source());
+    }
+
+    @Test
+    void rejectsInvalidBrowserLocationCoordinatesBeforeCallingProvider() {
+        ResponseStatusException failure = assertThrows(
+                ResponseStatusException.class, () -> weatherService.currentAt(91.0, 112.0));
+
+        assertEquals(HttpStatus.BAD_REQUEST, failure.getStatusCode());
+        assertEquals("定位坐标不合法", failure.getReason());
+    }
+
+    @Test
     void fallsBackToOpenMeteoWhenPrimaryTimesOut() {
         expectWttrTimeout();
         expectOpenMeteoSuccess();

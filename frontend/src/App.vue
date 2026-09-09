@@ -3,10 +3,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import {
   Bell,
   CircleAlert,
+  CloudSun,
   Clock3,
   Home,
+  LocateFixed,
   LoaderCircle,
   LogOut,
+  RefreshCw,
   Search,
   Shirt,
   Sparkles,
@@ -25,6 +28,7 @@ import LoginView from './views/LoginView.vue'
 
 const fashion = reactive(useFashionApp())
 const searchInput = ref(null)
+const weatherOpen = ref(false)
 
 const navigation = [
   { id: 'home', label: '首页', icon: Home },
@@ -78,6 +82,7 @@ const notifications = computed(() => {
 async function toggleSearch() {
   fashion.state.searchOpen = !fashion.state.searchOpen
   fashion.state.notificationsOpen = false
+  weatherOpen.value = false
   if (fashion.state.searchOpen) {
     await nextTick()
     searchInput.value?.focus()
@@ -87,6 +92,13 @@ async function toggleSearch() {
 function toggleNotifications() {
   fashion.state.notificationsOpen = !fashion.state.notificationsOpen
   fashion.state.searchOpen = false
+  weatherOpen.value = false
+}
+
+function toggleWeather() {
+  weatherOpen.value = !weatherOpen.value
+  fashion.state.searchOpen = false
+  fashion.state.notificationsOpen = false
 }
 
 function openSearchResult(result) {
@@ -99,6 +111,7 @@ function openSearchResult(result) {
 function closePanels() {
   fashion.state.searchOpen = false
   fashion.state.notificationsOpen = false
+  weatherOpen.value = false
 }
 
 onMounted(() => fashion.initialize())
@@ -135,6 +148,10 @@ onBeforeUnmount(() => fashion.dispose())
       </nav>
 
       <div class="header-actions">
+        <button class="utility-button weather-button" :class="{ active: weatherOpen }" type="button" aria-label="查看当地天气" :aria-expanded="weatherOpen" title="当地天气" @click="toggleWeather">
+          <CloudSun :size="19" />
+          <span v-if="fashion.state.weather" class="weather-nav-value">{{ Number(fashion.state.weather.temperatureC).toFixed(0) }}°</span>
+        </button>
         <button class="utility-button" type="button" aria-label="搜索页面、趋势或衣物" :aria-expanded="fashion.state.searchOpen" @click="toggleSearch">
           <X v-if="fashion.state.searchOpen" :size="19" />
           <Search v-else :size="19" />
@@ -173,6 +190,61 @@ onBeforeUnmount(() => fashion.dispose())
         <p v-if="!searchResults.length">没有找到匹配内容</p>
       </div>
       <p v-else class="panel-hint">输入名称、类别、颜色或趋势关键词</p>
+    </section>
+
+    <section v-if="weatherOpen" class="header-panel weather-panel" aria-label="当地天气">
+      <div class="weather-panel-heading">
+        <div class="weather-panel-title">
+          <CloudSun :size="20" aria-hidden="true" />
+          <div>
+            <span>当地天气</span>
+            <strong>{{ fashion.state.weather?.city || '当前位置' }}</strong>
+          </div>
+        </div>
+        <small v-if="fashion.state.weather">{{ fashion.weatherSourceLabel(fashion.state.weather.source) }}</small>
+      </div>
+
+      <div v-if="fashion.state.weather" class="weather-panel-reading">
+        <strong>{{ Number(fashion.state.weather.temperatureC).toFixed(1) }}°C</strong>
+        <div>
+          <span>{{ fashion.weatherConditionLabel(fashion.state.weather.weatherCode) }}</span>
+          <p>体感 {{ Number(fashion.state.weather.apparentTemperatureC).toFixed(1) }}°C · 降水 {{ Number(fashion.state.weather.precipitationMm).toFixed(1) }} mm · 风速 {{ Number(fashion.state.weather.windSpeedKmh).toFixed(1) }} km/h</p>
+        </div>
+      </div>
+
+      <div v-else-if="fashion.state.weatherLoading" class="weather-panel-empty" role="status" aria-live="polite">
+        <LoaderCircle class="spinning" :size="17" />正在获取当前位置天气…
+      </div>
+
+      <div v-else class="weather-panel-form">
+        <label>
+          <span class="sr-only">天气城市</span>
+          <input
+            v-model.trim="fashion.state.recommendationForm.city"
+            type="text"
+            maxlength="80"
+            placeholder="输入所在城市"
+            aria-label="天气城市"
+            @input="fashion.clearWeather"
+            @keyup.enter="fashion.loadWeather"
+          />
+        </label>
+        <button type="button" :disabled="!fashion.state.recommendationForm.city || fashion.state.weatherLoading" @click="fashion.loadWeather">
+          <RefreshCw :size="15" />读取城市天气
+        </button>
+        <button class="weather-panel-locate" type="button" :disabled="fashion.state.weatherLoading" @click="fashion.loadLocalWeather">
+          <LocateFixed :size="15" />定位本地
+        </button>
+      </div>
+
+      <div v-if="fashion.state.weather" class="weather-panel-actions">
+        <button type="button" @click="fashion.clearWeather">更换城市</button>
+        <button type="button" :disabled="fashion.state.weatherLoading" @click="fashion.refreshWeather">
+          <LoaderCircle v-if="fashion.state.weatherLoading" class="spinning" :size="15" />
+          <RefreshCw v-else :size="15" />更新天气
+        </button>
+      </div>
+      <p v-if="!fashion.state.weather && !fashion.state.weatherLoading" class="panel-hint">浏览器允许定位时，将优先使用当前位置；也可以手动输入城市。</p>
     </section>
 
     <section v-if="fashion.state.notificationsOpen" class="header-panel notification-panel" aria-label="通知列表">

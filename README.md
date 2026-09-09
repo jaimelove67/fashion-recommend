@@ -9,7 +9,7 @@
 - 前端：Vue 3、Vite、Lucide Vue，入口位于 frontend/。
 - 后端：Java 17、Spring Boot 3.4.2、Spring Web、Spring Security、JDBC、Validation、Flyway、Actuator，入口位于 backend/。
 - 数据与存储：PostgreSQL 16、MinIO 私有对象存储、Caffeine 进程内缓存。
-- 智能能力：阿里云百炼兼容 OpenAI Chat Completions 协议；推荐模型和视觉识别默认可关闭。
+- 智能能力：阿里云百炼兼容 OpenAI Chat Completions 协议；文本推荐模型默认优先使用，视觉识别默认关闭。
 - 本地编排：Docker Compose，包含 PostgreSQL、MinIO，以及可选的前后端应用服务。
 
 ## 环境要求
@@ -117,16 +117,17 @@ mvn spring-boot:run
 4. “使用 AI 自动识别”默认不勾选；此时需填写名称、类别和颜色。只有本次上传明确勾选后，后端才允许进入识别流程，实际外部调用还要求视觉开关和密钥均已配置。
 5. 进入“推荐”，填写城市、场合和可选的风格要求，生成搭配。
 6. 查看天气、推荐单品和推荐理由，保存方案并提交满意度反馈。
-7. 进入“历史”查看已生成记录；“风潮”优先展示已配置的授权 JSON 趋势源，不可用时显示明确标注的开发样本。
+7. 进入“历史”查看已生成记录；“风潮”优先展示已配置的授权 JSON 趋势源，其次可读取服务端配置的公开网页源，不可用时显示明确标注的开发样本。
 
 推荐至少需要两件可组合的、已完善的不同类别衣物。衣物为空、只剩待人工确认记录或类别无法组合时，接口会返回明确错误，不会伪造推荐结果。
 
 ## 当前能力边界
 
-- 推荐大模型是显式启用（opt-in）的：`BAILIAN_ENABLED` 默认为 `false`，即使配置了 `DASHSCOPE_API_KEY` 也不会发起任何付费模型调用，因此自动化测试与 E2E 默认只走规则引擎。只有显式设置 `BAILIAN_ENABLED=true` 且配置了 Key 时，推荐才会调用 qwen-plus。调用被禁用时审计 `fallback_reason` 为 `llm-disabled`；未配置 Key 为 `missing-api-key`；请求超时、响应不合规、结果越界或模型返回了非衣橱单品等其他失败则保留各自的稳定原因（`request-failed`、`response-invalid`、`result-invalid`、`duplicate-item-ids`、`foreign-item-ids`、`same-category`）。
+- 推荐大模型是首选引擎：`BAILIAN_ENABLED` 默认为 `true`，且配置 `DASHSCOPE_API_KEY` 后优先调用 qwen-plus。未配置 Key、请求超时、响应不合规、结果越界或模型返回了非衣橱单品时，系统才降级到规则引擎；降级记录会保留稳定的 `fallback_reason`（`missing-api-key`、`request-failed`、`response-invalid`、`result-invalid`、`duplicate-item-ids`、`foreign-item-ids`、`same-category`）。如需离线测试或避免模型费用，必须显式设置 `BAILIAN_ENABLED=false`，此时原因是 `llm-disabled`。
 - 每次生成都会持久化审计元数据：合法 LLM 结果保存真实 provider 元数据（provider call ID、模型名、prompt 版本与三类 token），规则降级只保存稳定的枚举式 fallback 原因，不保存异常原文。API 通过嵌套 `generationAudit` 返回这些字段，`engine` 仍保留在顶层。旧历史与降级路径保持为空，不伪造模型元数据。
 - BAILIAN_VISION_ENABLED 默认为 false。即使服务端已启用，仍需用户在每次上传时明确勾选 AI 识别；未同意、未启用或识别失败时，系统不会调用或不会采纳视觉模型结果，并要求人工确认不完整信息。
-- “风潮”仅在 `TREND_JSON_URL` 返回符合严格契约的授权数据时标记 `demoMode=false`；未配置、请求失败或数据不合规时回退到明确标注的三条开发样本，不代表实时平台热度。
+- “风潮”在 `TREND_JSON_URL` 返回符合严格契约的授权数据，或 `TREND_WEB_URLS` 成功读取到公开网页内容时标记 `demoMode=false`；两类源均不可用时回退到明确标注的 10 条开发样本，风潮页按热度降序展示 Top 10 弧形画廊。网页适配器抽取 HTML/OpenGraph/JSON-LD 的标题、摘要、标签、发布时间、图片和来源链接，并生成“来源页信号评分”；该评分只表示新鲜度与内容完整度，不代表平台实时热度。
+- 登录后的全局天气条会优先请求浏览器当前位置；用户拒绝定位时可输入城市。天气由后端调用 Open-Meteo/wttr.in 并标注数据来源，当前位置坐标只保存在浏览器本地，不写入业务数据库。
 - 个人数据接口要求 Spring Security Session 认证，服务端从认证上下文取得用户身份；客户端自定义用户请求头不会改变身份。
 - 衣橱、推荐历史、反馈和个人风格档案均保存在 PostgreSQL 中。推荐历史接口按页返回，页码从 0 开始，默认每页 20 条、最大 50 条；`page * size` 不得超过 1,000,000，越界返回 400，限制深分页查询成本。到达此边界时 `hasNext=false`，`totalElements` 仍为该用户的实际记录总数。图片删除在数据库事务内写入清理任务，由后台调度器异步重试 MinIO 清理，避免对象存储瞬时故障阻塞业务删除。
 
@@ -172,15 +173,17 @@ mvn spring-boot:run
 | AUTH_REGISTRATION_ENABLED | true | 是否允许创建本地账号 |
 | SESSION_TIMEOUT | 30m | 服务端 Session 有效期 |
 | SESSION_COOKIE_SECURE | false（本地 HTTP 示例） | 生产 HTTPS 必须设置为 true；未设置时后端默认 true |
-| DASHSCOPE_API_KEY | 空 | 百炼 API Key；还需显式开启 BAILIAN_ENABLED 才会调用推荐模型 |
-| BAILIAN_ENABLED | false | 是否启用文本推荐大模型（默认关闭，避免自动化测试产生付费调用） |
+| DASHSCOPE_API_KEY | 空 | 百炼 API Key；配置后由首选 LLM 引擎调用 |
+| BAILIAN_ENABLED | true | 是否启用文本推荐大模型（默认优先使用；离线测试需显式设为 false） |
 | BAILIAN_MODEL | qwen-plus | 文本推荐模型 |
 | BAILIAN_VISION_ENABLED | false | 是否启用图片视觉识别 |
 | BAILIAN_VISION_MODEL | qwen-vl-plus | 视觉识别模型 |
 | BAILIAN_ENDPOINT | 百炼兼容接口 | 模型请求地址 |
 | BAILIAN_CONNECT_TIMEOUT / BAILIAN_READ_TIMEOUT | 3s / 8s | 模型连接和读取超时 |
 
-授权趋势源变量：`TREND_JSON_URL`、`TREND_PLATFORM`、`TREND_CONNECT_TIMEOUT`、`TREND_READ_TIMEOUT`、`TREND_CACHE_TTL`。`TREND_JSON_URL` 为空时使用开发样本。数据源必须返回只含 `items` 的 JSON 对象；每条记录必须且只能包含 `id`、`platform`、`title`、`topicTags`、`heatScore`、`publishedAt`、`sourceUrl`、`imageUrl`。条目数为 1-50，热度为 0-100 整数，时间为 ISO-8601，链接为 HTTP(S)，`imageUrl` 可为 `null`。任一约束失败时整批拒绝并降级，不会把部分脏数据标记为实时趋势。
+授权趋势源变量：`TREND_JSON_URL`、`TREND_PLATFORM`、`TREND_WEB_URLS`、`TREND_WEB_PLATFORM`、`TREND_WEB_MAX_PAGE_CHARS`、`TREND_WEB_MAX_ARTICLES_PER_PAGE`、`TREND_CONNECT_TIMEOUT`、`TREND_READ_TIMEOUT`、`TREND_CACHE_TTL`。`TREND_JSON_URL` 与 `TREND_WEB_URLS` 都为空时使用开发样本。JSON 源必须返回只含 `items` 的对象；每条记录必须包含 `id`、`platform`、`title`、`topicTags`、`heatScore`、`publishedAt`、`sourceUrl`、`imageUrl`，可选 `summary`。条目数为 1-50，热度为 0-100 整数，时间为 ISO-8601，链接为 HTTP(S)，`imageUrl` 和 `summary` 可为 `null`。任一 JSON 条目约束失败时整批拒绝，不会把部分脏数据标记为实时趋势。
+
+网页源是逗号或换行分隔的、由服务端管理员配置的公开 HTTP(S) URL，不接受前端传入任意地址。`ConfiguredWebTrendSourceAdapter` 会限制 URL 数量、单页大小和文章数量，拒绝 localhost、内网/回环地址、带用户信息的 URL，并按缓存 TTL 复用结果。它优先读取 OpenGraph/JSON-LD，缺失时回退到页面标题、`article` 标题、可见摘要、标签、`time` 和图片；网页没有统一可信热度，因此界面会显示“来源页信号评分”。配置前仍需确认来源授权、服务条款和 robots 规则，不能绕过登录、验证码或访问控制。
 
 天气变量：WEATHER_PRIMARY_BASE_URL、WEATHER_FALLBACK_GEOCODING_BASE_URL、WEATHER_FALLBACK_FORECAST_BASE_URL、WEATHER_CONNECT_TIMEOUT、WEATHER_READ_TIMEOUT、WEATHER_CACHE_TTL、WEATHER_CACHE_MAX_SIZE。默认使用 wttr.in，失败后回退到 Open-Meteo，并在进程内缓存天气结果。
 
@@ -217,7 +220,7 @@ docker compose config -q
 前端 E2E 冒烟验证：
 
 ~~~powershell
-docker compose --profile app up --build -d
+docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile app up --build -d
 Set-Location frontend
 npm ci
 npm run test:e2e
@@ -257,7 +260,7 @@ python -m unittest discover -s scripts/evaluation -p "test_*.py"
 
 ### 没有百炼 API Key 是否无法使用
 
-不会。推荐会使用开发期规则引擎；只有需要真实文本推荐或视觉识别时才需要配置 DASHSCOPE_API_KEY，并且文本推荐还需另外显式设置 `BAILIAN_ENABLED=true`。视觉识别另外受 BAILIAN_VISION_ENABLED 控制。
+没有 Key 时仍然可以使用规则降级推荐；配置 `DASHSCOPE_API_KEY` 后，默认优先使用 qwen-plus。若要离线运行或避免模型费用，请显式设置 `BAILIAN_ENABLED=false`。视觉识别另外受 BAILIAN_VISION_ENABLED 控制。
 
 ### 端口被占用
 
