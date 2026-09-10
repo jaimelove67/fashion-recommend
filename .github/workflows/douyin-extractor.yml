@@ -1,0 +1,29 @@
+name: Douyin extractor tests
+
+on:
+  push:
+    paths:
+      - 'tools/douyin-extractor/**'
+      - '.github/workflows/douyin-extractor.yml'
+  pull_request:
+    paths:
+      - 'tools/douyin-extractor/**'
+      - '.github/workflows/douyin-extractor.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run offline parser, downloader and local API tests
+        working-directory: tools/douyin-extractor
+        run: python -m unittest discover -s tests -v

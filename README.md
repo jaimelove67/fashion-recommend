@@ -12,6 +12,17 @@
 - 智能能力：阿里云百炼兼容 OpenAI Chat Completions 协议；推荐模型和视觉识别默认可关闭。
 - 本地编排：Docker Compose。Redis 服务已纳入本地基础设施，便于后续缓存和趋势快照扩展。
 
+## 抖音素材提取工具（独立运行）
+
+新增的 [tools/douyin-extractor](tools/douyin-extractor/README.md) 可以从一条抖音分享链接中提取视频或图集，保存媒体文件及作品信息 JSON。工具使用 Python 和 Playwright，带本地网页、任务进度、取消和下载入口。
+
+- macOS：双击工具目录内的 `启动.command`。
+- Windows：安装 Python 3.10+ 后，双击工具目录内的 `启动.bat`。
+- 首次启动会安装依赖和 Chromium；如作品要求登录或验证，请在弹出的独立浏览器中完成。
+- 文件和登录状态仅保存在工具目录内，均已加入 Git 忽略规则。
+
+此提交提供独立的采集工具，尚未接入原有 Vue 页面、Spring Boot API、MinIO 或穿搭识别流程。集成建议与验证范围见 [接入说明](docs/douyin-extractor.md)。
+
 ## 环境要求
 
 完整 Docker 启动需要 Docker Desktop。直接运行源码还需要：
