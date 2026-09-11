@@ -13,7 +13,7 @@ defineEmits(['select'])
   <article class="trend-card" :class="{ active }" @click="$emit('select', item)">
     <img class="trend-image" :src="item.imageUrl" :alt="item.title" />
     <div class="trend-copy">
-      <div class="trend-meta"><span>{{ item.platform }}</span><span>更新于 {{ new Date(item.fetchedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span></div>
+      <div class="trend-meta"><span>{{ item.platform }}</span><span>更新时间 {{ new Date(item.fetchedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span></div>
       <h3>{{ item.title }}</h3>
       <p>{{ item.topicTags.join(' / ') }}</p>
     </div>

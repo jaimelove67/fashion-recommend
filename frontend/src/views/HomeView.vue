@@ -36,29 +36,29 @@ const statRail = computed(() => [
     label: '我的衣橱',
     value: wardrobeStats.value.total ?? 0,
     unit: '件',
-    note: `本周新增 ${wardrobeStats.value.weeklyAdded ?? 0} 件`,
+    note: `近 7 天新增 ${wardrobeStats.value.weeklyAdded ?? 0} 件`,
     icon: Shirt
   },
   {
-    label: '穿搭记录',
+    label: '搭配记录',
     value: recommendationStats.value.total ?? 0,
-    unit: '次',
+    unit: '条',
     note: `已收藏 ${recommendationStats.value.saved ?? 0} 条`,
     icon: Bookmark
   },
   {
-    label: '风潮样本',
+    label: '趋势条目',
     value: trendStats.value.count ?? 0,
     unit: '条',
-    note: trendStats.value.count ? `平均${scoreLabel.value} ${trendStats.value.averageHeat}` : '尚无可用数据',
+    note: trendStats.value.count ? `平均${scoreLabel.value} ${trendStats.value.averageHeat}` : '暂无趋势数据',
     icon: TrendingUp
   }
 ])
 
 function formatUpdateTime(value) {
-  if (!value) return '尚未更新'
+  if (!value) return '暂无更新时间'
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '尚未更新'
+  if (Number.isNaN(date.getTime())) return '暂无更新时间'
   return date.toLocaleString('zh-CN', {
     month: '2-digit',
     day: '2-digit',
@@ -89,28 +89,28 @@ function goToTrend(item) {
     <section class="editorial-hero" aria-labelledby="home-title">
       <div class="hero-copy">
         <div v-if="trendMeta.demoMode" class="sample-note" role="status">
-          风潮数据为开发样本
+          趋势数据使用开发样本
         </div>
-        <h1 id="home-title">知己，懂你的穿搭。</h1>
+        <h1 id="home-title">今天穿什么，从衣橱开始。</h1>
         <p class="hero-lead">
-          用你已记录的衣橱、风格档案和公开趋势样本，生成能说清理由、也能留下反馈的每日搭配。
+          记下你的衣物，再填场合和城市。系统会结合天气与风格偏好，从衣橱里挑出几套搭配，并说明选择理由。
         </p>
         <div class="hero-actions">
           <button type="button" class="primary-action" @click="app.selectView('recommend')">
-            <Sparkles :size="18" />开始搭配<ArrowRight :size="18" />
+            <Sparkles :size="18" />生成今日搭配<ArrowRight :size="18" />
           </button>
           <button type="button" class="secondary-action" @click="app.selectView('trend')">
-            查看风潮<TrendingUp :size="18" />
+            看看趋势<TrendingUp :size="18" />
           </button>
         </div>
         <div class="hero-context">
-          <span>{{ profile?.displayName ? `${profile.displayName}的知己` : '我的知己' }}</span>
+          <span>{{ profile?.displayName ? `${profile.displayName}的风格档案` : '我的风格档案' }}</span>
           <span v-if="heroTrend">当前趋势：{{ heroTrend.title }}</span>
-          <span v-else>风潮数据尚未载入</span>
+          <span v-else>趋势数据还没准备好</span>
         </div>
       </div>
 
-      <figure class="hero-collage" aria-label="穿搭风潮视觉集">
+      <figure class="hero-collage" aria-label="趋势参考图">
         <div
           v-for="(frame, index) in heroFrames"
           :key="frame.item?.id || frame.src"
@@ -119,18 +119,18 @@ function goToTrend(item) {
         >
           <img
             :src="frame.src"
-            :alt="frame.item?.title || '穿搭视觉参考'"
+            :alt="frame.item?.title || '穿搭参考图'"
             @error="handleImageError($event, frame.fallback)"
           />
         </div>
         <figcaption>
           <span>ZIJI / LOOK NOTES</span>
-          <strong>{{ heroTrend?.title || '从今天的衣橱开始' }}</strong>
+          <strong>{{ heroTrend?.title || '先从今天这一套开始' }}</strong>
         </figcaption>
       </figure>
     </section>
 
-    <section class="stat-rail" aria-label="真实数据概览">
+    <section class="stat-rail" aria-label="衣橱与推荐概览">
       <article v-for="stat in statRail" :key="stat.label" class="stat-item">
         <component :is="stat.icon" :size="19" aria-hidden="true" />
         <div>
@@ -140,26 +140,26 @@ function goToTrend(item) {
         </div>
       </article>
       <p class="rail-source">
-        <span>{{ trendMeta.demoMode ? '开发样本' : '后端数据' }}</span>
-        更新于 {{ formatUpdateTime(trendMeta.fetchedAt) }}
+        <span>{{ trendMeta.demoMode ? '开发样本' : '服务端数据' }}</span>
+        最后更新 {{ formatUpdateTime(trendMeta.fetchedAt) }}
       </p>
     </section>
 
     <section class="trend-section" aria-labelledby="home-trend-title">
       <header class="section-heading">
         <div>
-          <p>风潮摘要</p>
-          <h2 id="home-trend-title">从样本里找到可穿的线索</h2>
+          <p>趋势速览</p>
+          <h2 id="home-trend-title">先看看最近有哪些趋势</h2>
         </div>
         <button type="button" class="section-link" @click="app.selectView('trend')">
-          全部风潮<ArrowRight :size="17" />
+          查看全部趋势<ArrowRight :size="17" />
         </button>
       </header>
 
-      <div v-if="state.trendsLoading" class="section-state" aria-live="polite">正在读取风潮数据…</div>
+      <div v-if="state.trendsLoading" class="section-state" aria-live="polite">正在加载趋势数据…</div>
       <div v-else-if="!trendPreviews.length" class="section-state">
-        <strong>暂无风潮样本</strong>
-        <button type="button" @click="app.loadTrends()">重新读取</button>
+        <strong>暂无趋势数据</strong>
+        <button type="button" @click="app.loadTrends()">重新加载</button>
       </div>
       <div v-else class="trend-grid">
         <button
@@ -179,12 +179,12 @@ function goToTrend(item) {
           </span>
           <span class="preview-copy">
             <span class="preview-meta">
-              <span>{{ item.platform || '来源未标记' }}</span>
+              <span>{{ item.platform || '未标注来源' }}</span>
               <span>{{ scoreLabel }} {{ item.heatScore ?? '—' }}</span>
             </span>
             <strong>{{ item.title }}</strong>
-            <span class="preview-tags">{{ (item.topicTags || []).join(' / ') || '暂无标签' }}</span>
-            <span class="preview-open">查看数据<ArrowUpRight :size="16" /></span>
+            <span class="preview-tags">{{ (item.topicTags || []).join(' / ') || '未设置标签' }}</span>
+            <span class="preview-open">查看详情<ArrowUpRight :size="16" /></span>
           </span>
         </button>
       </div>
@@ -201,11 +201,11 @@ function goToTrend(item) {
 
 .editorial-hero {
   display: grid;
-  min-height: 620px;
+  min-height: 610px;
   grid-template-columns: minmax(300px, 0.78fr) minmax(500px, 1.22fr);
   gap: clamp(28px, 5vw, 76px);
   align-items: center;
-  padding: 44px 0 36px;
+  padding: 54px 0 42px;
 }
 
 .hero-copy {
@@ -214,25 +214,37 @@ function goToTrend(item) {
 }
 
 .sample-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   width: fit-content;
   margin-bottom: 22px;
-  border-left: 3px solid var(--accent);
-  padding: 6px 10px;
-  color: var(--muted);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: 999px;
+  padding: 7px 11px;
+  color: var(--accent-strong);
   background: var(--accent-soft);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0;
 }
 
+.sample-note::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--coral);
+  content: '';
+}
+
 .hero-copy h1 {
   max-width: 570px;
   margin: 0;
-  font-family: Georgia, "Songti SC", serif;
-  font-size: 68px;
-  font-weight: 500;
-  line-height: 1.02;
-  letter-spacing: 0;
+  font-family: var(--font-display);
+  font-size: clamp(48px, 5vw, 68px);
+  font-weight: 600;
+  line-height: 1.04;
+  letter-spacing: -.04em;
   text-wrap: balance;
 }
 
@@ -241,7 +253,7 @@ function goToTrend(item) {
   margin: 26px 0 0;
   color: var(--muted);
   font-size: 15px;
-  line-height: 1.85;
+  line-height: 1.8;
 }
 
 .hero-actions {
@@ -267,9 +279,10 @@ function goToTrend(item) {
 }
 
 .primary-action {
-  border: 1px solid var(--ink);
+  border: 1px solid var(--accent-strong);
   color: var(--surface);
-  background: var(--ink);
+  background: var(--accent-strong);
+  box-shadow: 0 10px 22px rgba(27, 85, 77, .16);
 }
 
 .secondary-action {
@@ -283,7 +296,16 @@ function goToTrend(item) {
 .section-link:hover,
 .section-link:focus-visible {
   border-color: var(--accent);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
   outline: 0;
+}
+
+.hero-actions .primary-action:hover,
+.hero-actions .primary-action:focus-visible {
+  color: var(--surface);
+  background: var(--accent);
+  box-shadow: 0 13px 28px rgba(27, 85, 77, .22);
 }
 
 .hero-context {
@@ -308,15 +330,29 @@ function goToTrend(item) {
   position: relative;
   min-height: 540px;
   margin: 0;
+  isolation: isolate;
+}
+
+.hero-collage::before {
+  position: absolute;
+  top: 12%;
+  right: 1%;
+  width: 78%;
+  height: 74%;
+  border-radius: 26px;
+  background: #e7ece6;
+  content: '';
+  transform: rotate(-2deg);
+  z-index: -1;
 }
 
 .collage-frame {
   position: absolute;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
-  border-radius: var(--radius);
+  border: 7px solid rgba(255, 253, 249, .84);
+  border-radius: 16px;
   background: var(--surface);
-  box-shadow: 0 18px 46px rgba(22, 32, 29, 0.1);
+  box-shadow: var(--shadow-soft);
 }
 
 .collage-frame img {
@@ -373,7 +409,7 @@ function goToTrend(item) {
 }
 
 .hero-collage figcaption strong {
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-display);
   font-size: 18px;
   font-weight: 500;
   line-height: 1.25;
@@ -384,6 +420,7 @@ function goToTrend(item) {
   grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(190px, 0.7fr);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
 }
 
 .stat-item {
@@ -418,7 +455,7 @@ function goToTrend(item) {
 }
 
 .stat-item strong {
-  font-family: Georgia, serif;
+  font-family: var(--font-mono);
   font-size: 32px;
   font-weight: 500;
 }
@@ -442,7 +479,7 @@ function goToTrend(item) {
 }
 
 .trend-section {
-  padding: 92px 0 100px;
+  padding: 84px 0 92px;
 }
 
 .section-heading {
@@ -463,9 +500,9 @@ function goToTrend(item) {
 .section-heading h2 {
   max-width: 650px;
   margin: 0;
-  font-family: Georgia, "Songti SC", serif;
-  font-size: 36px;
-  font-weight: 500;
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 700;
   line-height: 1.18;
   letter-spacing: 0;
 }
@@ -480,7 +517,7 @@ function goToTrend(item) {
 
 .trend-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1.2fr .9fr .9fr;
   gap: 16px;
 }
 
@@ -488,17 +525,22 @@ function goToTrend(item) {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 14px;
   padding: 0;
   color: var(--ink);
   background: var(--surface);
   text-align: left;
-  transition: transform 180ms ease, border-color 180ms ease;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.trend-preview:first-child .preview-image {
+  aspect-ratio: 1.08 / 1;
 }
 
 .trend-preview:hover,
 .trend-preview:focus-visible {
   border-color: var(--accent);
+  box-shadow: var(--shadow-soft);
   outline: 0;
   transform: translateY(-3px);
 }
@@ -555,9 +597,9 @@ function goToTrend(item) {
 
 .preview-copy > strong {
   min-height: 48px;
-  font-family: Georgia, "Songti SC", serif;
-  font-size: 21px;
-  font-weight: 500;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -590,7 +632,7 @@ function goToTrend(item) {
 
 .section-state strong {
   color: var(--ink);
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-display);
   font-size: 22px;
   font-weight: 500;
 }
@@ -608,7 +650,7 @@ function goToTrend(item) {
   }
 
   .hero-copy h1 {
-    font-size: 54px;
+    font-size: 56px;
   }
 
   .hero-collage {
@@ -640,7 +682,7 @@ function goToTrend(item) {
 
   .hero-copy h1 {
     max-width: 560px;
-    font-size: 50px;
+    font-size: 52px;
   }
 
   .hero-collage {
@@ -766,6 +808,10 @@ function goToTrend(item) {
   }
 
   .preview-image {
+    aspect-ratio: 4 / 3;
+  }
+
+  .trend-preview:first-child .preview-image {
     aspect-ratio: 4 / 3;
   }
 }

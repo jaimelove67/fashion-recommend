@@ -6,9 +6,9 @@ server:
       cookie:
         http-only: true
         same-site: lax
-        # Secure by default for deployed environments. Local HTTP Compose runs
-        # explicitly set SESSION_COOKIE_SECURE=false in .env.example.
-        secure: ${SESSION_COOKIE_SECURE:true}
+        # The default app entrypoints use local HTTP. HTTPS deployments must
+        # explicitly set SESSION_COOKIE_SECURE=true.
+        secure: ${SESSION_COOKIE_SECURE:false}
 
 spring:
   application:

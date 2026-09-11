@@ -63,7 +63,6 @@ docker compose up -d
 
 ~~~powershell
 Set-Location backend
-$env:SESSION_COOKIE_SECURE = "false" # Local HTTP only
 mvn spring-boot:run
 ~~~
 
@@ -90,7 +89,7 @@ mvn spring-boot:run
 
 密码使用 BCrypt 存储。Spring Security 将认证状态保存在服务端 Session 中，浏览器只接收 HttpOnly、SameSite=Lax 的 `JSESSIONID` Cookie，前端不保存可伪造的用户 ID 或认证 Token。个人接口从认证上下文取得用户名；匿名访问返回 401，退出登录会使当前 Session 失效并清除会话数据。
 
-前端在同源请求中携带 Cookie，并从 `GET /api/v1/auth/csrf` 取得 CSRF Token；所有 POST、PUT、DELETE 请求发送服务端返回的 `X-XSRF-TOKEN` 请求头。令牌过期导致 403 时前端只刷新一次令牌并重试。后端默认启用 Secure Cookie；本地 HTTP 的 Compose 配置和 `.env.example` 显式使用 `SESSION_COOKIE_SECURE=false`，源码启动时也需在终端设置该变量。生产部署应启用 HTTPS，并显式设置 `SESSION_COOKIE_SECURE=true`，尤其不能沿用本地 Compose 的 false 默认值。
+前端在同源请求中携带 Cookie，并从 `GET /api/v1/auth/csrf` 取得 CSRF Token；所有 POST、PUT、DELETE 请求发送服务端返回的 `X-XSRF-TOKEN` 请求头。令牌过期导致 403 时前端只刷新一次令牌并重试。后端默认使用可兼容本地 HTTP 的 Session Cookie，源码启动后刷新页面仍会保留登录状态。生产部署应启用 HTTPS，并显式设置 `SESSION_COOKIE_SECURE=true`。
 
 ## 准备答辩演示数据
 
@@ -172,7 +171,7 @@ mvn spring-boot:run
 | BACKEND_PORT / FRONTEND_PORT | 8088 / 8090 | Docker 应用的主机端口 |
 | AUTH_REGISTRATION_ENABLED | true | 是否允许创建本地账号 |
 | SESSION_TIMEOUT | 30m | 服务端 Session 有效期 |
-| SESSION_COOKIE_SECURE | false（本地 HTTP 示例） | 生产 HTTPS 必须设置为 true；未设置时后端默认 true |
+| SESSION_COOKIE_SECURE | false（本地 HTTP 默认值） | 生产 HTTPS 必须设置为 true |
 | DASHSCOPE_API_KEY | 空 | 百炼 API Key；配置后由首选 LLM 引擎调用 |
 | BAILIAN_ENABLED | true | 是否启用文本推荐大模型（默认优先使用；离线测试需显式设为 false） |
 | BAILIAN_MODEL | qwen-plus | 文本推荐模型 |

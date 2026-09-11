@@ -17,10 +17,10 @@ class SessionCookieConfigurationTest {
             .withUserConfiguration(CookieConfiguration.class);
 
     @Test
-    void defaultsToSecureSessionCookies() {
+    void defaultsToSessionCookiesThatWorkWithLocalHttp() {
         contextRunner.run(context -> {
             var cookie = context.getBean(ServerProperties.class).getServlet().getSession().getCookie();
-            assertThat(cookie.getSecure()).isTrue();
+            assertThat(cookie.getSecure()).isFalse();
             assertThat(cookie.getHttpOnly()).isTrue();
         });
     }
@@ -30,6 +30,15 @@ class SessionCookieConfigurationTest {
         contextRunner.withPropertyValues("SESSION_COOKIE_SECURE=false").run(context -> {
             var cookie = context.getBean(ServerProperties.class).getServlet().getSession().getCookie();
             assertThat(cookie.getSecure()).isFalse();
+            assertThat(cookie.getHttpOnly()).isTrue();
+        });
+    }
+
+    @Test
+    void allowsExplicitHttpsConfiguration() {
+        contextRunner.withPropertyValues("SESSION_COOKIE_SECURE=true").run(context -> {
+            var cookie = context.getBean(ServerProperties.class).getServlet().getSession().getCookie();
+            assertThat(cookie.getSecure()).isTrue();
             assertThat(cookie.getHttpOnly()).isTrue();
         });
     }

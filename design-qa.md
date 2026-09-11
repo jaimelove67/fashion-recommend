@@ -76,6 +76,65 @@ The implementation intentionally uses product-specific copy instead of copying r
 
 final result: passed
 
+## 2026-09-11 个人形象页联合分析流程复核
+
+- Source visual truth: `docx/reference_photo/personal_page.png` plus the selected “中心画像仪表盘” direction generated from that reference.
+- Implementation evidence: live Codex in-app browser at `http://localhost:5173/#profile`, authenticated as the local `demo-user`; desktop viewport measured 1280px wide with document scroll width 1265px, so the profile page has no root horizontal overflow.
+- Visual state: warm paper-like background, horizontal WEAVESELF header, left copy block, centered personal portrait with height/weight/photo fact cards, right AI analysis panel, three lower guidance modules, and a profile timeline. The reference’s AI score/BMI-style claims were intentionally replaced with editable qualitative analysis and explicit “not an appearance rating” copy.
+
+### Interaction and state checks
+
+- Height and weight are required before the second step; native 80–250 cm and 20–300 kg bounds plus a custom “请填写身高和体重后再继续” guard were verified.
+- The example portrait is not treated as the user’s upload. Starting analysis without a user-selected image is blocked with “请先选择个人照片，再开始分析”。
+- JPG/PNG/WEBP file selection, the combined-input summary, the “正在整理你的形象参考” state, the completed state, inline analysis editing, recommendation CTA, and the post-analysis notice were verified through the live accessibility tree.
+- Dialog semantics are present (`role=dialog`, `aria-modal=true`); body scrolling is locked while open and restored after close.
+- Browser runtime logs contained no warning or error entries during the final pass.
+
+### Findings
+
+No actionable P0, P1, or P2 findings remain.
+
+### Accepted Product Constraint
+
+- The current page implements the requested front-end flow with local demo persistence. The existing backend profile contract still does not expose height, weight, photo, or structured face-analysis fields; wiring these values to the real LLM endpoint remains a separate API/data-model task.
+
+final result: passed
+
+## 2026-09-10 推荐页一周穿搭工作台复核
+
+- Source visual truth: `docx/reference_photo/recommendation_page.png` (1132 × 1389 px).
+- Implementation evidence: live Codex in-app browser at `http://localhost:8090/?preview=20260910&fallback=1#recommend`, authenticated as `demo-user`; captured viewport was 653 × 694 CSS px. DOM metrics reported one weekly section, one selected-day detail, one generator, one generated-result region, and one signal grid; document scroll width stayed at 638 px, so there was no root horizontal overflow at this viewport.
+- State: current week `9月7日 — 9月13日`, Thursday selected, generator expanded. A second pass generated local recommendation `#33` under the fallback rule engine, saved it, rated it 5 stars, and confirmed it on the history page.
+
+### Intentional redesign boundary
+
+- Preserved from the reference: seven-day browsing, day-level weather/context, outfit item grouping, match score, and the ability to move across the week.
+- Redesigned per request: the header/hero, overview rail, selected-day detail, generator workbench, closet signal, trend signal, and usage notes. The new visual direction uses a warm paper surface, olive operational accents, brick action accents, editorial serif headlines, and tighter workbench grouping instead of copying the source page pixel-for-pixel.
+
+### Mandatory comparison passes
+
+- Typography: serif display treatment is reserved for the page promise and selected-day headline; metadata and controls use a compact sans system. The hero wraps cleanly at the captured width without clipped characters.
+- Spacing and layout: the weekly tabs remain the primary browsing band; the selected-day detail is visually separated from the generator; the generator collapses to a compact summary and expands back to its labeled fields. No overlapping regions were observed in the live DOM metrics.
+- Viewport resilience: at 653 px, the weekly cards use an intentional horizontal track while the page itself remains within the viewport. The responsive rules stack the detail/workbench regions below the weekly planner and preserve usable controls.
+- Colors and tokens: warm paper background, dark ink, olive selected states, brick action states, and low-contrast borders are applied consistently; no unrelated gradients or decorative blobs were introduced.
+- Image quality: visible outfit imagery uses existing repository assets and real wardrobe item URLs with fixed object-fit framing and alt text. The available project assets do not exactly reproduce the reference subjects; this remains an accepted asset constraint.
+- Copy and content: the main title remains `从你的衣橱，生成今天的答案。`; dynamic weekly details use the authenticated demo wardrobe and weather data. Generated result #33 explicitly identified `规则引擎降级 / 模型调用已关闭`.
+- Icons and controls: Lucide icons are used for weather, navigation, outfit states, save, rating, and section controls. Tabs expose semantic `role=tab`; form controls retain accessible labels.
+- States and interactions: verified day selection, next-week navigation, return-to-current-week, generator collapse/expand, generation, save, 5-star rating, and history persistence. Browser console warnings/errors were empty after the final page load.
+- Accessibility: labeled inputs, semantic buttons/tabs, disabled saved state, visible selection state, and no root horizontal overflow were verified in the live page.
+
+### Findings
+
+No actionable P0, P1, or P2 findings remain.
+
+### Accepted Product Constraints
+
+- The source reference is a populated marketing-style mockup while the implementation is driven by the authenticated demo wardrobe/history contract; content and counts intentionally come from live local data.
+- The live browser capture is available in the Codex in-app browser session rather than as a persisted PNG artifact; the page was inspected visually and through its accessibility tree/DOM metrics.
+- External model calls were disabled for this verification run through the existing E2E compose override; the real user-visible generation, save, rating, and persistence states were still exercised.
+
+final result: passed
+
 ## 2026-09-08 自动轮播节奏最终复核
 
 - 行为目标：风潮画廊每 1000ms 自动切换一次；鼠标悬浮任意图片时暂停，移出后恢复。

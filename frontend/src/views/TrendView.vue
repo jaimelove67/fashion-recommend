@@ -54,26 +54,26 @@ let galleryTimer = null
 let galleryMounted = false
 let galleryMediaQuery = null
 const visibleCards = computed(() => filteredTrends.value.slice(0, 3))
-const metricRail = computed(() => [
+  const metricRail = computed(() => [
   {
-    label: '可用样本',
+    label: '当前条目',
     value: trendStats.value.count ?? 0,
     unit: '条',
-    note: trendMeta.value.demoMode ? '开发样本集' : '后端返回快照',
+    note: trendMeta.value.demoMode ? '使用开发样本' : '服务端返回数据',
     icon: Layers3
   },
   {
     label: `平均${scoreLabel.value}`,
     value: trendStats.value.count ? trendStats.value.averageHeat : '—',
     unit: trendStats.value.count ? '分' : '',
-    note: '仅基于当前返回项',
+    note: '按当前条目计算',
     icon: TrendingUp
   },
   {
-    label: '高频标签',
-    value: trendStats.value.topTag || '暂无',
+    label: '出现最多的标签',
+    value: trendStats.value.topTag || '未设置',
     unit: '',
-    note: '由当前样本标签计数',
+    note: '统计当前标签出现次数',
     icon: Tag
   }
 ])
@@ -83,18 +83,18 @@ const selectedFacts = computed(() => {
   if (!item) return []
   return [
     {
-      label: `${scoreLabel.value}与位次`,
+      label: `${scoreLabel.value}与排名`,
       value: item.heatScore ?? '—',
-      note: selectedRank.value ? `当前样本第 ${selectedRank.value} 位` : '暂无位次'
+      note: selectedRank.value ? `当前条目排名第 ${selectedRank.value}` : '暂无排名'
     },
     {
-      label: '内容标签',
+      label: '主题标签',
       value: (item.topicTags || []).length,
-      note: (item.topicTags || []).join('、') || '暂无标签'
+      note: (item.topicTags || []).join('、') || '未设置标签'
     },
     {
-      label: '采集状态',
-      value: item.stale ? '已标记过期' : '已采集',
+      label: '数据状态',
+      value: item.stale ? '已过期' : '已收录',
       note: formatDateTime(item.fetchedAt)
     }
   ]
@@ -161,13 +161,13 @@ onBeforeUnmount(() => {
 })
 
 function formatPlatform(value) {
-  return platformNames[value] || value || '来源未标记'
+  return platformNames[value] || value || '未标注来源'
 }
 
 function formatDateTime(value) {
-  if (!value) return '尚未更新'
+  if (!value) return '暂无更新时间'
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '尚未更新'
+  if (Number.isNaN(date.getTime())) return '暂无更新时间'
   return date.toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
@@ -324,19 +324,19 @@ function useSuggestion(suggestion) {
     <section class="trend-hero" aria-labelledby="trend-title">
       <div class="hero-intro">
         <div v-if="trendMeta.demoMode" class="demo-banner" role="status">
-          <strong>开发样本</strong>
-          <span>当前内容用于界面与数据链路联调</span>
+          <strong>开发样本数据</strong>
+          <span>当前内容用于演示，接入趋势源后会替换</span>
         </div>
-        <h1 id="trend-title">风潮观察</h1>
-        <p>阅读后端已返回的公开趋势快照，看清标签、评分与时间，再决定它是否值得进入你的衣橱。</p>
+        <h1 id="trend-title">趋势观察</h1>
+        <p>这里展示已返回的公开趋势数据。查看标签、热度和发布时间，再决定哪些方向值得试试。</p>
         <div class="hero-update">
-          <span>数据更新 {{ formatDateTime(trendMeta.fetchedAt) }}</span>
+          <span>更新时间 {{ formatDateTime(trendMeta.fetchedAt) }}</span>
           <button
             type="button"
             class="refresh-button"
             :disabled="state.trendsLoading"
-            aria-label="刷新风潮数据"
-            title="刷新风潮数据"
+            aria-label="刷新趋势数据"
+            title="刷新趋势数据"
             @click="app.loadTrends()"
           >
             <LoaderCircle v-if="state.trendsLoading" class="spinning" :size="18" />
@@ -348,17 +348,17 @@ function useSuggestion(suggestion) {
       <figure class="hero-media">
         <img
           :src="heroImage"
-          :alt="selectedTrend?.title || '风潮视觉参考'"
+          :alt="selectedTrend?.title || '趋势参考图'"
           @error="handleImageError($event, fallbackLooks[0])"
         />
         <figcaption>
-          <span>{{ selectedTrend ? formatPlatform(selectedTrend.platform) : '风潮样本' }}</span>
-          <strong>{{ selectedTrend?.title || '等待风潮数据' }}</strong>
+          <span>{{ selectedTrend ? formatPlatform(selectedTrend.platform) : '趋势条目' }}</span>
+          <strong>{{ selectedTrend?.title || '等待趋势数据' }}</strong>
         </figcaption>
       </figure>
     </section>
 
-    <section class="metric-rail" aria-label="风潮数据概览">
+    <section class="metric-rail" aria-label="趋势数据概览">
       <article v-for="metric in metricRail" :key="metric.label">
         <component :is="metric.icon" :size="19" aria-hidden="true" />
         <div>
@@ -373,8 +373,8 @@ function useSuggestion(suggestion) {
       <header class="gallery-heading">
         <div>
           <p>DAILY TOP 10</p>
-          <h2 id="trend-gallery-title">风潮穿搭精选</h2>
-          <span>{{ trendMeta.demoMode ? '开发样本 · 接入抓取后每日更新' : `按${scoreLabel}降序排列 · 每日更新` }}</span>
+          <h2 id="trend-gallery-title">趋势穿搭精选</h2>
+          <span>{{ trendMeta.demoMode ? '开发样本 · 接入趋势源后更新' : `按${scoreLabel}从高到低排列 · 每日更新` }}</span>
         </div>
       </header>
 
@@ -383,8 +383,8 @@ function useSuggestion(suggestion) {
         ref="galleryStage"
         class="gallery-stage"
         role="region"
-        aria-label="风潮穿搭自动轮播画廊"
-        aria-roledescription="自动轮播画廊"
+        aria-label="趋势穿搭轮播"
+        aria-roledescription="趋势穿搭轮播"
         aria-keyshortcuts="ArrowLeft ArrowRight Home End"
         tabindex="0"
         @keydown="handleGalleryKeydown"
@@ -414,21 +414,21 @@ function useSuggestion(suggestion) {
         </button>
       </div>
       <div v-else class="trend-state gallery-empty">
-        <strong>等待今日风潮样本</strong>
-        <span>抓取数据准备好后，这里会展示热度最高的 10 套穿搭。</span>
+        <strong>等待趋势数据</strong>
+        <span>趋势源准备好后，这里会展示热度最高的 10 条内容。</span>
       </div>
     </section>
 
     <section class="trend-browser" aria-labelledby="trend-browser-title">
       <header class="browser-heading">
         <div>
-          <p>趋势分类</p>
-          <h2 id="trend-browser-title">选一个标签，聚焦当下风格</h2>
+          <p>按标签浏览</p>
+          <h2 id="trend-browser-title">按标签查看趋势</h2>
         </div>
-        <span>{{ filteredTrends.length }} 条匹配</span>
+        <span>{{ filteredTrends.length }} 条结果</span>
       </header>
 
-      <div class="tag-filters" role="toolbar" aria-label="按标签筛选风潮">
+      <div class="tag-filters" role="toolbar" aria-label="按标签筛选趋势">
         <button
           v-for="tagName in tags"
           :key="tagName"
@@ -442,11 +442,11 @@ function useSuggestion(suggestion) {
       </div>
 
       <div v-if="state.trendsLoading && !selectedTrend" class="trend-state" aria-live="polite">
-        <LoaderCircle class="spinning" :size="22" />正在读取风潮数据…
+        <LoaderCircle class="spinning" :size="22" />正在加载趋势数据…
       </div>
       <div v-else-if="!selectedTrend" class="trend-state">
-        <strong>当前没有可用趋势</strong>
-        <button type="button" @click="app.loadTrends()">重新读取</button>
+        <strong>暂时没有趋势数据</strong>
+        <button type="button" @click="app.loadTrends()">重新加载</button>
       </div>
       <template v-else>
         <article class="selected-feature">
@@ -462,10 +462,10 @@ function useSuggestion(suggestion) {
             <div class="feature-number">NO. {{ String(selectedRank || 1).padStart(2, '0') }}</div>
             <p class="feature-source">{{ formatPlatform(selectedTrend.platform) }} · 发布于 {{ formatDateTime(selectedTrend.publishedAt) }}</p>
             <h2>{{ selectedTrend.title }}</h2>
-            <p class="feature-summary">{{ selectedTrend.summary || `这条趋势的可用信息来自标题、主题标签和${scoreLabel}字段。系统不会把评分直接当作个人偏好。` }}</p>
-            <div class="feature-tags" aria-label="趋势标签">
+            <p class="feature-summary">{{ selectedTrend.summary || `当前条目只有标题、主题标签和${scoreLabel}。${scoreLabel}反映数据源的热度信号，不等于你的个人偏好。` }}</p>
+            <div class="feature-tags" aria-label="主题标签">
               <span v-for="tagName in selectedTrend.topicTags || []" :key="tagName">{{ tagName }}</span>
-              <span v-if="!(selectedTrend.topicTags || []).length">暂无标签</span>
+              <span v-if="!(selectedTrend.topicTags || []).length">未设置标签</span>
             </div>
             <a
               v-if="selectedTrend.sourceUrl"
@@ -479,7 +479,7 @@ function useSuggestion(suggestion) {
           </div>
         </article>
 
-        <div class="fact-grid" aria-label="当前趋势数据卡">
+        <div class="fact-grid" aria-label="当前趋势信息">
           <article v-for="fact in selectedFacts" :key="fact.label" class="fact-card">
             <span>{{ fact.label }}</span>
             <strong>{{ fact.value }}</strong>
@@ -492,8 +492,8 @@ function useSuggestion(suggestion) {
     <section v-if="visibleCards.length" class="trend-list" aria-labelledby="trend-list-title">
       <header class="list-heading">
         <div>
-          <p>当前样本</p>
-          <h2 id="trend-list-title">精选趋势，三种穿法线索</h2>
+          <p>当前条目</p>
+          <h2 id="trend-list-title">精选趋势</h2>
         </div>
       </header>
       <div class="trend-card-grid">
@@ -520,11 +520,11 @@ function useSuggestion(suggestion) {
             <span class="card-copy">
               <span class="card-meta"><span>{{ formatPlatform(item.platform) }}</span><span>{{ scoreLabel }} {{ item.heatScore ?? '—' }}</span></span>
               <strong>{{ item.title }}</strong>
-              <span class="card-tags">{{ (item.topicTags || []).join(' / ') || '暂无标签' }}</span>
+              <span class="card-tags">{{ (item.topicTags || []).join(' / ') || '未设置标签' }}</span>
             </span>
           </button>
           <a v-if="item.sourceUrl" :href="item.sourceUrl" target="_blank" rel="noreferrer">
-            来源页<ArrowUpRight :size="15" />
+            查看来源<ArrowUpRight :size="15" />
           </a>
         </article>
       </div>
@@ -534,12 +534,12 @@ function useSuggestion(suggestion) {
       <header>
         <div>
           <p>个人档案</p>
-          <h2 id="suggestion-title">下一件，从你的风格空缺里找</h2>
+          <h2 id="suggestion-title">下一件衣物，可以试试什么？</h2>
         </div>
         <Sparkles :size="22" aria-hidden="true" />
       </header>
 
-      <div v-if="state.profileLoading" class="suggestion-state" aria-live="polite">正在读取风格档案…</div>
+      <div v-if="state.profileLoading" class="suggestion-state" aria-live="polite">正在加载风格档案…</div>
       <div v-else-if="profile?.itemSuggestions?.length" class="suggestion-list">
         <button
           v-for="(suggestion, index) in profile.itemSuggestions"
@@ -549,13 +549,13 @@ function useSuggestion(suggestion) {
         >
           <span>{{ String(index + 1).padStart(2, '0') }}</span>
           <strong>{{ suggestion }}</strong>
-          <em>用于下次推荐</em>
+          <em>带入下一次推荐</em>
           <ArrowRight :size="17" />
         </button>
       </div>
       <div v-else class="suggestion-state">
-        <span>{{ profile ? '当前档案暂无单品建议' : '完善个人档案后，这里会显示单品建议' }}</span>
-        <button type="button" @click="app.selectView('profile')">前往个人档案</button>
+        <span>{{ profile ? '档案里还没有衣物建议' : '填写风格档案后，这里会按你的偏好给出衣物建议' }}</span>
+        <button type="button" @click="app.selectView('profile')">打开风格档案</button>
       </div>
     </section>
   </div>
@@ -571,7 +571,7 @@ function useSuggestion(suggestion) {
 
 .trend-hero {
   display: grid;
-  min-height: 520px;
+  min-height: 500px;
   grid-template-columns: minmax(320px, 0.82fr) minmax(460px, 1.18fr);
   gap: 68px;
   align-items: center;
@@ -580,11 +580,11 @@ function useSuggestion(suggestion) {
 
 .hero-intro h1 {
   margin: 0;
-  font-family: Georgia, "Songti SC", serif;
-  font-size: 60px;
-  font-weight: 500;
+  font-family: var(--font-display);
+  font-size: 54px;
+  font-weight: 700;
   line-height: 1.05;
-  letter-spacing: 0;
+  letter-spacing: -.06em;
 }
 
 .hero-intro > p {
@@ -655,10 +655,10 @@ function useSuggestion(suggestion) {
   width: 100%;
   aspect-ratio: 16 / 10;
   display: block;
-  border-radius: var(--radius);
+  border-radius: 16px;
   object-fit: cover;
   object-position: center 35%;
-  box-shadow: 0 20px 50px rgba(22, 32, 29, 0.1);
+  box-shadow: 0 20px 50px rgba(25, 70, 60, .1);
 }
 
 .hero-media figcaption {
@@ -668,10 +668,10 @@ function useSuggestion(suggestion) {
   gap: 5px;
   margin: -36px 0 0 auto;
   border-left: 3px solid var(--accent);
-  border-radius: var(--radius) 0 0 var(--radius);
+  border-radius: 14px 0 0 14px;
   padding: 15px 18px;
   background: var(--surface);
-  box-shadow: 0 12px 30px rgba(22, 32, 29, 0.1);
+  box-shadow: 0 12px 30px rgba(25, 70, 60, .1);
 }
 
 .hero-media figcaption span {
@@ -681,7 +681,7 @@ function useSuggestion(suggestion) {
 }
 
 .hero-media figcaption strong {
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-display);
   font-size: 19px;
   font-weight: 500;
   line-height: 1.3;
@@ -731,7 +731,7 @@ function useSuggestion(suggestion) {
 
 .metric-rail strong {
   overflow: hidden;
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-display);
   font-size: 31px;
   font-weight: 500;
   text-overflow: ellipsis;
@@ -761,9 +761,9 @@ function useSuggestion(suggestion) {
 
 .gallery-heading h2 {
   margin: 0;
-  font-family: Georgia, "Songti SC", serif;
-  font-size: 36px;
-  font-weight: 500;
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 700;
   line-height: 1.15;
 }
 
@@ -884,7 +884,7 @@ function useSuggestion(suggestion) {
 .list-heading h2,
 .profile-suggestions header h2 {
   margin: 0;
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-display);
   font-size: 34px;
   font-weight: 500;
   line-height: 1.2;
@@ -970,7 +970,7 @@ function useSuggestion(suggestion) {
 
 .feature-number {
   color: var(--accent);
-  font-family: Georgia, serif;
+  font-family: var(--font-mono);
   font-size: 15px;
   font-weight: 700;
 }
@@ -984,9 +984,9 @@ function useSuggestion(suggestion) {
 
 .feature-copy h2 {
   margin: 14px 0 0;
-  font-family: Georgia, "Songti SC", serif;
-  font-size: 38px;
-  font-weight: 500;
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 700;
   line-height: 1.13;
   letter-spacing: 0;
 }
@@ -1035,7 +1035,7 @@ function useSuggestion(suggestion) {
 
 .fact-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1.15fr .92fr .92fr;
   gap: 14px;
   margin-top: 18px;
 }
@@ -1043,9 +1043,10 @@ function useSuggestion(suggestion) {
 .fact-card {
   min-width: 0;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 14px;
   padding: 22px;
   background: var(--surface);
+  box-shadow: 0 14px 34px rgba(25, 70, 60, .05);
 }
 
 .fact-card span {
@@ -1058,7 +1059,7 @@ function useSuggestion(suggestion) {
   display: block;
   overflow: hidden;
   margin-top: 14px;
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-display);
   font-size: 28px;
   font-weight: 500;
   line-height: 1.15;
@@ -1081,7 +1082,7 @@ function useSuggestion(suggestion) {
 
 .trend-card-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1.15fr .92fr .92fr;
   gap: 15px;
   margin-top: 30px;
 }
@@ -1089,15 +1090,18 @@ function useSuggestion(suggestion) {
 .trend-card {
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 14px;
   background: var(--surface);
-  transition: border-color 180ms ease, transform 180ms ease;
+  box-shadow: 0 14px 34px rgba(25, 70, 60, .05);
+  transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
 }
 
 .trend-card:hover,
 .trend-card:focus-within,
 .trend-card.selected {
   border-color: var(--accent);
+  box-shadow: 0 18px 40px rgba(25, 70, 60, .1);
+  transform: translateY(-2px);
 }
 
 .trend-card:hover {
@@ -1166,7 +1170,7 @@ function useSuggestion(suggestion) {
 
 .card-copy > strong {
   min-height: 50px;
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-display);
   font-size: 21px;
   font-weight: 500;
   line-height: 1.28;
@@ -1243,7 +1247,7 @@ function useSuggestion(suggestion) {
 
 .suggestion-list button > span {
   color: var(--muted);
-  font-family: Georgia, serif;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
@@ -1289,7 +1293,7 @@ function useSuggestion(suggestion) {
 
 .trend-state strong {
   color: var(--ink);
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-display);
   font-size: 22px;
   font-weight: 500;
 }

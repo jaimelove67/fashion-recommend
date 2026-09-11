@@ -18,7 +18,7 @@ Copy `.env.example` to `.env` only when replacing the development defaults. Do n
 
 Run `docker compose --profile app up --build -d` to additionally build the Spring Boot API and Vue application. The containerized application is then available at `http://localhost:8090`; it proxies `/api` to the API container. Set `DASHSCOPE_API_KEY` only in a local `.env` or the cloud deployment secret store. Model calls remain disabled unless their corresponding `BAILIAN_ENABLED` or `BAILIAN_VISION_ENABLED` switch is enabled; vision also requires consent for each upload.
 
-This loopback HTTP configuration explicitly defaults `SESSION_COOKIE_SECURE` to `false`. For HTTPS deployment, set it to `true` and replace the development passwords. Running the backend outside Compose defaults to secure session cookies; local HTTP source runs need an explicit `SESSION_COOKIE_SECURE=false` environment variable.
+This loopback HTTP configuration uses `SESSION_COOKIE_SECURE=false`. For HTTPS deployment, set it to `true` and replace the development passwords. The backend source configuration uses the same local-HTTP-safe default, so refreshing a local page keeps the session without an extra environment variable.
 
 Weather requests use `wttr.in` first and fall back to Open-Meteo. Successful snapshots are cached in-process for 15 minutes by default; provider URLs, timeouts, TTL, and maximum cache size can be overridden with the `WEATHER_*` variables documented in `.env.example`.
 

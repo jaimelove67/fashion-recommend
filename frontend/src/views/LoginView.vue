@@ -69,11 +69,11 @@ async function submit() {
   const username = form.username.trim()
   const passwordBytes = new TextEncoder().encode(form.password).length
   if (passwordBytes > 72) {
-    validationError.value = '密码的 UTF-8 编码不能超过 72 字节。'
+    validationError.value = '密码长度不能超过 72 个字节。'
     return
   }
   if (mode.value === 'register' && form.password !== form.confirmPassword) {
-    validationError.value = '两次输入的密码不一致。'
+    validationError.value = '两次输入的密码不一样。'
     return
   }
   const credentials = { username, password: form.password }
@@ -93,14 +93,14 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="auth-view">
-    <section class="auth-visual" aria-label="知己穿搭视觉">
+    <section class="auth-visual" aria-label="知己穿搭预览">
       <div class="auth-visual-media">
-        <img src="/assets/look-tailoring.jpg" alt="简洁剪裁的城市穿搭" fetchpriority="high" />
+        <img src="/assets/look-urban.jpg" alt="城市穿搭参考" fetchpriority="high" />
       </div>
       <div class="auth-visual-copy">
         <p>WEAVESELF / 知己</p>
-        <h1>穿得像自己。</h1>
-        <span>你的衣橱、偏好与推荐记录，只在登录后呈现。</span>
+        <h1>先把你的衣橱记下来。</h1>
+        <span>登录后，你的衣橱、偏好和推荐记录都会保存在这里。</span>
       </div>
     </section>
 
@@ -118,7 +118,7 @@ onBeforeUnmount(() => {
           @click="selectMode('login')"
         >
           <span class="auth-tab-title">登录</span>
-          <small aria-hidden="true">继续已有风格</small>
+           <small aria-hidden="true">继续使用</small>
         </button>
         <button
           type="button"
@@ -130,7 +130,7 @@ onBeforeUnmount(() => {
           @click="selectMode('register')"
         >
           <span class="auth-tab-title">注册</span>
-          <small aria-hidden="true">开始新的风格记录</small>
+           <small aria-hidden="true">新建风格档案</small>
         </button>
       </div>
 
@@ -158,7 +158,7 @@ onBeforeUnmount(() => {
               placeholder="例如 lin_xia"
             />
           </div>
-          <small :class="{ 'is-hidden': mode !== 'register' }">3-32 位小写字母、数字、下划线或连字符</small>
+          <small :class="{ 'is-hidden': mode !== 'register' }">3–32 位小写字母、数字、下划线或连字符</small>
         </label>
 
         <label>
@@ -206,7 +206,7 @@ onBeforeUnmount(() => {
                 />
               </div>
             </label>
-            <p v-else key="continue-style" class="auth-mode-note" aria-hidden="true">登录后继续已有风格记录</p>
+          <p v-else key="continue-style" class="auth-mode-note" aria-hidden="true">登录后继续使用你的风格档案</p>
           </Transition>
         </div>
 
@@ -214,7 +214,7 @@ onBeforeUnmount(() => {
           <LoaderCircle v-if="submitting" class="spinning" :size="18" aria-hidden="true" />
           <LogIn v-else-if="mode === 'login'" :size="18" aria-hidden="true" />
           <UserRoundPlus v-else :size="18" aria-hidden="true" />
-          {{ submitting ? '请稍候' : mode === 'login' ? '登录' : '创建账户' }}
+          {{ submitting ? '正在提交' : mode === 'login' ? '登录' : '注册账户' }}
         </button>
       </form>
     </section>
@@ -223,17 +223,27 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .auth-view {
+  --auth-bg: #f5f2ed;
+  --auth-surface: #fffdf9;
+  --auth-ink: #1e2c27;
+  --auth-muted: #68746e;
+  --auth-line: #d9e0da;
+  --auth-accent: #b76450;
+  --auth-accent-strong: #1b554d;
+  --auth-accent-soft: #f3e2da;
   display: grid;
-  min-height: 100vh;
-  grid-template-columns: minmax(360px, 1.08fr) minmax(430px, .92fr);
-  background: var(--bg);
+  min-height: 100dvh;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  color: var(--auth-ink);
+  background: var(--auth-bg);
 }
 
 .auth-visual {
   position: relative;
-  min-height: 100vh;
+  min-height: 100dvh;
   overflow: hidden;
-  background: #242522;
+  border-right: 1px solid rgba(255, 255, 255, .14);
+  background: #1e2c27;
 }
 
 .auth-visual-media {
@@ -245,7 +255,7 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   z-index: 1;
-  background: rgba(20, 21, 19, .38);
+  background: rgba(30, 44, 39, .28);
   content: '';
 }
 
@@ -255,27 +265,36 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center;
+  transform: scale(1.01);
+  transition: transform 900ms cubic-bezier(.22, .8, .32, 1);
+}
+
+.auth-visual:hover .auth-visual-media img {
+  transform: scale(1.035);
 }
 
 .auth-visual-copy {
   position: absolute;
-  right: 48px;
-  bottom: 46px;
-  left: 48px;
+  right: 56px;
+  bottom: 56px;
+  left: 56px;
   z-index: 1;
   color: #fff;
 }
 
 .auth-visual-copy p {
   margin: 0 0 9px;
-  color: var(--accent);
+  color: #f2c4b0;
   font-size: 11px;
   font-weight: 800;
+  letter-spacing: .08em;
 }
 
 .auth-visual-copy h1 {
   margin: 0 0 13px;
-  font: 700 46px/1.08 var(--serif);
+  font: 700 clamp(40px, 4.2vw, 62px)/1.02 var(--font-display);
+  letter-spacing: -.055em;
 }
 
 .auth-visual-copy span {
@@ -288,26 +307,30 @@ onBeforeUnmount(() => {
 
 .auth-panel {
   display: flex;
-  width: min(100%, 520px);
-  justify-self: center;
+  width: 100%;
+  min-width: 0;
   flex-direction: column;
   justify-content: center;
-  padding: 56px 48px;
+  padding: 72px clamp(44px, 7vw, 116px);
+  background: var(--auth-surface);
+  animation: auth-panel-enter 620ms cubic-bezier(.22, .8, .32, 1) both;
 }
 
 .auth-brand {
   display: flex;
   align-items: baseline;
   gap: 9px;
-  margin-bottom: 54px;
+  margin-bottom: clamp(42px, 5vh, 64px);
 }
 
 .auth-brand strong {
-  font: 700 25px/1 var(--serif);
+  color: var(--auth-ink);
+  font: 700 27px/1 var(--font-display);
+  letter-spacing: -.055em;
 }
 
 .auth-brand span {
-  color: var(--muted);
+  color: var(--auth-muted);
   font-size: 9px;
   font-weight: 800;
 }
@@ -317,8 +340,8 @@ onBeforeUnmount(() => {
   position: relative;
   width: 100%;
   grid-template-columns: 1fr 1fr;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 34px;
+  border-bottom: 1px solid var(--auth-line);
+  margin-bottom: 38px;
 }
 
 .auth-tabs button {
@@ -331,7 +354,7 @@ onBeforeUnmount(() => {
   gap: 2px;
   border: 0;
   padding: 0 4px 8px;
-  color: var(--muted);
+  color: var(--auth-muted);
   background: transparent;
   font-size: 13px;
   font-weight: 700;
@@ -348,7 +371,7 @@ onBeforeUnmount(() => {
   transform: scaleX(0);
   transform-origin: left center;
   border-radius: 0 2px 2px 0;
-  background: var(--accent-strong);
+  background: var(--auth-accent-strong);
   content: '';
 }
 
@@ -359,7 +382,7 @@ onBeforeUnmount(() => {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--auth-accent);
   content: '';
   opacity: 0;
 }
@@ -373,7 +396,7 @@ onBeforeUnmount(() => {
 }
 
 .auth-tabs button.active {
-  color: var(--ink);
+  color: var(--auth-ink);
 }
 
 .auth-tab-title {
@@ -381,7 +404,7 @@ onBeforeUnmount(() => {
 }
 
 .auth-tabs button small {
-  color: var(--muted);
+  color: var(--auth-muted);
   font-size: 10px;
   font-weight: 500;
   line-height: 1.2;
@@ -389,11 +412,16 @@ onBeforeUnmount(() => {
 }
 
 .auth-tabs button.active small {
-  color: var(--accent-strong);
+  color: var(--auth-accent-strong);
 }
 
 .auth-tabs button:hover:not(:disabled) {
-  color: var(--ink);
+  color: var(--auth-ink);
+}
+
+.auth-view button:focus-visible,
+.auth-view input:focus-visible {
+  outline-color: var(--auth-accent);
 }
 
 @keyframes auth-stitch-line {
@@ -422,11 +450,12 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: flex-start;
   gap: 9px;
-  border-left: 3px solid var(--coral);
+  border: 1px solid color-mix(in srgb, var(--auth-accent) 34%, var(--auth-line));
+  border-radius: 10px;
   margin-bottom: 20px;
   padding: 11px 13px;
-  color: #822f25;
-  background: #fff0ed;
+  color: #873c2d;
+  background: var(--auth-accent-soft);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -444,14 +473,14 @@ onBeforeUnmount(() => {
 .auth-form label {
   display: grid;
   gap: 8px;
-  color: var(--ink);
+  color: var(--auth-ink);
   font-size: 12px;
   font-weight: 700;
 }
 
 .auth-form label > small {
   min-height: 13px;
-  color: var(--muted);
+  color: var(--auth-muted);
   font-size: 10px;
   font-weight: 400;
   line-height: 1.3;
@@ -469,21 +498,21 @@ onBeforeUnmount(() => {
   align-items: center;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border: 1px solid var(--auth-line);
+  border-radius: 6px;
   padding: 0 13px;
-  background: var(--surface);
+  background: #fffdfb;
   transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
 }
 
 .auth-input:focus-within {
-  border-color: var(--accent-strong);
-  box-shadow: 0 0 0 3px rgba(169, 133, 86, .2), 0 5px 18px rgba(76, 57, 35, .06);
-  background: #fffdf9;
+  border-color: var(--auth-accent);
+  box-shadow: 0 0 0 3px rgba(182, 95, 67, .15), 0 10px 24px rgba(67, 42, 32, .07);
+  background: #ffffff;
 }
 
 .auth-input > svg {
-  color: var(--muted);
+  color: var(--auth-muted);
 }
 
 .auth-input input {
@@ -491,7 +520,7 @@ onBeforeUnmount(() => {
   height: 45px;
   border: 0;
   outline: 0;
-  color: var(--ink);
+  color: var(--auth-ink);
   background: transparent;
   font: inherit;
   font-weight: 500;
@@ -503,7 +532,7 @@ onBeforeUnmount(() => {
   height: 32px;
   place-items: center;
   border: 0;
-  color: var(--muted);
+  color: var(--auth-muted);
   background: transparent;
 }
 
@@ -521,27 +550,24 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   width: 100%;
-  max-height: 75px;
   overflow: hidden;
   transform-origin: top center;
-  transition: max-height 240ms ease, opacity 240ms ease, transform 240ms cubic-bezier(.22, .8, .32, 1);
+  transition: opacity 240ms ease, transform 240ms cubic-bezier(.22, .8, .32, 1);
 }
 
 .auth-confirm-enter-from {
-  max-height: 0;
   opacity: 0;
   transform: translateY(-10px) scaleY(.86);
 }
 
 .auth-confirm-leave-to {
-  max-height: 0;
   opacity: 0;
   transform: translateY(-7px) scaleY(.9);
 }
 
 .auth-mode-note {
   margin: 12px 0 0;
-  color: var(--muted);
+  color: var(--auth-muted);
   font-size: 11px;
   font-weight: 500;
   line-height: 1.4;
@@ -554,19 +580,21 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid var(--ink);
-  border-radius: var(--radius);
+  border: 1px solid var(--auth-ink);
+  border-radius: 6px;
   margin-top: 5px;
   color: #fff;
-  background: var(--ink);
+  background: var(--auth-ink);
   font-size: 13px;
   font-weight: 800;
+  box-shadow: 0 10px 22px rgba(27, 85, 77, .14);
   transition: border-color 180ms ease, box-shadow 180ms ease, transform 120ms ease;
 }
 
 .auth-submit:hover:not(:disabled) {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  border-color: var(--auth-accent-strong);
+  background: #2a7468;
+  box-shadow: 0 13px 28px rgba(27, 85, 77, .22);
 }
 
 .auth-submit:active:not(:disabled) {
@@ -583,18 +611,28 @@ onBeforeUnmount(() => {
   animation: spin .9s linear infinite;
 }
 
+@keyframes auth-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateX(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
 
 @media (min-width: 681px) and (max-width: 820px) {
   .auth-view {
-    grid-template-columns: minmax(0, .86fr) minmax(400px, 1.14fr);
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   }
 
   .auth-panel {
-    width: 100%;
-    padding: 44px 32px;
+    padding: 44px 36px;
   }
 
   .auth-visual-copy {
@@ -604,7 +642,7 @@ onBeforeUnmount(() => {
   }
 
   .auth-visual-copy h1 {
-    font-size: 36px;
+    font-size: 38px;
   }
 
   .auth-visual-copy span {
@@ -615,7 +653,7 @@ onBeforeUnmount(() => {
 @media (max-width: 680px) {
   .auth-view {
     grid-template-columns: 1fr;
-    min-height: 100svh;
+    min-height: 100dvh;
   }
 
   .auth-visual {
@@ -650,13 +688,15 @@ onBeforeUnmount(() => {
     min-height: auto;
     justify-self: stretch;
     justify-content: flex-start;
-    padding: 30px 24px 48px;
+    padding: 34px 24px 48px;
+    border-top: 1px solid rgba(30, 44, 39, .1);
+    animation-name: none;
   }
 }
 
 @media (max-width: 520px) {
   .auth-panel {
-    padding: 26px 20px 42px;
+    padding: 28px 20px 42px;
   }
 
   .auth-brand {
@@ -687,11 +727,22 @@ onBeforeUnmount(() => {
   }
 
   .auth-panel {
-    min-height: 100svh;
+    min-height: 100dvh;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .auth-panel,
+  .auth-visual-media img {
+    animation: none;
+    transition-duration: .01ms !important;
+  }
+
+  .auth-visual-media img,
+  .auth-visual:hover .auth-visual-media img {
+    transform: none;
+  }
+
   .auth-tabs button::after,
   .auth-tabs button::before {
     animation: none;
@@ -719,7 +770,6 @@ onBeforeUnmount(() => {
   .auth-confirm-enter-from,
   .auth-confirm-leave-to {
     opacity: 1;
-    max-height: none;
     transform: none;
   }
 

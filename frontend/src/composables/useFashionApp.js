@@ -81,7 +81,7 @@ async function readApiBody(response) {
   return response.json().catch(() => null)
 }
 
-function responseError(response, body, fallback = '接口请求失败') {
+function responseError(response, body, fallback = '请求失败，请稍后再试。') {
   const error = new Error(body?.message || `${fallback} (${response.status})`)
   error.status = response.status
   return error
@@ -172,7 +172,7 @@ export function useFashionApp() {
     csrf = null
     state.authUser = null
     state.authPhase = 'guest'
-    state.authError = '登录状态已失效，请重新登录。'
+    state.authError = '登录已过期，请重新登录。'
   }
 
   async function refreshCsrf() {
@@ -182,7 +182,7 @@ export function useFashionApp() {
     })
     const body = await readApiBody(response)
     if (!response.ok || !body || body.code !== 0 || !body.data?.headerName || !body.data?.token) {
-      throw responseError(response, body, '无法建立安全会话')
+      throw responseError(response, body, '无法建立登录会话')
     }
     csrf = body.data
     return csrf
@@ -220,7 +220,7 @@ export function useFashionApp() {
     }
     if (response.status === 401) {
       if (!policy.allowUnauthorized) expireSession()
-      throw responseError(response, body, '请先登录')
+      throw responseError(response, body, '请先登录账户')
     }
     if (!response.ok || !body || body.code !== 0) {
       throw responseError(response, body)
@@ -237,7 +237,7 @@ export function useFashionApp() {
 
   function showError(cause) {
     if (cause?.status === 401) return
-    state.error = cause instanceof Error ? cause.message : '接口暂时不可用，请稍后重试。'
+    state.error = cause instanceof Error ? cause.message : '服务暂时不可用，请稍后再试。'
   }
 
   function clearError() {
@@ -280,7 +280,7 @@ export function useFashionApp() {
       resetPrivateState()
       state.authUser = null
       state.authPhase = 'guest'
-      state.authError = cause instanceof Error ? cause.message : '登录失败，请稍后重试。'
+      state.authError = cause instanceof Error ? cause.message : '登录失败，请稍后再试。'
       return false
     } finally {
       state.authSubmitting = false
@@ -302,7 +302,7 @@ export function useFashionApp() {
       resetPrivateState()
       state.authUser = null
       state.authPhase = 'guest'
-      state.authError = cause instanceof Error ? cause.message : '注册失败，请稍后重试。'
+      state.authError = cause instanceof Error ? cause.message : '注册失败，请稍后再试。'
       return false
     } finally {
       state.authSubmitting = false
@@ -470,7 +470,7 @@ export function useFashionApp() {
   function browserLocation() {
     return new Promise((resolve, reject) => {
       if (typeof navigator === 'undefined' || !navigator.geolocation) {
-        reject(new Error('当前浏览器不支持定位'))
+        reject(new Error('此浏览器不支持定位。'))
         return
       }
       navigator.geolocation.getCurrentPosition(
@@ -501,7 +501,7 @@ export function useFashionApp() {
       return weather
     } catch (cause) {
       if (isCurrentSession(version) && !options.silent) {
-        showError(new Error('无法获取当前位置天气，请输入城市后读取。'))
+        showError(new Error('无法获取当前位置天气，请输入城市后再试。'))
       }
       return null
     } finally {
@@ -721,7 +721,7 @@ export function useFashionApp() {
     for (const item of state.trends) {
       for (const tag of item.topicTags || []) tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1)
     }
-    const topTag = [...tagCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '暂无'
+    const topTag = [...tagCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '未设置'
     return {
       count: state.trends.length,
       averageHeat: scores.length ? Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length) : 0,
@@ -747,9 +747,9 @@ export function useFashionApp() {
     const richness = (values, step) => values?.length ? Math.min(100, 40 + values.length * step) : 0
     return [
       { label: '风格偏好', value: richness(profile?.stylePreferences, 24) },
-      { label: '颜色方向', value: richness(profile?.colorPreferences, 20) },
-      { label: '场合覆盖', value: richness(profile?.occasions, 20) },
-      { label: '档案状态', value: profile ? (profile.stale ? 60 : 100) : 0 }
+      { label: '颜色偏好', value: richness(profile?.colorPreferences, 20) },
+      { label: '常用场合', value: richness(profile?.occasions, 20) },
+      { label: '更新状态', value: profile ? (profile.stale ? 60 : 100) : 0 }
     ]
   })
 
@@ -786,10 +786,10 @@ export function useFashionApp() {
   // Weather is usually live (wttr.in / open-meteo). The configured-demo snapshot is static offline
   // presentation data and must never be shown as real-time weather.
   function weatherSourceLabel(source = '') {
-    if (source === 'configured-demo') return '配置演示天气 · 非实时'
+    if (source === 'configured-demo') return '演示天气 · 非实时'
     if (source === 'wttr.in') return '实时天气 · wttr.in'
     if (source === 'open-meteo') return '实时天气 · Open-Meteo'
-    return source || '未知来源'
+    return source || '来源未知'
   }
 
   function weatherConditionLabel(code) {
@@ -805,21 +805,21 @@ export function useFashionApp() {
   }
 
   function engineLabel(engine) {
-    if (engine === 'llm') return '大模型生成'
-    if (engine === 'development-rule-v1') return '规则引擎降级'
+    if (engine === 'llm') return '大模型'
+    if (engine === 'development-rule-v1') return '规则引擎（备用）'
     return engine || '来源未知'
   }
 
   function fallbackReasonLabel(reason) {
     const labels = {
-      'llm-disabled': '模型调用已关闭',
-      'missing-api-key': '未配置模型 Key',
+      'llm-disabled': '已关闭模型调用',
+      'missing-api-key': '未配置模型密钥',
       'request-failed': '模型请求失败',
-      'response-invalid': '模型响应无法解析',
-      'result-invalid': '模型结果不符合约束',
-      'duplicate-item-ids': '模型返回了重复衣物',
-      'foreign-item-ids': '模型返回了衣橱外衣物',
-      'same-category': '模型返回的类别不够完整'
+      'response-invalid': '模型返回内容无法解析',
+      'result-invalid': '模型结果未通过校验',
+      'duplicate-item-ids': '返回了重复衣物',
+      'foreign-item-ids': '返回了衣橱之外的衣物',
+      'same-category': '返回的衣物类别不完整'
     }
     return labels[reason] || reason || ''
   }
@@ -873,7 +873,7 @@ export function useFashionApp() {
       state.authPhase = 'guest'
       state.authError = cause?.status === 401
         ? ''
-        : (cause instanceof Error ? cause.message : '暂时无法检查登录状态。')
+        : (cause instanceof Error ? cause.message : '暂时无法确认登录状态。')
     }
     await trendsPromise
   }

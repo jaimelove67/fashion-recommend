@@ -64,10 +64,10 @@ function statValue(key) {
 }
 
 const statCards = computed(() => [
-  { label: '全部单品', value: statValue('total'), icon: Shirt },
-  { label: '本周新增', value: statValue('weeklyAdded'), icon: Plus },
-  { label: '可参与推荐', value: statValue('ready'), icon: CircleCheck },
-  { label: '待完善', value: statValue('review'), icon: CircleAlert }
+  { label: '全部衣物', value: statValue('total'), icon: Shirt },
+  { label: '近 7 天新增', value: statValue('weeklyAdded'), icon: Plus },
+  { label: '可用于推荐', value: statValue('ready'), icon: CircleCheck },
+  { label: '待补充信息', value: statValue('review'), icon: CircleAlert }
 ])
 
 const categoryCards = computed(() => categories.value.map((category) => {
@@ -92,9 +92,9 @@ function isReviewItem(item) {
 }
 
 function statusLabel(item) {
-  if (isReviewItem(item)) return '待完善'
-  if (item?.recognitionStatus === 'MANUAL_CORRECTED') return '人工确认'
-  return '可推荐'
+  if (isReviewItem(item)) return '待补充'
+  if (item?.recognitionStatus === 'MANUAL_CORRECTED') return '已确认'
+  return '可用于推荐'
 }
 
 const filteredItems = computed(() => {
@@ -258,35 +258,35 @@ onDeactivated(() => {
   <section class="wardrobe-view" aria-labelledby="wardrobe-title">
     <header class="page-header">
       <div>
-        <p class="eyebrow">数字化衣橱</p>
+        <p class="eyebrow">衣橱管理</p>
         <h1 id="wardrobe-title">我的衣橱</h1>
-        <p class="page-intro">管理你的所有单品，让推荐从真实衣物出发。</p>
+        <p class="page-intro">把常穿的衣物记在这里，推荐才会用到你的实际选择。</p>
       </div>
       <div class="header-actions">
         <button type="button" class="button secondary" @click="openAddModal(true)">
           <Upload :size="17" aria-hidden="true" />
-          上传单品
+          上传衣物
         </button>
         <button type="button" class="button primary" @click="openAddModal(false)">
           <Plus :size="17" aria-hidden="true" />
-          添加单品
+          添加衣物
         </button>
       </div>
     </header>
 
     <div class="wardrobe-layout">
-      <aside class="filter-rail" aria-label="衣橱分类与状态筛选">
+      <aside class="filter-rail" aria-label="按类别和状态筛选衣物">
         <div class="rail-heading">
           <div>
             <strong>我的衣橱</strong>
-            <span>{{ statValue('total') }} 件单品</span>
+            <span>{{ statValue('total') }} 件衣物</span>
           </div>
           <button
             type="button"
             class="icon-button"
             :disabled="loading"
-            aria-label="刷新衣橱"
-            title="刷新衣橱"
+            aria-label="重新加载衣橱"
+            title="重新加载衣橱"
             @click="app.loadWardrobe()"
           >
             <LoaderCircle v-if="loading" class="spinning" :size="17" aria-hidden="true" />
@@ -295,7 +295,7 @@ onDeactivated(() => {
         </div>
 
         <div class="rail-group">
-          <p>单品分类</p>
+          <p>按类别查看</p>
           <div class="rail-options">
             <button
               type="button"
@@ -303,7 +303,7 @@ onDeactivated(() => {
               :aria-pressed="categoryFilter === 'all'"
               @click="selectCategory('all')"
             >
-              <span><PackageOpen :size="16" aria-hidden="true" />全部单品</span>
+              <span><PackageOpen :size="16" aria-hidden="true" />全部衣物</span>
               <em>{{ statValue('total') }}</em>
             </button>
             <button
@@ -321,7 +321,7 @@ onDeactivated(() => {
         </div>
 
         <div class="rail-group compact-group">
-          <p>资料状态</p>
+          <p>信息状态</p>
           <div class="rail-options">
             <button
               type="button"
@@ -329,7 +329,7 @@ onDeactivated(() => {
               :aria-pressed="statusFilter === 'ready'"
               @click="statusFilter = statusFilter === 'ready' ? 'all' : 'ready'"
             >
-              <span><CircleCheck :size="16" aria-hidden="true" />可参与推荐</span>
+              <span><CircleCheck :size="16" aria-hidden="true" />可用于推荐</span>
               <em>{{ statValue('ready') }}</em>
             </button>
             <button
@@ -338,14 +338,14 @@ onDeactivated(() => {
               :aria-pressed="statusFilter === 'review'"
               @click="statusFilter = statusFilter === 'review' ? 'all' : 'review'"
             >
-              <span><CircleAlert :size="16" aria-hidden="true" />待完善</span>
+              <span><CircleAlert :size="16" aria-hidden="true" />待补充信息</span>
               <em>{{ statValue('review') }}</em>
             </button>
           </div>
         </div>
 
         <button v-if="hasActiveFilters" type="button" class="clear-rail" @click="clearFilters">
-          <X :size="15" aria-hidden="true" />清除全部筛选
+          <X :size="15" aria-hidden="true" />清除筛选
         </button>
       </aside>
 
@@ -360,8 +360,8 @@ onDeactivated(() => {
         <section class="category-overview" aria-labelledby="category-overview-title">
           <div class="section-heading">
             <div>
-              <p class="section-kicker">分类概览</p>
-              <h2 id="category-overview-title">快速进入一个分类</h2>
+              <p class="section-kicker">类别概览</p>
+              <h2 id="category-overview-title">按类别查看衣物</h2>
             </div>
             <span>{{ categories.length }} 个分类</span>
           </div>
@@ -385,14 +385,14 @@ onDeactivated(() => {
               <span v-else class="category-fallback"><Shirt :size="27" aria-hidden="true" /></span>
             </button>
           </div>
-          <div v-else class="overview-empty">添加单品后，这里会按真实分类生成概览。</div>
+          <div v-else class="overview-empty">添加衣物后，这里会显示各类别的数量。</div>
         </section>
 
         <section id="wardrobe-collection" class="collection" aria-labelledby="collection-title">
           <div class="section-heading collection-heading">
             <div>
-              <p class="section-kicker">单品集合</p>
-              <h2 id="collection-title">{{ filteredItems.length }} 件符合条件</h2>
+              <p class="section-kicker">衣物列表</p>
+              <h2 id="collection-title">{{ filteredItems.length }} 件衣物</h2>
             </div>
             <button
               type="button"
@@ -402,27 +402,27 @@ onDeactivated(() => {
             >
               <LoaderCircle v-if="loading" class="spinning" :size="15" aria-hidden="true" />
               <RefreshCw v-else :size="15" aria-hidden="true" />
-              刷新
+              重新加载
             </button>
           </div>
 
           <div class="toolbar" role="search">
             <label class="select-control">
-              <span class="sr-only">筛选类别</span>
+              <span class="sr-only">按类别筛选</span>
               <select v-model="categoryFilter">
                 <option value="all">全部类别</option>
                 <option v-for="category in categories" :key="category" :value="category">{{ category }}</option>
               </select>
             </label>
             <label class="select-control">
-              <span class="sr-only">筛选颜色</span>
+              <span class="sr-only">按颜色筛选</span>
               <select v-model="colorFilter">
                 <option value="all">全部颜色</option>
                 <option v-for="color in colorOptions" :key="color" :value="color">{{ color }}</option>
               </select>
             </label>
             <label class="select-control">
-              <span class="sr-only">筛选风格</span>
+              <span class="sr-only">按风格筛选</span>
               <select v-model="styleFilter">
                 <option value="all">全部风格</option>
                 <option v-for="style in styleOptions" :key="style" :value="style">{{ style }}</option>
@@ -440,27 +440,27 @@ onDeactivated(() => {
             </label>
             <label class="search-control">
               <Search :size="17" aria-hidden="true" />
-              <span class="sr-only">搜索我的衣橱</span>
-              <input v-model="query" type="search" placeholder="搜索名称、颜色或风格" />
+              <span class="sr-only">搜索衣橱</span>
+              <input v-model="query" type="search" placeholder="搜名称、颜色或风格" />
               <button v-if="query" type="button" aria-label="清空搜索" @click="query = ''">
                 <X :size="15" aria-hidden="true" />
               </button>
             </label>
-            <div class="view-toggle" aria-label="展示方式">
+            <div class="view-toggle" aria-label="查看方式">
               <button
                 type="button"
                 :class="{ active: viewMode === 'grid' }"
                 :aria-pressed="viewMode === 'grid'"
-                aria-label="网格展示"
-                title="网格展示"
+                aria-label="网格视图"
+                title="网格视图"
                 @click="viewMode = 'grid'"
               ><Grid2X2 :size="17" aria-hidden="true" /></button>
               <button
                 type="button"
                 :class="{ active: viewMode === 'list' }"
                 :aria-pressed="viewMode === 'list'"
-                aria-label="列表展示"
-                title="列表展示"
+                aria-label="列表视图"
+                title="列表视图"
                 @click="viewMode = 'list'"
               ><List :size="18" aria-hidden="true" /></button>
             </div>
@@ -468,23 +468,23 @@ onDeactivated(() => {
 
           <div v-if="loading" class="state-panel" role="status" aria-live="polite">
             <LoaderCircle class="spinning" :size="25" aria-hidden="true" />
-            <strong>正在整理衣橱</strong>
-            <span>单品数据返回后会显示在这里。</span>
+            <strong>正在加载衣物</strong>
+            <span>衣物加载后会显示在这里。</span>
           </div>
 
           <div v-else-if="wardrobe.length === 0" class="state-panel empty-state">
             <span class="state-icon"><PackageOpen :size="28" aria-hidden="true" /></span>
-            <strong>衣橱还是空的</strong>
-            <span>先录入一件真实单品，再开始建立你的穿搭资料。</span>
+            <strong>衣橱里还没有衣物</strong>
+            <span>先添加一件衣物，之后的搭配才会用到它。</span>
             <button type="button" class="button primary" @click="openAddModal(false)">
-              <Plus :size="16" aria-hidden="true" />添加第一件单品
+              <Plus :size="16" aria-hidden="true" />添加第一件衣物
             </button>
           </div>
 
           <div v-else-if="filteredItems.length === 0" class="state-panel empty-state">
             <span class="state-icon"><Search :size="27" aria-hidden="true" /></span>
-            <strong>没有符合条件的单品</strong>
-            <span>换一个关键词或清除筛选条件。</span>
+            <strong>没有找到符合条件的衣物</strong>
+            <span>换个关键词，或清除筛选条件。</span>
             <button type="button" class="button secondary" @click="clearFilters">清除筛选</button>
           </div>
 
@@ -494,13 +494,13 @@ onDeactivated(() => {
                 <img
                   v-if="showImage(item)"
                   :src="item.imageUrl"
-                  :alt="item.name || '衣物图片'"
+                  :alt="item.name || '衣物照片'"
                   loading="lazy"
                   @error="markImageError(item)"
                 />
                 <div v-else class="image-fallback">
                   <ImageOff :size="25" aria-hidden="true" />
-                  <span>暂无图片</span>
+                  <span>暂无照片</span>
                 </div>
                 <span class="status-badge" :class="{ review: isReviewItem(item) }">
                   {{ statusLabel(item) }}
@@ -509,16 +509,16 @@ onDeactivated(() => {
                   <button
                     type="button"
                     class="icon-button"
-                    :aria-label="'编辑' + (item.name || '这件单品')"
-                    title="编辑单品"
+                    :aria-label="'编辑' + (item.name || '这件衣物')"
+                    title="编辑衣物"
                     @click="openEditModal(item)"
                   ><Pencil :size="15" aria-hidden="true" /></button>
                   <button
                     type="button"
                     class="icon-button danger"
                     :disabled="deletingId === item.id"
-                    :aria-label="'删除' + (item.name || '这件单品')"
-                    title="删除单品"
+                    :aria-label="'删除' + (item.name || '这件衣物')"
+                    title="删除衣物"
                     @click="app.deleteGarment(item.id)"
                   >
                     <LoaderCircle v-if="deletingId === item.id" class="spinning" :size="15" aria-hidden="true" />
@@ -528,11 +528,11 @@ onDeactivated(() => {
               </div>
               <div class="garment-copy">
                 <div>
-                  <h3>{{ item.name || '待补充衣物' }}</h3>
+                  <h3>{{ item.name || '未命名衣物' }}</h3>
                   <p>{{ item.category || '未分类' }}<template v-if="item.color"> · {{ item.color }}</template></p>
                 </div>
                 <span v-if="item.style" class="style-tag"><Tags :size="13" aria-hidden="true" />{{ item.style }}</span>
-                <small v-if="isReviewItem(item)">{{ item.recognitionMessage || '补全信息后即可用于推荐' }}</small>
+                  <small v-if="isReviewItem(item)">{{ item.recognitionMessage || '补充信息后即可用于推荐' }}</small>
               </div>
             </article>
           </div>
@@ -556,15 +556,15 @@ onDeactivated(() => {
       >
         <header class="modal-header">
           <div>
-            <p class="section-kicker">{{ editingId ? '修正资料' : uploadIntent ? '图片上传' : '手动录入' }}</p>
-            <h2 id="garment-modal-title">{{ editingId ? '编辑这件单品' : '添加一件单品' }}</h2>
-            <p>{{ editingId ? '修改名称、类别、颜色或风格。' : '上传图片后可选择 AI 识别，也可直接填写信息。' }}</p>
+            <p class="section-kicker">{{ editingId ? '补充信息' : uploadIntent ? '上传照片' : '手动添加' }}</p>
+            <h2 id="garment-modal-title">{{ editingId ? '编辑衣物' : '添加一件衣物' }}</h2>
+            <p>{{ editingId ? '可修改名称、类别、颜色和风格。' : '上传照片后可选择 AI 识别，也可以手动填写。' }}</p>
           </div>
           <button
             type="button"
             class="icon-button modal-close"
             :disabled="adding"
-            aria-label="关闭添加单品窗口"
+            aria-label="关闭衣物编辑窗口"
             title="关闭"
             @click="closeModal"
           ><X :size="19" aria-hidden="true" /></button>
@@ -572,7 +572,7 @@ onDeactivated(() => {
 
         <form class="garment-form" @submit.prevent="submitGarment">
           <label>
-            <span>单品名称</span>
+            <span>衣物名称</span>
             <input
               ref="firstField"
               v-model.trim="garmentForm.name"
@@ -587,7 +587,7 @@ onDeactivated(() => {
             <label>
               <span>类别</span>
               <select v-model="garmentForm.category" :required="!selectedImage || !state.allowAiRecognition">
-                <option value="" disabled>{{ selectedImage && state.allowAiRecognition ? '由 AI 识别' : '请选择类别' }}</option>
+                <option value="" disabled>{{ selectedImage && state.allowAiRecognition ? '等待 AI 识别' : '请选择类别' }}</option>
                 <option v-for="category in categories" :key="category" :value="category">{{ category }}</option>
               </select>
             </label>
@@ -604,7 +604,7 @@ onDeactivated(() => {
           </div>
 
           <label>
-            <span>风格 <em>可选</em></span>
+              <span>风格 <em>可选</em></span>
             <input
               v-model.trim="garmentForm.style"
               maxlength="120"
@@ -614,15 +614,15 @@ onDeactivated(() => {
           </label>
 
           <label v-if="!editingId" class="upload-field" :class="{ emphasized: uploadIntent }">
-            <span><Upload :size="16" aria-hidden="true" />衣物图片</span>
+              <span><Upload :size="16" aria-hidden="true" />衣物照片</span>
             <input
               ref="fileField"
               type="file"
               accept="image/jpeg,image/png,image/webp"
-              aria-label="衣物图片"
+              aria-label="衣物照片"
               @change="app.selectImage($event)"
             />
-            <small>{{ selectedImage ? selectedImage.name : '支持 JPG、PNG、WebP，选择后可决定是否启用 AI 识别。' }}</small>
+            <small>{{ selectedImage ? selectedImage.name : '支持 JPG、PNG 和 WebP；选好照片后可选择是否使用 AI 识别。' }}</small>
           </label>
 
           <label v-if="!editingId && selectedImage" class="recognition-consent">
@@ -631,12 +631,12 @@ onDeactivated(() => {
               type="checkbox"
               aria-describedby="recognition-consent-note"
             />
-            <span>使用 AI 自动识别</span>
-            <small id="recognition-consent-note">图片只会在本次勾选后发送给已配置的识别模型。</small>
+            <span>使用 AI 识别照片</span>
+            <small id="recognition-consent-note">只有勾选本次上传，照片才会发送给已配置的识别模型。</small>
           </label>
 
           <label v-if="!editingId && !selectedImage">
-            <span>图片地址 <em>可选</em></span>
+            <span>照片地址 <em>可选</em></span>
             <input
               v-model.trim="garmentForm.imageUrl"
               type="url"
@@ -647,8 +647,8 @@ onDeactivated(() => {
           </label>
 
           <div v-if="editingId && garmentForm.imageUrl" class="current-image">
-            <span>当前图片</span>
-            <img :src="garmentForm.imageUrl" alt="当前衣物图片" />
+            <span>当前照片</span>
+            <img :src="garmentForm.imageUrl" alt="当前衣物照片" />
           </div>
 
           <footer class="modal-actions">
@@ -656,7 +656,7 @@ onDeactivated(() => {
             <button type="submit" class="button primary" :disabled="adding">
               <LoaderCircle v-if="adding" class="spinning" :size="17" aria-hidden="true" />
               <CircleCheck v-else :size="17" aria-hidden="true" />
-              {{ adding ? '保存中' : editingId ? '保存修改' : '加入衣橱' }}
+              {{ adding ? '正在保存' : editingId ? '保存更改' : '添加到衣橱' }}
             </button>
           </footer>
         </form>
@@ -693,9 +693,9 @@ onDeactivated(() => {
 .page-header h1 {
   max-width: 760px;
   margin: 0;
-  font-family: Georgia, "Songti SC", serif;
-  font-size: 32px;
-  font-weight: 500;
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 700;
   line-height: 1.08;
   letter-spacing: 0;
 }
@@ -745,6 +745,12 @@ onDeactivated(() => {
   background: var(--ink);
 }
 
+.button.primary:hover:not(:disabled) {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+  transform: translateY(-1px);
+}
+
 .button.secondary {
   color: var(--ink);
   background: var(--surface);
@@ -781,7 +787,7 @@ select:focus-visible {
   position: sticky;
   top: 24px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 16px;
   padding: 18px 12px 14px;
   background: var(--surface);
 }
@@ -801,7 +807,7 @@ select:focus-visible {
 }
 
 .rail-heading strong {
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-display);
   font-size: 18px;
   font-weight: 500;
 }
@@ -910,8 +916,9 @@ select:focus-visible {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 14px;
   background: var(--surface);
+  box-shadow: 0 14px 34px rgba(25, 70, 60, .05);
 }
 
 .stat-item {
@@ -943,7 +950,7 @@ select:focus-visible {
 }
 
 .stat-item strong {
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-mono);
   font-size: 27px;
   font-weight: 500;
   line-height: 1;
@@ -973,7 +980,7 @@ select:focus-visible {
 
 .section-heading h2 {
   margin: 0;
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-display);
   font-size: 21px;
   font-weight: 500;
   line-height: 1.2;
@@ -999,7 +1006,7 @@ select:focus-visible {
   grid-template-columns: minmax(0, .8fr) minmax(56px, 1fr);
   align-items: stretch;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 14px;
   padding: 0;
   color: var(--ink);
   background: var(--surface);
@@ -1027,7 +1034,7 @@ select:focus-visible {
 }
 
 .category-copy strong {
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-display);
   font-size: 17px;
   font-weight: 500;
 }
@@ -1183,8 +1190,17 @@ select:focus-visible {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 14px;
   background: var(--surface);
+  box-shadow: 0 12px 28px rgba(25, 70, 60, .045);
+  transition: transform 180ms cubic-bezier(.22, .8, .32, 1), border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.garment-card:hover,
+.garment-card:focus-within {
+  border-color: var(--line-strong);
+  box-shadow: 0 18px 38px rgba(25, 70, 60, .09);
+  transform: translateY(-2px);
 }
 
 .garment-media {
@@ -1347,7 +1363,7 @@ select:focus-visible {
 
 .state-panel strong {
   color: var(--ink);
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-display);
   font-size: 20px;
   font-weight: 500;
 }
@@ -1388,8 +1404,9 @@ select:focus-visible {
   max-height: calc(100vh - 48px);
   overflow-y: auto;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 18px;
   background: var(--surface);
+  box-shadow: 0 24px 60px rgba(25, 70, 60, .18);
 }
 
 .modal-header {
@@ -1403,7 +1420,7 @@ select:focus-visible {
 
 .modal-header h2 {
   margin: 0;
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-display);
   font-size: 27px;
   font-weight: 500;
   letter-spacing: 0;

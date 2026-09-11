@@ -1,10 +1,14 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
-  ArrowUpRight,
+  ArrowRight,
   Bookmark,
+  CalendarDays,
+  Check,
+  ChevronLeft,
+  ChevronRight,
   CloudSun,
-  ClipboardList,
+  Compass,
   Flame,
   LoaderCircle,
   MapPin,
@@ -12,8 +16,12 @@ import {
   Shirt,
   Sparkles,
   Star,
-  TrendingUp
+  SunMedium,
+  Thermometer,
+  Umbrella,
+  Wind
 } from '@lucide/vue'
+import Stack from '../components/Stack.vue'
 
 const props = defineProps({
   app: { type: Object, required: true }
@@ -21,22 +29,290 @@ const props = defineProps({
 
 const formOpen = ref(!props.app.state.currentRecommendation)
 const brokenImages = ref(new Set())
+const dailyOffset = ref(0)
+const selectedLookId = ref(null)
+const today = new Date()
+const weekdayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
-const trendPreview = computed(() => props.app.state.trends.slice(0, 3))
+const fallbackImages = [
+  '/assets/look-tailoring.jpg',
+  '/assets/look-color.jpg',
+  '/assets/look-urban.jpg'
+]
+
+const planTemplates = [
+  {
+    dayName: '周一',
+    occasion: '通勤 · 清爽利落',
+    weatherLabel: '晴朗',
+    temperature: '24°',
+    low: '17°',
+    score: 93,
+    palette: '暖白 / 石墨灰',
+    note: '柔和的中性色适合工作日，轮廓利落，穿着也不拘束。',
+    icon: SunMedium
+  },
+  {
+    dayName: '周二',
+    occasion: '客户会面 · 稳妥得体',
+    weatherLabel: '多云',
+    temperature: '22°',
+    low: '16°',
+    score: 91,
+    palette: '雾蓝 / 米白',
+    note: '蓝灰色压住明度，利落的版型看起来正式，但不会太用力。',
+    icon: CloudSun
+  },
+  {
+    dayName: '周三',
+    occasion: '城市漫步 · 轻松分层',
+    weatherLabel: '晴朗',
+    temperature: '25°',
+    low: '18°',
+    score: 90,
+    palette: '黑色 / 冷灰白',
+    note: '用常穿的一件做主角，颜色保持简单，走一天也轻便。',
+    icon: SunMedium
+  },
+  {
+    dayName: '周四',
+    occasion: '通勤 · 稳妥正式',
+    weatherLabel: '小雨',
+    temperature: '20°',
+    low: '15°',
+    score: 90,
+    palette: '雾蓝 / 炭灰',
+    note: '带一件轻薄外层应对温差，鞋子选防滑、走路不累的款式。',
+    icon: Umbrella
+  },
+  {
+    dayName: '周五',
+    occasion: '晚间约会 · 舒展得体',
+    weatherLabel: '多云',
+    temperature: '23°',
+    low: '17°',
+    score: 92,
+    palette: '炭灰 / 暖白',
+    note: '深色打底更收比例，再用柔软材质放松整体感觉。',
+    icon: CloudSun
+  },
+  {
+    dayName: '周六',
+    occasion: '周末出行 · 轻装',
+    weatherLabel: '晴朗',
+    temperature: '26°',
+    low: '19°',
+    score: 88,
+    palette: '橄榄绿 / 白色',
+    note: '少穿一层，把方便活动的衣物留给户外行程。',
+    icon: SunMedium
+  },
+  {
+    dayName: '周日',
+    occasion: '休息日 · 随意出门',
+    weatherLabel: '晴间云',
+    temperature: '24°',
+    low: '18°',
+    score: 89,
+    palette: '米白 / 橄榄绿',
+    note: '用熟悉的颜色配一双舒服的鞋，出门不必花太多时间。',
+    icon: Wind
+  }
+]
+
+const dailyLookModes = [
+  {
+    title: '清爽通勤',
+    subtitle: '轻正式 · 低饱和',
+    palette: '暖白 / 石墨灰',
+    note: '轻薄外层应对全天温差，先把轮廓穿稳。',
+    fitLabel: '首选'
+  },
+  {
+    title: '柔和层次',
+    subtitle: '松弛感 · 有分寸',
+    palette: '雾蓝 / 米白',
+    note: '柔软材质靠近脸部，上下比例保持利落。',
+    fitLabel: '轻正式'
+  },
+  {
+    title: '城市轻叠穿',
+    subtitle: '利落感 · 轻叠穿',
+    palette: '炭灰 / 冷白',
+    note: '用常穿衣物做重点，活动时不显臃肿。',
+    fitLabel: '有层次'
+  },
+  {
+    title: '深色小对比',
+    subtitle: '深色基底 · 小亮点',
+    palette: '墨黑 / 橄榄绿',
+    note: '主色占大部分面积，鞋履或配饰只加一处亮色。',
+    fitLabel: '低负担'
+  },
+  {
+    title: '轻松周末',
+    subtitle: '舒适感 · 易行动',
+    palette: '米白 / 棕灰',
+    note: '少一层、更好活动，最后一套留给舒适感。',
+    fitLabel: '松弛版'
+  }
+]
+
+const state = computed(() => props.app.state || {})
+const wardrobe = computed(() => state.value.wardrobe || [])
+const history = computed(() => state.value.history || [])
+const trendPreview = computed(() => state.value.trends?.[0] || null)
+const profile = computed(() => state.value.profile || null)
+const actualWeather = computed(() => state.value.weather || null)
+
+const recommendationPool = computed(() => {
+  const candidates = []
+  if (state.value.currentRecommendation) candidates.push(state.value.currentRecommendation)
+  candidates.push(...history.value)
+  const unique = new Map()
+  for (const item of candidates) {
+    if (item?.id && !unique.has(item.id)) unique.set(item.id, item)
+  }
+  return [...unique.values()]
+})
+
+function itemKey(item) {
+  return item?.id || item?.name || 'unknown'
+}
+
+function categoryMatches(item, category) {
+  const value = item?.category || ''
+  return value.includes(category) || (category === '鞋履' && value.includes('鞋'))
+}
+
+function itemsForLook(variantIndex, dayIndex, source) {
+  if (source?.items?.length) return source.items.slice(0, 4)
+  if (!wardrobe.value.length) return []
+
+  const categoryOrder = variantIndex % 2
+    ? ['外套', '上装', '下装', '鞋履', '配饰']
+    : ['上装', '下装', '外套', '鞋履', '配饰']
+  const picked = []
+  const pickedKeys = new Set()
+  for (const category of categoryOrder) {
+    const candidates = wardrobe.value.filter((item) => categoryMatches(item, category) && !pickedKeys.has(itemKey(item)))
+    const candidate = candidates.length
+      ? candidates[(variantIndex + dayIndex) % candidates.length]
+      : null
+    if (candidate) {
+      picked.push(candidate)
+      pickedKeys.add(itemKey(candidate))
+    }
+  }
+  for (let offset = 0; offset < wardrobe.value.length; offset += 1) {
+    if (picked.length >= 4) break
+    const item = wardrobe.value[(variantIndex + dayIndex + offset) % wardrobe.value.length]
+    if (!pickedKeys.has(itemKey(item))) {
+      picked.push(item)
+      pickedKeys.add(itemKey(item))
+    }
+  }
+  return picked.slice(0, 4)
+}
+
+function addDays(date, amount) {
+  const result = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  result.setDate(result.getDate() + amount)
+  return result
+}
+
+function dateSlug(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function dateLabel(date) {
+  return `${date.getMonth() + 1}.${String(date.getDate()).padStart(2, '0')}`
+}
+
+function uniqueColors(items) {
+  return [...new Set(items.map((item) => item?.color).filter(Boolean))].slice(0, 2)
+}
+
+const dailyDate = computed(() => addDays(today, dailyOffset.value))
+const dailyDateKey = computed(() => dateSlug(dailyDate.value))
+const dailyDayIndex = computed(() => {
+  const todayIndex = today.getDay() === 0 ? 6 : today.getDay() - 1
+  return (todayIndex + dailyOffset.value + planTemplates.length) % planTemplates.length
+})
+const dailyTemplate = computed(() => planTemplates[dailyDayIndex.value])
+const dailyDateLabel = computed(() => dateLabel(dailyDate.value))
+const dailyDayName = computed(() => weekdayNames[dailyDate.value.getDay()])
+const dailyDateHeading = computed(() => `${dailyDate.value.getMonth() + 1}月${dailyDate.value.getDate()}日 · ${dailyDayName.value}`)
+const dailyWeather = computed(() => {
+  if (dailyOffset.value === 0 && actualWeather.value) {
+    return {
+      label: props.app.weatherConditionLabel(actualWeather.value.weatherCode),
+      temperature: `${Number(actualWeather.value.temperatureC).toFixed(0)}°`,
+      low: `${Number(actualWeather.value.apparentTemperatureC).toFixed(0)}°`
+    }
+  }
+  return {
+    label: dailyTemplate.value.weatherLabel,
+    temperature: dailyTemplate.value.temperature,
+    low: dailyTemplate.value.low
+  }
+})
+
+const dailyLooks = computed(() => dailyLookModes.map((mode, lookIndex) => {
+  const source = recommendationPool.value[lookIndex] || null
+  const items = itemsForLook(lookIndex, dailyDayIndex.value, source)
+  const heroItem = items.find((item) => item?.imageUrl) || items[0] || null
+  const palette = uniqueColors(items).join(' / ') || mode.palette
+  const occasion = dailyTemplate.value.occasion.split('·')[0].trim()
+  return {
+    id: `ootd-${dailyDateKey.value}-${lookIndex + 1}`,
+    img: imageSource(heroItem, `ootd-${dailyDateKey.value}`, lookIndex),
+    lookIndex,
+    lookLabel: `LOOK ${String(lookIndex + 1).padStart(2, '0')}`,
+    title: `${occasion} · ${mode.title}`,
+    subtitle: source?.summary || mode.subtitle,
+    occasion,
+    palette,
+    note: source?.reason || mode.note,
+    items,
+    heroItem,
+    source,
+    fitLabel: mode.fitLabel,
+    weatherLabel: dailyWeather.value.label,
+    temperature: dailyWeather.value.temperature,
+    low: dailyWeather.value.low,
+    city: source?.city || actualWeather.value?.city || state.value.recommendationForm.city || '当前城市',
+    dayName: dailyDayName.value,
+    dateLabel: dailyDateLabel.value,
+    isToday: dailyOffset.value === 0,
+    isGenerated: Boolean(source?.id)
+  }
+}))
+
+const selectedLook = computed(() => dailyLooks.value.find((look) => look.id === selectedLookId.value) || dailyLooks.value.at(-1) || null)
+const dailyLookCount = computed(() => dailyLooks.value.length)
 const coveragePercent = computed(() => {
   const total = props.app.wardrobeStats.total
   if (!total) return null
   return Math.min(100, Math.round((props.app.recommendationStats.coveredItems / total) * 100))
 })
 
+const profileTags = computed(() => {
+  const tags = profile.value?.styleTags || []
+  return tags.length ? tags.slice(0, 3) : ['低饱和', '利落轮廓', '日常通勤']
+})
+
+const heroCondition = computed(() => dailyWeather.value.label || '晴朗')
+const heroTemperature = computed(() => dailyWeather.value.temperature || '--')
+
 function formatRating(value) {
   return Number.isFinite(value) ? value.toFixed(1) : '--'
 }
 
 function formatDate(value) {
-  if (!value) return '时间未记录'
+  if (!value) return '暂无时间'
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '时间未记录'
+  if (Number.isNaN(date.getTime())) return '暂无时间'
   return new Intl.DateTimeFormat('zh-CN', {
     month: 'numeric',
     day: 'numeric',
@@ -45,719 +321,1921 @@ function formatDate(value) {
   }).format(date)
 }
 
-function imageFailed(key) {
-  brokenImages.value.add(key)
+function imageKey(prefix, item, index = 0) {
+  return `${prefix}-${itemKey(item)}-${index}`
 }
+
+function imageSource(item, prefix, index = 0) {
+  const key = imageKey(prefix, item, index)
+  if (item?.imageUrl && !brokenImages.value.has(key)) return item.imageUrl
+  return fallbackImages[index % fallbackImages.length]
+}
+
+function imageFailed(prefix, item, index = 0) {
+  brokenImages.value = new Set([...brokenImages.value, imageKey(prefix, item, index)])
+}
+
+function handleLookChange(payload) {
+  if (payload?.card?.id) selectedLookId.value = payload.card.id
+}
+
+function shiftDay(step) {
+  dailyOffset.value += step
+}
+
+function jumpToToday() {
+  dailyOffset.value = 0
+}
+
+function openGenerator(plan = selectedLook.value) {
+  formOpen.value = true
+  if (plan?.occasion) props.app.state.recommendationForm.occasion = plan.occasion
+  if (plan?.palette) props.app.state.recommendationForm.styleHint = plan.palette
+  if (plan?.city && plan.city !== '当前城市') props.app.state.recommendationForm.city = plan.city
+  window.setTimeout(() => document.querySelector('#generator-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0)
+}
+
+async function handleGenerate() {
+  const recommendation = await props.app.generateRecommendation()
+  if (recommendation) formOpen.value = false
+}
+
+watch(dailyLooks, (looks) => {
+  if (!looks.some((look) => look.id === selectedLookId.value)) {
+    selectedLookId.value = looks.at(-1)?.id || null
+  }
+}, { immediate: true })
 </script>
 
 <template>
   <section class="recommendation-view">
-    <header class="page-hero">
-      <div class="hero-copy">
-        <p class="eyebrow"><Sparkles :size="15" aria-hidden="true" />智能穿搭推荐</p>
-        <h1>从你的衣橱，生成今天的答案。</h1>
-        <p>场合、城市与个人偏好会交给后端主链路，页面只呈现真实返回的衣物和推荐依据。</p>
-      </div>
-      <button
-        class="primary-action"
-        type="button"
-        :aria-expanded="formOpen"
-        aria-controls="recommendation-form"
-        @click="formOpen = !formOpen"
-      >
-        <Sparkles :size="17" aria-hidden="true" />
-        {{ formOpen ? '收起生成条件' : '生成新搭配' }}
-      </button>
-    </header>
-
-    <section class="stats-band" aria-label="推荐统计">
-      <article>
-        <span>历史方案</span>
-        <strong>{{ app.recommendationStats.total }}</strong>
-        <small>后端已返回的推荐记录</small>
-      </article>
-      <article>
-        <span>已收藏</span>
-        <strong>{{ app.recommendationStats.saved }}</strong>
-        <small>已确认保存的方案</small>
-      </article>
-      <article>
-        <span>平均反馈</span>
-        <strong>{{ formatRating(app.recommendationStats.averageRating) }}<em v-if="app.recommendationStats.averageRating"> / 5</em></strong>
-        <small>{{ app.recommendationStats.averageRating ? '基于已提交评分' : '尚无评分数据' }}</small>
-      </article>
-      <article>
-        <span>覆盖衣物</span>
-        <strong>{{ app.recommendationStats.coveredItems }}</strong>
-        <small>历史方案中出现过的单品</small>
-      </article>
-    </section>
-
-    <section id="recommendation-form" v-show="formOpen" class="generator-panel" aria-labelledby="generator-title">
-      <header class="panel-heading">
-        <div>
-          <p class="section-kicker">生成条件</p>
-          <h2 id="generator-title">这次要去哪里？</h2>
-          <p class="engine-preference"><Sparkles :size="14" aria-hidden="true" />首选大模型生成，异常时自动降级为规则推荐</p>
-        </div>
-        <button class="quiet-button" type="button" :disabled="app.state.weatherLoading || !app.state.recommendationForm.city" @click="app.loadWeather">
-          <LoaderCircle v-if="app.state.weatherLoading" class="spinning" :size="16" />
-          <RefreshCw v-else :size="16" aria-hidden="true" />
-          更新天气
-        </button>
-      </header>
-
-      <form class="recommendation-form" @submit.prevent="app.generateRecommendation">
-        <div class="form-fields">
-          <label>
-            <span>场合</span>
-            <input v-model.trim="app.state.recommendationForm.occasion" required maxlength="80" placeholder="例如：通勤、约会、周末出行" />
-          </label>
-          <label>
-            <span>城市</span>
-            <input v-model.trim="app.state.recommendationForm.city" required maxlength="80" placeholder="例如：长沙" @input="app.clearWeather" />
-          </label>
-          <label class="wide-field">
-            <span>风格提示 <small>可选</small></span>
-            <input v-model.trim="app.state.recommendationForm.styleHint" maxlength="120" placeholder="例如：低饱和、利落、适合步行" />
-          </label>
+    <div class="recommendation-canvas">
+      <header class="recommendation-hero">
+        <div class="hero-overline">
+          <span><Sparkles :size="14" aria-hidden="true" />DAILY EDIT / 今日搭配</span>
+          <span class="hero-overline-date">{{ dailyDateHeading }}</span>
         </div>
 
-        <div class="form-footer">
-          <div v-if="app.state.weather" class="weather-preview">
-            <CloudSun :size="20" aria-hidden="true" />
-            <p>
-              <strong>{{ app.state.weather.city }}</strong>
-              <span>{{ app.state.weather.temperatureC }}°C · 体感 {{ app.state.weather.apparentTemperatureC }}°C · 降水 {{ app.state.weather.precipitationMm }} mm</span>
-            </p>
-            <small>{{ app.weatherSourceLabel(app.state.weather.source) }}</small>
-          </div>
-          <p v-else class="weather-empty"><MapPin :size="17" aria-hidden="true" />填写城市后可先读取实时天气</p>
-
-          <button class="generate-button" type="submit" :disabled="app.state.generating">
-            <LoaderCircle v-if="app.state.generating" class="spinning" :size="18" />
-            <Sparkles v-else :size="18" aria-hidden="true" />
-            {{ app.state.generating ? '正在生成方案' : '生成穿搭方案' }}
-          </button>
-        </div>
-      </form>
-    </section>
-
-    <section class="result-section" aria-labelledby="result-title">
-      <header class="section-heading">
-        <div>
-          <p class="section-kicker">当前方案</p>
-          <h2 id="result-title">从数据到可执行穿搭</h2>
-        </div>
-        <span v-if="app.state.currentRecommendation" class="result-time">{{ formatDate(app.state.currentRecommendation.generatedAt) }}</span>
-      </header>
-
-      <div v-if="app.state.generating" class="loading-state" aria-live="polite">
-        <LoaderCircle class="spinning" :size="26" />
-        <strong>后端正在组合衣橱单品</strong>
-        <span>完成后会在这里显示真实推荐结果。</span>
-      </div>
-
-      <article v-else-if="app.state.currentRecommendation" class="recommendation-result">
-        <div class="result-topline">
-          <div>
-            <span class="record-id">方案 #{{ app.state.currentRecommendation.id }}</span>
-            <span>{{ app.state.currentRecommendation.occasion }}</span>
-            <span>{{ app.state.currentRecommendation.city }}</span>
-          </div>
-          <span class="saved-state" :class="{ saved: app.state.currentRecommendation.saved }">
-            <Bookmark :size="15" :fill="app.state.currentRecommendation.saved ? 'currentColor' : 'none'" />
-            {{ app.state.currentRecommendation.saved ? '已收藏' : '未收藏' }}
-          </span>
-        </div>
-
-        <div class="engine-badge-row">
-          <span class="engine-badge" :class="{ fallback: app.state.currentRecommendation.engine !== 'llm' }">
-            <Sparkles :size="14" aria-hidden="true" />
-            {{ app.engineLabel(app.state.currentRecommendation.engine) }}
-          </span>
-          <span v-if="app.state.currentRecommendation.generationAudit?.modelName" class="engine-meta">
-            {{ app.state.currentRecommendation.generationAudit.modelName }}
-          </span>
-          <span v-if="app.state.currentRecommendation.generationAudit?.fallbackReason" class="engine-meta">
-            {{ app.fallbackReasonLabel(app.state.currentRecommendation.generationAudit.fallbackReason) }}
-          </span>
-        </div>
-
-        <h3>{{ app.state.currentRecommendation.summary }}</h3>
-
-        <ul class="outfit-list" aria-label="推荐衣物">
-          <li v-for="item in app.state.currentRecommendation.items || []" :key="`${app.state.currentRecommendation.id}-${item.id}`">
-            <div class="garment-media">
-              <img
-                v-if="item.imageUrl && !brokenImages.has(`result-${item.id}`)"
-                :src="item.imageUrl"
-                :alt="item.name"
-                @error="imageFailed(`result-${item.id}`)"
-              />
-              <span v-else class="image-fallback" :style="{ backgroundColor: app.colorFor(item.color) }"><Shirt :size="23" /></span>
-            </div>
-            <div>
-              <strong>{{ item.name }}</strong>
-              <p>{{ item.category }} · {{ item.color }}<template v-if="item.style"> · {{ item.style }}</template></p>
-            </div>
-          </li>
-        </ul>
-
-        <div class="result-details">
-          <div>
-            <span>推荐理由</span>
-            <p>{{ app.state.currentRecommendation.reason }}</p>
-          </div>
-          <div>
-            <span>生成来源</span>
-            <p>{{ app.engineLabel(app.state.currentRecommendation.engine) }}<small v-if="app.state.currentRecommendation.generationAudit?.modelName"> · {{ app.state.currentRecommendation.generationAudit.modelName }}</small></p>
-          </div>
-          <div v-if="app.state.currentRecommendation.weather">
-            <span>天气快照</span>
-            <p>
-              {{ app.state.currentRecommendation.weather.temperatureC }}°C · 体感 {{ app.state.currentRecommendation.weather.apparentTemperatureC }}°C ·
-              风速 {{ app.state.currentRecommendation.weather.windSpeedKmh }} km/h · {{ app.weatherSourceLabel(app.state.currentRecommendation.weather.source) }}
-            </p>
-          </div>
-        </div>
-
-        <footer class="result-actions">
-          <div class="rating-control">
-            <span>这套搭配是否有用？</span>
-            <div aria-label="方案评分">
-              <button
-                v-for="rating in 5"
-                :key="rating"
-                type="button"
-                :class="{ rated: app.state.currentRecommendation.feedback?.rating >= rating }"
-                :disabled="app.state.feedbackSavingId === app.state.currentRecommendation.id"
-                :aria-label="`${rating} 星反馈`"
-                @click="app.rateRecommendation(app.state.currentRecommendation, rating)"
-              >
-                <Star :size="19" :fill="app.state.currentRecommendation.feedback?.rating >= rating ? 'currentColor' : 'none'" />
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <div class="hero-index"><span>01</span><span>今天穿哪一套？</span></div>
+            <h1>今天有 {{ dailyLookCount }} 套搭配可选。</h1>
+            <p class="hero-lead">天气、场合和衣橱已经放在一起。先看看今天的搭配，再选你愿意穿的那一套。</p>
+            <div class="hero-actions">
+              <button class="hero-primary" type="button" @click="openGenerator()">
+                <Sparkles :size="17" aria-hidden="true" />重新生成<ArrowRight :size="17" aria-hidden="true" />
+              </button>
+              <button class="hero-secondary" type="button" @click="jumpToToday">
+                <CalendarDays :size="16" aria-hidden="true" />回到今天
               </button>
             </div>
+            <div class="hero-footnote">
+              <span v-for="tag in profileTags" :key="tag">#{{ tag }}</span>
+              <span class="hero-footnote-muted">{{ profile?.displayName ? `${profile.displayName}的今日搭配` : '按你的衣橱生成' }}</span>
+            </div>
           </div>
-          <button
-            class="save-button"
-            type="button"
-            :class="{ saved: app.state.currentRecommendation.saved }"
-            :disabled="app.state.saving || app.state.currentRecommendation.saved"
-            @click="app.saveRecommendation()"
-          >
-            <LoaderCircle v-if="app.state.saving" class="spinning" :size="17" />
-            <Bookmark v-else :size="17" :fill="app.state.currentRecommendation.saved ? 'currentColor' : 'none'" />
-            {{ app.state.currentRecommendation.saved ? '已保存到历史' : '收藏这套方案' }}
-          </button>
-        </footer>
-      </article>
 
-      <div v-else class="empty-state">
-        <ClipboardList :size="30" aria-hidden="true" />
-        <strong>还没有当前方案</strong>
-        <span>补充生成条件后，推荐结果会连同来源、天气快照和真实衣物一起出现。</span>
-        <button type="button" @click="formOpen = true">填写生成条件</button>
-      </div>
-    </section>
-
-    <section class="insight-grid">
-      <div class="coverage-panel">
-        <header class="section-heading compact-heading">
-          <div>
-            <p class="section-kicker">衣橱覆盖</p>
-            <h2>推荐是否真正用到了已有衣物</h2>
-          </div>
-          <Shirt :size="22" aria-hidden="true" />
-        </header>
-
-        <div class="coverage-value">
-          <strong>{{ coveragePercent === null ? '--' : `${coveragePercent}%` }}</strong>
-          <span>{{ app.recommendationStats.coveredItems }} / {{ app.wardrobeStats.total }} 件衣物已在历史方案中出现</span>
+          <aside class="weather-brief" aria-label="今天的天气和穿衣提示">
+            <div class="weather-brief-top">
+              <div>
+                <span class="brief-label">{{ dailyOffset === 0 ? 'TODAY / 今日' : 'DAY / 当日' }}</span>
+                <strong>{{ heroCondition }}</strong>
+              </div>
+              <component :is="dailyTemplate?.icon || CloudSun" :size="24" aria-hidden="true" />
+            </div>
+            <div class="weather-reading">
+              <strong>{{ heroTemperature }}</strong>
+              <div>
+                <span>{{ actualWeather?.city || '你的常用城市' }}</span>
+                <small v-if="actualWeather">体感 {{ Number(actualWeather.apparentTemperatureC).toFixed(0) }}° · 风速 {{ Number(actualWeather.windSpeedKmh).toFixed(0) }} km/h</small>
+                <small v-else>填好城市后，这里会显示天气</small>
+              </div>
+            </div>
+            <div class="weather-note">
+              <Thermometer :size="15" aria-hidden="true" />
+              <span>{{ selectedLook?.note || dailyTemplate.note }}</span>
+            </div>
+            <button class="weather-link" type="button" @click="openGenerator()">修改场合和城市 <ArrowRight :size="14" /></button>
+          </aside>
         </div>
-        <progress v-if="coveragePercent !== null" :value="coveragePercent" max="100" aria-label="衣橱推荐覆盖率">{{ coveragePercent }}%</progress>
-        <p v-else class="coverage-empty">衣橱暂无可计算基数，添加衣物并生成方案后再统计覆盖率。</p>
+      </header>
 
-        <dl class="coverage-facts">
-          <div><dt>衣橱总数</dt><dd>{{ app.wardrobeStats.total }}</dd></div>
-          <div><dt>可直接使用</dt><dd>{{ app.wardrobeStats.ready }}</dd></div>
-          <div><dt>待完善信息</dt><dd>{{ app.wardrobeStats.review }}</dd></div>
-        </dl>
-      </div>
+      <section class="overview-strip" aria-label="今日搭配概览">
+        <div class="overview-item">
+          <span>今日搭配</span>
+          <strong>{{ dailyLookCount }} <small>套</small></strong>
+          <em>拖动或点击切换搭配</em>
+        </div>
+        <div class="overview-item">
+          <span>可用衣物</span>
+          <strong>{{ props.app.wardrobeStats.ready }} <small>件</small></strong>
+          <em>{{ props.app.wardrobeStats.review ? `${props.app.wardrobeStats.review} 件衣物待补充` : (props.app.wardrobeStats.ready ? '衣物信息齐全' : '至少添加两类衣物') }}</em>
+        </div>
+        <div class="overview-item overview-item-accent">
+          <span>衣橱覆盖率</span>
+          <strong>{{ coveragePercent === null ? '--' : `${coveragePercent}%` }}</strong>
+          <em>{{ props.app.recommendationStats.coveredItems }} 件衣物参与过推荐</em>
+        </div>
+        <div class="overview-source">
+          <span>推荐依据</span>
+          <strong>先浏览，再生成</strong>
+          <p>每套搭配都会参考你的衣橱、天气和场合。</p>
+        </div>
+      </section>
 
-      <div class="trend-panel">
-        <header class="section-heading compact-heading">
+      <section class="ootd-section" aria-labelledby="ootd-title">
+        <header class="section-header ootd-header">
           <div>
-            <p class="section-kicker">实时风潮参照</p>
-            <h2>生成前可以看看当下趋势</h2>
+            <div class="section-number">02 / DAILY OOTD</div>
+            <h2 id="ootd-title">今天的搭配</h2>
+            <p>{{ dailyDateHeading }} · {{ dailyWeather.label }} {{ dailyWeather.temperature }} · {{ dailyOffset === 0 ? '今日' : '当日' }} {{ dailyLookCount }} 套搭配可选。</p>
           </div>
-          <button class="quiet-button" type="button" @click="app.selectView('trend')">查看风潮 <TrendingUp :size="16" /></button>
+          <div class="ootd-controls">
+            <button class="round-control" type="button" aria-label="前一天" title="前一天" @click="shiftDay(-1)"><ChevronLeft :size="17" /></button>
+            <button class="ootd-today" type="button" @click="jumpToToday">{{ dailyOffset === 0 ? '今天' : '回到今天' }}</button>
+            <button class="round-control" type="button" aria-label="后一天" title="后一天" @click="shiftDay(1)"><ChevronRight :size="17" /></button>
+          </div>
         </header>
 
-        <div v-if="trendPreview.length" class="trend-list">
-          <article v-for="trend in trendPreview" :key="trend.id">
-            <div class="trend-media">
-              <img
-                v-if="trend.imageUrl && !brokenImages.has(`trend-${trend.id}`)"
-                :src="trend.imageUrl"
-                :alt="trend.title"
-                @error="imageFailed(`trend-${trend.id}`)"
-              />
-              <span v-else class="image-fallback trend-fallback"><TrendingUp :size="23" /></span>
+        <div class="ootd-workspace">
+          <div class="ootd-stack-panel">
+            <div class="ootd-stack-stage">
+              <Stack
+                :key="dailyDateKey"
+                :cards-data="dailyLooks"
+                :random-rotation="true"
+                :sensitivity="150"
+                :send-to-back-on-click="true"
+                :mobile-click-only="true"
+                @change="handleLookChange"
+              >
+                <template #default="{ card }">
+                  <article class="ootd-stack-card">
+                    <img
+                      :src="card.img"
+                      :alt="`${card.dayName} ${card.title}`"
+                      draggable="false"
+                      @error="imageFailed(`ootd-${dailyDateKey}`, card.heroItem, card.lookIndex)"
+                    />
+                  </article>
+                </template>
+              </Stack>
             </div>
-            <div class="trend-copy">
-              <span>{{ trend.platform }} · <Flame :size="13" />{{ trend.heatScore }}</span>
-              <strong>{{ trend.title }}</strong>
-              <p>{{ (trend.topicTags || []).slice(0, 3).join(' · ') || '暂无标签' }}</p>
+          </div>
+
+          <article v-if="selectedLook" class="ootd-detail" role="tabpanel" :aria-label="`${selectedLook.dayName} ${selectedLook.title}`">
+            <div class="ootd-detail-topline"><span>{{ selectedLook.dayName }} / {{ selectedLook.dateLabel }}</span><strong>{{ selectedLook.weatherLabel }} {{ selectedLook.temperature }} · {{ selectedLook.low }}</strong></div>
+            <div class="ootd-detail-kicker"><span>{{ selectedLook.lookLabel }} / SELECTED LOOK</span><span class="ootd-fit-label">{{ selectedLook.fitLabel }}</span></div>
+            <h3>{{ selectedLook.title }}</h3>
+            <p class="ootd-detail-lead">{{ selectedLook.note }}</p>
+            <div class="ootd-detail-palette">
+              <span>COLOR EDIT</span>
+              <strong>{{ selectedLook.palette }}</strong>
             </div>
-            <a :href="trend.sourceUrl" target="_blank" rel="noreferrer" :aria-label="`查看${trend.title}来源`"><ArrowUpRight :size="17" /></a>
+            <div class="ootd-items-heading">
+              <span>LOOK CONTENT</span>
+              <strong>{{ selectedLook.items.length ? `${selectedLook.items.length} 件衣物` : '衣橱中还没有可用衣物' }}</strong>
+            </div>
+            <ul v-if="selectedLook.items.length" class="ootd-item-list" aria-label="这套搭配包含的衣物">
+              <li v-for="(item, itemIndex) in selectedLook.items" :key="`${itemKey(item)}-${itemIndex}`">
+                <div class="ootd-item-image">
+                  <img
+                    :src="imageSource(item, `ootd-detail-${dailyDateKey}`, itemIndex)"
+                    :alt="item.name || item.category || '搭配衣物'"
+                    @error="imageFailed(`ootd-detail-${dailyDateKey}`, item, itemIndex)"
+                  />
+                </div>
+                <div class="ootd-item-copy"><span>{{ String(itemIndex + 1).padStart(2, '0') }} / {{ item.category || '衣物' }}</span><strong>{{ item.name || item.style || '衣橱衣物' }}</strong><small>{{ item.style || item.color || '已加入这套搭配' }}</small></div>
+              </li>
+            </ul>
+            <div v-else class="ootd-empty"><Shirt :size="20" aria-hidden="true" /><span>添加至少两类衣物后，这里会换成你衣橱里的搭配。</span></div>
+            <div class="ootd-editor-note"><Compass :size="18" aria-hidden="true" /><div><span>EDITOR'S NOTE</span><p>{{ selectedLook.note }}</p></div></div>
+            <div class="ootd-detail-actions">
+              <button class="detail-secondary" type="button" @click="openGenerator(selectedLook)">修改条件</button>
+              <button class="detail-primary" type="button" @click="openGenerator(selectedLook)"><Sparkles :size="15" />生成类似搭配</button>
+            </div>
           </article>
         </div>
-        <div v-else class="trend-empty"><TrendingUp :size="24" /><span>暂无可用趋势数据</span></div>
-      </div>
-    </section>
+      </section>
+
+      <section id="generator-panel" class="workbench-grid" aria-label="生成新的搭配">
+        <article class="generator-panel">
+          <header class="panel-header">
+            <div>
+              <div class="section-number">03 / CUSTOM EDIT</div>
+              <h2>按条件生成搭配</h2>
+              <p>填入场合和城市，系统只会从已确认的衣物中选择。</p>
+            </div>
+            <button class="panel-toggle" type="button" :aria-expanded="formOpen" @click="formOpen = !formOpen">
+              {{ formOpen ? '收起' : '展开' }}<ChevronRight :size="15" :class="{ rotated: formOpen }" />
+            </button>
+          </header>
+
+          <form v-show="formOpen" class="recommendation-form" @submit.prevent="handleGenerate">
+            <div class="form-fields">
+              <label>
+                <span>场合</span>
+                <input v-model.trim="state.recommendationForm.occasion" aria-label="场合" required maxlength="80" placeholder="例如：通勤、约会或周末出行" />
+              </label>
+              <label>
+                <span>城市</span>
+                <input v-model.trim="state.recommendationForm.city" aria-label="城市" required maxlength="80" placeholder="例如：杭州" @input="props.app.clearWeather" />
+              </label>
+              <label class="wide-field">
+                <span>风格提示 <small>可选</small></span>
+                <input v-model.trim="state.recommendationForm.styleHint" aria-label="风格提示（可选）" maxlength="120" placeholder="例如：低饱和、利落、适合步行" />
+              </label>
+            </div>
+
+            <div class="form-footer">
+              <div v-if="actualWeather" class="form-weather">
+                <CloudSun :size="18" aria-hidden="true" />
+                <div><strong>{{ actualWeather.city }}</strong><span>{{ Number(actualWeather.temperatureC).toFixed(0) }}° · 体感 {{ Number(actualWeather.apparentTemperatureC).toFixed(0) }}° · {{ props.app.weatherConditionLabel(actualWeather.weatherCode) }}</span></div>
+                <button type="button" :disabled="state.weatherLoading" @click="props.app.refreshWeather"><RefreshCw :size="14" />刷新天气</button>
+              </div>
+              <p v-else class="form-weather-empty"><MapPin :size="17" aria-hidden="true" />填好城市后查看天气</p>
+              <button class="generate-button" type="submit" :disabled="state.generating">
+                <LoaderCircle v-if="state.generating" class="spinning" :size="17" />
+                <Sparkles v-else :size="17" aria-hidden="true" />
+                {{ state.generating ? '正在生成搭配' : '生成搭配' }}
+              </button>
+            </div>
+          </form>
+          <div v-if="!formOpen" class="collapsed-hint"><Sparkles :size="15" />已选条件：{{ state.recommendationForm.occasion || '未填写场合' }} · {{ state.recommendationForm.city || '未填写城市' }}<button type="button" @click="formOpen = true">修改条件</button></div>
+        </article>
+
+        <aside class="closet-panel">
+          <header class="panel-header compact">
+            <div>
+              <div class="section-number">04 / CLOSET SIGNAL</div>
+              <h2>衣橱使用情况</h2>
+            </div>
+            <Shirt :size="19" aria-hidden="true" />
+          </header>
+          <div class="closet-score">
+            <strong>{{ coveragePercent === null ? '--' : `${coveragePercent}%` }}</strong>
+            <span>已有衣物参与推荐</span>
+          </div>
+          <div class="closet-progress" role="progressbar" :aria-valuenow="coveragePercent || 0" aria-valuemin="0" aria-valuemax="100" aria-label="衣橱参与推荐的比例"><span :style="{ width: `${coveragePercent || 0}%` }"></span></div>
+          <div class="closet-facts">
+            <div><span>衣橱衣物数</span><strong>{{ props.app.wardrobeStats.total }}</strong></div>
+            <div><span>历史搭配</span><strong>{{ props.app.recommendationStats.total }}</strong></div>
+          </div>
+          <div class="closet-suggestion"><Check :size="15" aria-hidden="true" /><span>{{ props.app.wardrobeStats.review ? '先补充待确认衣物的信息，再生成搭配。' : (props.app.wardrobeStats.ready ? '衣物信息已齐，可以生成下一套搭配。' : '先添加至少两类衣物，再生成第一套搭配。') }}</span></div>
+        </aside>
+      </section>
+
+      <section class="generated-section" aria-labelledby="generated-title">
+        <header class="section-header">
+          <div>
+            <div class="section-number">05 / GENERATED LOOK</div>
+            <h2 id="generated-title">刚生成的搭配</h2>
+          </div>
+          <span v-if="state.currentRecommendation" class="generated-time">{{ formatDate(state.currentRecommendation.generatedAt) }}</span>
+        </header>
+
+        <div v-if="state.generating" class="generated-state" aria-live="polite">
+          <LoaderCircle class="spinning" :size="22" />
+          <strong>正在从衣橱里挑选搭配</strong>
+          <span>天气、场合和风格偏好会一起参考。</span>
+        </div>
+
+        <article v-else-if="state.currentRecommendation" class="generated-card">
+          <div class="generated-card-topline">
+            <div><span class="record-id">搭配 #{{ state.currentRecommendation.id }}</span><span>{{ state.currentRecommendation.occasion }}</span><span>{{ state.currentRecommendation.city }}</span></div>
+            <span class="saved-state" :class="{ saved: state.currentRecommendation.saved }"><Bookmark :size="15" :fill="state.currentRecommendation.saved ? 'currentColor' : 'none'" />{{ state.currentRecommendation.saved ? '已收藏' : '未收藏' }}</span>
+          </div>
+          <div class="engine-line"><span><Sparkles :size="13" />{{ props.app.engineLabel(state.currentRecommendation.engine) }}</span><small v-if="state.currentRecommendation.generationAudit?.modelName">{{ state.currentRecommendation.generationAudit.modelName }}</small><small v-if="state.currentRecommendation.generationAudit?.fallbackReason">{{ props.app.fallbackReasonLabel(state.currentRecommendation.generationAudit.fallbackReason) }}</small></div>
+          <h3>{{ state.currentRecommendation.summary }}</h3>
+          <div class="generated-content-grid">
+            <ul class="generated-items" aria-label="搭配中的衣物">
+              <li v-for="(item, itemIndex) in state.currentRecommendation.items || []" :key="`${state.currentRecommendation.id}-${item.id || itemIndex}`">
+                <div class="generated-item-image"><img :src="imageSource(item, 'result', itemIndex)" :alt="item.name" @error="imageFailed('result', item, itemIndex)" /></div>
+                <div><span>{{ item.category }} · {{ item.color }}</span><strong>{{ item.name }}</strong><small>{{ item.style || '衣橱衣物' }}</small></div>
+              </li>
+            </ul>
+            <div class="generated-reason"><span>这样搭的原因</span><p>{{ state.currentRecommendation.reason }}</p><div v-if="state.currentRecommendation.weather" class="generated-weather"><CloudSun :size="15" />{{ state.currentRecommendation.weather.temperatureC }}° · 体感 {{ state.currentRecommendation.weather.apparentTemperatureC }}° · {{ props.app.weatherConditionLabel(state.currentRecommendation.weather.weatherCode) }}</div></div>
+          </div>
+          <footer class="generated-actions">
+            <div class="rating-control"><span>这套搭配对你有用吗？</span><div aria-label="搭配评分"><button v-for="rating in 5" :key="rating" type="button" :class="{ rated: state.currentRecommendation.feedback?.rating >= rating }" :disabled="state.feedbackSavingId === state.currentRecommendation.id" :aria-label="`${rating} 星评分`" @click="props.app.rateRecommendation(state.currentRecommendation, rating)"><Star :size="18" :fill="state.currentRecommendation.feedback?.rating >= rating ? 'currentColor' : 'none'" /></button></div></div>
+            <button class="save-button" type="button" :class="{ saved: state.currentRecommendation.saved }" :disabled="state.saving || state.currentRecommendation.saved" @click="props.app.saveRecommendation()"><LoaderCircle v-if="state.saving" class="spinning" :size="16" /><Bookmark v-else :size="16" :fill="state.currentRecommendation.saved ? 'currentColor' : 'none'" />{{ state.currentRecommendation.saved ? '已保存' : '收藏这套搭配' }}</button>
+          </footer>
+        </article>
+
+          <div v-else class="generated-empty">
+          <div><Sparkles :size="19" aria-hidden="true" /><strong>还没有生成搭配</strong></div>
+          <span>选择上面的日期，或填写场合和城市开始生成。</span>
+          <button type="button" @click="openGenerator()">填写搭配条件 <ArrowRight :size="14" /></button>
+        </div>
+      </section>
+
+      <section class="signal-grid" aria-label="搭配参考">
+        <article class="signal-panel trend-signal">
+          <header class="panel-header compact">
+              <div><div class="section-number">06 / TREND SIGNAL</div><h2>本周趋势参考</h2></div>
+            <Flame :size="19" aria-hidden="true" />
+          </header>
+          <div v-if="trendPreview" class="trend-signal-content">
+            <img :src="trendPreview.imageUrl || fallbackImages[1]" :alt="trendPreview.title" />
+            <div><span>{{ trendPreview.platform || '趋势样本' }} · 热度 {{ trendPreview.heatScore ?? '—' }}</span><strong>{{ trendPreview.title }}</strong><p>{{ (trendPreview.topicTags || []).slice(0, 3).join(' · ') || '先从趋势里挑一个方向' }}</p><button type="button" @click="props.app.selectView('trend')">查看全部趋势 <ArrowRight :size="14" /></button></div>
+          </div>
+          <div v-else class="signal-empty"><Flame :size="18" />加载趋势数据后，这里会显示一条参考。</div>
+        </article>
+        <article class="signal-panel note-signal">
+          <header class="panel-header compact"><div><div class="section-number">07 / NOTES</div><h2>搭配小提示</h2></div><Wind :size="19" aria-hidden="true" /></header>
+          <ul>
+            <li><span>01</span><p><strong>让常穿衣物多出现几次</strong>同一件衣物也能搭出不同组合。</p></li>
+            <li><span>02</span><p><strong>先把主色定下来</strong>颜色稳定后，再决定要不要加配饰。</p></li>
+            <li><span>03</span><p><strong>给天气留一点余量</strong>温差大时，带一件轻薄外层更方便。</p></li>
+          </ul>
+        </article>
+      </section>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .recommendation-view {
-  width: min(1180px, 100%);
+  --rec-bg: #f4f1eb;
+  --rec-paper: #fbfaf6;
+  --rec-paper-strong: #fffefa;
+  --rec-ink: #202923;
+  --rec-muted: #7a8179;
+  --rec-line: #dddcd3;
+  --rec-line-dark: #c3c7bd;
+  --rec-accent: #788a6b;
+  --rec-accent-soft: #e6ece2;
+  --rec-rust: #b96850;
+  --rec-dark: #202b24;
+  min-height: calc(100vh - 76px);
+  color: var(--rec-ink);
+  background: var(--rec-bg);
+}
+
+.recommendation-canvas {
+  width: min(calc(100% - 64px), 1280px);
   margin: 0 auto;
-  color: var(--ink);
+  padding: 42px 0 96px;
 }
 
-.page-hero {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 40px;
-  padding: 72px 0 42px;
+.recommendation-view button,
+.recommendation-view input {
+  font: inherit;
 }
 
-.hero-copy { max-width: 720px; }
-.eyebrow,
-.section-kicker {
+.recommendation-view button {
+  border: 0;
+}
+
+.recommendation-view button:focus-visible,
+.recommendation-view input:focus-visible {
+  outline: 2px solid var(--rec-accent);
+  outline-offset: 3px;
+}
+
+.recommendation-view h1,
+.recommendation-view h2,
+.recommendation-view h3,
+.recommendation-view p {
+  margin-top: 0;
+}
+
+.recommendation-view h1,
+.recommendation-view h2,
+.recommendation-view h3 {
+  font-family: var(--font-display);
+  letter-spacing: -.045em;
+}
+
+.recommendation-hero {
+  border-bottom: 1px solid var(--rec-line);
+  padding-bottom: 42px;
+}
+
+.hero-overline,
+.hero-overline > span,
+.hero-actions,
+.hero-footnote,
+.hero-index,
+.weather-brief-top,
+.weather-note,
+.weather-link,
+.section-number,
+.panel-toggle,
+.form-weather,
+.form-weather-empty,
+.collapsed-hint,
+.generated-card-topline,
+.engine-line,
+.generated-actions,
+.rating-control,
+.rating-control > div,
+.save-button,
+.signal-empty {
   display: flex;
   align-items: center;
-  gap: 7px;
-  margin: 0 0 12px;
-  color: var(--accent);
+}
+
+.hero-overline {
+  justify-content: space-between;
+  gap: 24px;
+  color: var(--rec-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+
+.hero-overline > span:first-child {
+  gap: 8px;
+  color: var(--rec-accent);
+}
+
+.hero-overline-date {
+  letter-spacing: .04em;
+  text-transform: none;
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: clamp(48px, 9vw, 136px);
+  align-items: end;
+  padding: 54px 0 18px;
+}
+
+.hero-copy {
+  max-width: 760px;
+}
+
+.hero-index {
+  gap: 12px;
+  margin-bottom: 22px;
+  color: var(--rec-muted);
+  font-size: 11px;
+  letter-spacing: .04em;
+}
+
+.hero-index span:first-child {
+  color: var(--rec-rust);
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0;
 }
 
-.page-hero h1 {
-  max-width: 680px;
-  margin: 0;
-  font-family: Georgia, "Songti SC", serif;
-  font-size: 48px;
-  font-weight: 500;
-  line-height: 1.08;
-  letter-spacing: 0;
+.hero-copy h1 {
+  max-width: 720px;
+  margin-bottom: 22px;
+  color: var(--rec-dark);
+  font-size: clamp(46px, 6vw, 76px);
+  font-weight: 650;
+  line-height: 1.03;
 }
 
-.hero-copy > p:last-child {
-  max-width: 650px;
-  margin: 19px 0 0;
-  color: var(--muted);
+.hero-lead {
+  max-width: 500px;
+  margin-bottom: 30px;
+  color: var(--rec-muted);
   font-size: 14px;
-  line-height: 1.8;
+  line-height: 1.85;
 }
 
-.primary-action,
+.hero-actions {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.hero-primary,
+.hero-secondary,
+.detail-primary,
+.detail-secondary,
 .generate-button,
 .save-button,
-.empty-state button {
-  display: inline-flex;
-  min-height: 44px;
-  align-items: center;
-  justify-content: center;
+.generated-empty button {
+  min-height: 42px;
   gap: 8px;
-  border: 1px solid var(--ink);
-  border-radius: 5px;
-  padding: 10px 17px;
-  color: var(--surface);
-  background: var(--ink);
-  font-size: 13px;
+  padding: 10px 16px;
+  font-size: 12px;
   font-weight: 700;
 }
 
-.stats-band {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
+.hero-primary,
+.detail-primary,
+.generate-button,
+.save-button {
+  display: inline-flex;
+  justify-content: center;
+  color: var(--rec-paper-strong);
+  background: var(--rec-dark);
 }
 
-.stats-band article {
-  min-width: 0;
-  padding: 24px 27px;
-  border-right: 1px solid var(--line);
+.hero-primary:hover,
+.detail-primary:hover,
+.generate-button:hover:not(:disabled),
+.save-button:hover:not(:disabled) {
+  background: var(--rec-accent);
+  transform: translateY(-1px);
 }
 
-.stats-band article:last-child { border-right: 0; }
-.stats-band span,
-.stats-band small {
-  display: block;
-  color: var(--muted);
+.hero-secondary,
+.detail-secondary,
+.generated-empty button {
+  display: inline-flex;
+  justify-content: center;
+  border: 1px solid var(--rec-line-dark);
+  color: var(--rec-ink);
+  background: transparent;
+}
+
+.hero-secondary:hover,
+.detail-secondary:hover,
+.generated-empty button:hover {
+  border-color: var(--rec-accent);
+  color: var(--rec-accent);
+}
+
+.hero-footnote {
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 34px;
+  color: var(--rec-accent);
   font-size: 11px;
 }
 
-.stats-band strong {
-  display: block;
-  margin: 8px 0 7px;
-  font-family: Georgia, serif;
-  font-size: 31px;
+.hero-footnote-muted {
+  margin-left: 8px;
+  color: var(--rec-muted);
+}
+
+.weather-brief {
+  border-top: 1px solid var(--rec-ink);
+  border-bottom: 1px solid var(--rec-line);
+  padding: 18px 0 16px;
+}
+
+.weather-brief-top {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.weather-brief-top > div {
+  display: grid;
+  gap: 6px;
+}
+
+.brief-label,
+.weather-reading span,
+.weather-reading small,
+.weather-note,
+.weather-link,
+.overview-item span,
+.overview-item em,
+.overview-source span,
+  .overview-source p,
+.section-header p,
+.generated-time,
+.generated-card-topline > div,
+.engine-line,
+.generated-item-image + div span,
+.generated-item-image + div small,
+.generated-reason span,
+.generated-reason p,
+.generated-weather,
+.signal-panel span,
+.signal-panel p,
+.note-signal p,
+.closet-score span,
+.closet-facts span,
+.closet-suggestion {
+  color: var(--rec-muted);
+  font-size: 11px;
+}
+
+.weather-brief-top > svg {
+  color: var(--rec-rust);
+}
+
+.weather-brief-top strong {
+  color: var(--rec-dark);
+  font-family: var(--font-display);
+  font-size: 23px;
+  font-weight: 650;
+}
+
+.weather-reading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: baseline;
+  margin-top: 28px;
+}
+
+.weather-reading > strong {
+  font-family: var(--font-mono);
+  font-size: 38px;
   font-weight: 500;
   line-height: 1;
 }
 
-.stats-band em { color: var(--muted); font: 400 13px/1 sans-serif; }
-
-.generator-panel {
-  margin-top: 34px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 28px;
-  background: var(--surface);
+.weather-reading > div {
+  display: grid;
+  gap: 4px;
 }
 
-.panel-heading,
-.section-heading {
+.weather-reading small {
+  line-height: 1.45;
+}
+
+.weather-note {
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 26px;
+  line-height: 1.6;
+}
+
+.weather-note svg {
+  flex: 0 0 auto;
+  color: var(--rec-accent);
+}
+
+.weather-link {
+  gap: 5px;
+  margin-top: 17px;
+  padding: 0;
+  color: var(--rec-ink);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.weather-link:hover {
+  color: var(--rec-accent);
+}
+
+.overview-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(230px, .95fr);
+  border-bottom: 1px solid var(--rec-line);
+}
+
+.overview-item,
+.overview-source {
+  min-width: 0;
+  padding: 23px 22px 25px 0;
+}
+
+.overview-item + .overview-item,
+.overview-source {
+  border-left: 1px solid var(--rec-line);
+  padding-left: 22px;
+}
+
+.overview-item span,
+.overview-item em,
+.overview-source span,
+.overview-source p {
+  display: block;
+}
+
+.overview-item strong {
+  display: block;
+  margin: 9px 0 6px;
+  color: var(--rec-dark);
+  font-family: var(--font-mono);
+  font-size: 29px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.overview-item strong small {
+  font: 400 11px/1 var(--font-sans);
+}
+
+.overview-item-accent strong {
+  color: var(--rec-accent);
+}
+
+.overview-item em {
+  font-style: normal;
+}
+
+.overview-source strong {
+  display: block;
+  margin: 9px 0 6px;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.overview-source p {
+  max-width: 210px;
+  margin: 0;
+  line-height: 1.55;
+}
+
+.ootd-section {
+  padding-top: 62px;
+}
+
+.section-header,
+.panel-header {
   display: flex;
-  align-items: start;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
 }
 
-.panel-heading h2,
-.section-heading h2 {
+.section-number {
+  gap: 7px;
+  margin-bottom: 12px;
+  color: var(--rec-rust);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+
+.section-header h2,
+.panel-header h2 {
+  margin-bottom: 8px;
+  color: var(--rec-dark);
+  font-size: 29px;
+  font-weight: 650;
+  line-height: 1.1;
+}
+
+.section-header p,
+.panel-header p {
   margin: 0;
-  font-family: Georgia, "Songti SC", serif;
-  font-size: 26px;
-  font-weight: 500;
-  line-height: 1.25;
+  line-height: 1.6;
+}
+
+.ootd-controls {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ootd-today,
+.round-control,
+.panel-toggle {
+  color: var(--rec-muted);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ootd-today {
+  min-height: 34px;
+  border-bottom: 1px solid var(--rec-ink);
+  padding: 0 3px;
+  color: var(--rec-ink);
+}
+
+.round-control {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--rec-line);
+  border-radius: 50%;
+}
+
+.round-control:hover,
+.round-control:focus-visible {
+  border-color: var(--rec-accent);
+  color: var(--rec-accent);
+}
+
+.ootd-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 30px;
+}
+
+.ootd-stack-panel {
+  overflow: hidden;
+  min-width: 0;
+  min-height: 520px;
+  border: 1px solid var(--rec-line);
+  padding: 20px 22px 17px;
+  background: #e8e3d9;
+}
+
+.ootd-detail-topline,
+.ootd-detail-kicker,
+.ootd-detail-palette,
+.ootd-items-heading,
+.ootd-detail-actions {
+  display: flex;
+  align-items: center;
+}
+
+.ootd-detail-kicker,
+.ootd-items-heading,
+.ootd-detail-palette,
+.ootd-editor-note > div > span {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.ootd-detail-kicker,
+.ootd-items-heading,
+.ootd-detail-palette,
+.ootd-editor-note > div > span {
+  color: var(--rec-accent);
+}
+
+.ootd-stack-stage {
+  width: min(100%, 520px);
+  height: 680px;
+  margin: 0 auto;
+}
+
+.ootd-stack-card {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(255, 254, 250, .45);
+  border-radius: 18px;
+  background: var(--rec-accent-soft);
+  box-shadow: 0 18px 38px rgba(32, 43, 36, .16);
+}
+
+.ootd-stack-card > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 100%;
+  min-height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.ootd-detail {
+  min-width: 0;
+  border: 1px solid var(--rec-line);
+  display: flex;
+  flex-direction: column;
+  min-height: 520px;
+  padding: 30px 34px 25px;
+  background: var(--rec-paper);
+}
+
+.ootd-detail-topline {
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--rec-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .06em;
+}
+
+.ootd-detail-topline strong {
+  color: var(--rec-rust);
+  font-weight: 700;
+}
+
+.ootd-detail-kicker {
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 48px;
+  font-weight: 700;
+}
+
+.ootd-fit-label {
+  border: 1px solid var(--rec-line-dark);
+  border-radius: 999px;
+  padding: 5px 8px;
+  color: var(--rec-ink);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.ootd-detail h3 {
+  max-width: 620px;
+  margin: 18px 0 11px;
+  color: var(--rec-dark);
+  font-size: 35px;
+  font-weight: 650;
+  line-height: 1.1;
+}
+
+.ootd-detail-lead {
+  max-width: 570px;
+  margin: 0;
+  color: var(--rec-muted);
+  line-height: 1.65;
+}
+
+.ootd-detail-palette {
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 25px;
+  border-top: 1px solid var(--rec-line);
+  border-bottom: 1px solid var(--rec-line);
+  padding: 11px 0;
+}
+
+.ootd-detail-palette strong {
+  overflow: hidden;
+  color: var(--rec-dark);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ootd-items-heading {
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 21px;
+}
+
+.ootd-items-heading strong {
+  color: var(--rec-ink);
+  font-family: var(--font-sans);
+  font-size: 11px;
   letter-spacing: 0;
 }
 
-.engine-preference {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin: 9px 0 0;
-  color: var(--green);
-  font-size: 11px;
+.ootd-item-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 18px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
 }
 
-.quiet-button {
-  display: inline-flex;
-  min-height: 38px;
+.ootd-item-list li {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  padding: 8px 11px;
-  color: var(--ink);
-  background: var(--surface);
-  font-size: 12px;
+  gap: 10px;
+  min-width: 0;
+  border-bottom: 1px solid var(--rec-line);
+  padding-bottom: 9px;
+}
+
+.ootd-item-image {
+  width: 56px;
+  height: 64px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--rec-accent-soft);
+}
+
+.ootd-item-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ootd-item-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.ootd-item-copy span,
+.ootd-item-copy strong,
+.ootd-item-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ootd-item-copy span {
+  color: var(--rec-accent);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.ootd-item-copy strong {
+  color: var(--rec-dark);
+  font-size: 13px;
   font-weight: 650;
 }
 
-.recommendation-form { margin-top: 26px; }
+.ootd-item-copy small {
+  color: var(--rec-muted);
+  font-size: 10px;
+}
+
+.ootd-empty {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 14px;
+  border: 1px dashed var(--rec-line-dark);
+  padding: 12px;
+  color: var(--rec-muted);
+  font-size: 11px;
+}
+
+.ootd-empty svg {
+  flex: 0 0 auto;
+  color: var(--rec-accent);
+}
+
+.ootd-editor-note {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 20px;
+  border-left: 2px solid var(--rec-accent);
+  padding-left: 12px;
+}
+
+.ootd-editor-note > svg {
+  color: var(--rec-accent);
+}
+
+.ootd-editor-note > div {
+  display: grid;
+  gap: 5px;
+}
+
+.ootd-editor-note p {
+  overflow: hidden;
+  display: -webkit-box;
+  margin: 0;
+  color: var(--rec-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.ootd-detail-actions {
+  gap: 9px;
+  margin-top: auto;
+  padding-top: 24px;
+}
+
+.workbench-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr);
+  gap: 28px;
+  padding-top: 64px;
+}
+
+.generator-panel,
+.closet-panel,
+.signal-panel {
+  min-width: 0;
+  border-top: 1px solid var(--rec-ink);
+  padding-top: 22px;
+}
+
+.panel-header {
+  align-items: flex-start;
+}
+
+.panel-header h2 {
+  font-size: 24px;
+}
+
+.panel-header p {
+  max-width: 430px;
+}
+
+.panel-toggle {
+  gap: 5px;
+  padding: 7px 0;
+}
+
+.panel-toggle:hover {
+  color: var(--rec-accent);
+}
+
+.panel-toggle svg {
+  transition: transform 180ms ease;
+}
+
+.panel-toggle svg.rotated {
+  transform: rotate(90deg);
+}
+
+.recommendation-form {
+  margin-top: 27px;
+}
+
 .form-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+  gap: 17px 20px;
 }
 
-.wide-field { grid-column: 1 / -1; }
-.recommendation-form label { display: grid; gap: 8px; }
-.recommendation-form label > span { color: var(--muted); font-size: 12px; font-weight: 700; }
-.recommendation-form label small { font-weight: 400; }
+.recommendation-form label {
+  display: grid;
+  gap: 8px;
+}
+
+.recommendation-form label > span {
+  color: var(--rec-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.recommendation-form label small {
+  margin-left: 4px;
+  color: var(--rec-muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.wide-field {
+  grid-column: 1 / -1;
+}
+
 .recommendation-form input {
   width: 100%;
-  min-height: 46px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  outline: none;
-  padding: 11px 13px;
-  color: var(--ink);
-  background: var(--bg);
-  font-size: 14px;
+  min-height: 44px;
+  border: 1px solid var(--rec-line);
+  border-radius: 3px;
+  outline: 0;
+  padding: 10px 12px;
+  color: var(--rec-ink);
+  background: var(--rec-paper);
+  font-size: 13px;
 }
 
-.recommendation-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.recommendation-form input:focus {
+  border-color: var(--rec-accent);
+  box-shadow: 0 0 0 3px var(--rec-accent-soft);
+}
+
+.recommendation-form input::placeholder {
+  color: #a5aaa1;
+}
+
 .form-footer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 18px;
   align-items: center;
-  margin-top: 20px;
+  margin-top: 22px;
+  border-top: 1px solid var(--rec-line);
+  padding-top: 17px;
 }
 
-.weather-preview,
-.weather-empty {
-  display: flex;
-  min-height: 52px;
-  align-items: center;
-  gap: 11px;
+.form-weather,
+.form-weather-empty {
+  min-width: 0;
+  gap: 9px;
   margin: 0;
-  border-top: 1px solid var(--line);
-  padding-top: 14px;
-  color: var(--muted);
+  color: var(--rec-muted);
 }
 
-.weather-preview > svg,
-.weather-empty > svg { flex: 0 0 auto; color: var(--accent); }
-.weather-preview p { display: grid; gap: 3px; margin: 0; }
-.weather-preview strong { color: var(--ink); font-size: 13px; }
-.weather-preview span { font-size: 12px; }
-.weather-preview small { margin-left: auto; color: var(--muted); font-size: 10px; }
-.weather-empty { font-size: 12px; }
-.generate-button { min-width: 180px; }
-
-.result-section { padding: 64px 0 0; }
-.result-time { color: var(--muted); font-size: 12px; }
-.recommendation-result {
-  margin-top: 24px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 30px;
-  background: var(--surface);
+.form-weather > svg,
+.form-weather-empty > svg {
+  flex: 0 0 auto;
+  color: var(--rec-accent);
 }
 
-.result-topline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
+.form-weather > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
 }
 
-.result-topline > div { display: flex; flex-wrap: wrap; gap: 8px 15px; color: var(--muted); font-size: 11px; }
-.record-id { color: var(--accent); font-weight: 700; }
-.engine-badge-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
-.engine-badge {
+.form-weather strong {
+  color: var(--rec-ink);
+  font-size: 12px;
+}
+
+.form-weather span {
+  overflow: hidden;
+  color: var(--rec-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-weather button {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  border-radius: 999px;
-  padding: 6px 10px;
-  color: var(--green);
-  background: var(--green-soft);
+  gap: 4px;
+  margin-left: auto;
+  padding: 0;
+  color: var(--rec-accent);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.form-weather-empty {
+  font-size: 11px;
+}
+
+.generate-button {
+  min-width: 164px;
+}
+
+.collapsed-hint {
+  gap: 8px;
+  margin-top: 26px;
+  border-top: 1px solid var(--rec-line);
+  padding-top: 17px;
+  color: var(--rec-muted);
+  font-size: 11px;
+}
+
+.collapsed-hint svg {
+  color: var(--rec-accent);
+}
+
+.collapsed-hint button {
+  margin-left: auto;
+  color: var(--rec-ink);
+  background: transparent;
   font-size: 11px;
   font-weight: 700;
 }
-.engine-badge.fallback { color: var(--accent-strong); background: var(--accent-soft); }
-.engine-meta { color: var(--muted); font-size: 11px; }
-.saved-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
+
+.closet-panel > .panel-header > svg {
+  color: var(--rec-accent);
+}
+
+.panel-header.compact h2 {
+  margin-bottom: 0;
+}
+
+.closet-score {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 35px;
+}
+
+.closet-score strong {
+  color: var(--rec-dark);
+  font-family: var(--font-mono);
+  font-size: 40px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.closet-score span {
+  max-width: 105px;
+  line-height: 1.45;
+}
+
+.closet-progress {
+  height: 7px;
+  margin-top: 17px;
+  background: var(--rec-line);
+}
+
+.closet-progress span {
+  display: block;
+  height: 100%;
+  background: var(--rec-accent);
+  transition: width 300ms ease;
+}
+
+.closet-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.closet-facts div {
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid var(--rec-line);
+  padding-top: 12px;
+}
+
+.closet-facts strong {
+  font-family: var(--font-mono);
+  font-size: 23px;
+  font-weight: 500;
+}
+
+.closet-suggestion {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  margin-top: 27px;
+  border-left: 2px solid var(--rec-rust);
+  padding-left: 11px;
+  line-height: 1.6;
+}
+
+.closet-suggestion svg {
+  color: var(--rec-rust);
+}
+
+.generated-section {
+  padding-top: 70px;
+}
+
+.generated-time {
+  align-self: center;
+}
+
+.generated-state,
+.generated-empty {
+  display: grid;
+  min-height: 180px;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  margin-top: 28px;
+  border: 1px dashed var(--rec-line-dark);
+  color: var(--rec-muted);
+  text-align: center;
+}
+
+.generated-state svg,
+.generated-empty svg {
+  color: var(--rec-accent);
+}
+
+.generated-state strong,
+.generated-empty strong {
+  color: var(--rec-ink);
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.generated-state span,
+.generated-empty > span {
   font-size: 11px;
 }
 
-.saved-state.saved { color: var(--accent); }
-.recommendation-result > h3 {
-  max-width: 760px;
-  margin: 20px 0 26px;
-  font-family: Georgia, "Songti SC", serif;
-  font-size: 32px;
-  font-weight: 500;
-  line-height: 1.25;
-  letter-spacing: 0;
+.generated-empty > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.outfit-list {
+.generated-empty button {
+  min-height: 34px;
+  margin-top: 5px;
+  padding: 7px 11px;
+}
+
+.generated-card {
+  margin-top: 28px;
+  border: 1px solid var(--rec-line);
+  padding: 28px 30px 24px;
+  background: var(--rec-paper);
+}
+
+.generated-card-topline {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.generated-card-topline > div {
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.record-id {
+  color: var(--rec-accent);
+  font-weight: 700;
+}
+
+.saved-state {
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.saved-state.saved {
+  color: var(--rec-accent);
+}
+
+.engine-line {
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 15px;
+}
+
+.engine-line > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--rec-accent);
+  background: var(--rec-accent-soft);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.engine-line small {
+  color: var(--rec-muted);
+  font-size: 10px;
+}
+
+.generated-card h3 {
+  max-width: 760px;
+  margin: 20px 0 25px;
+  color: var(--rec-dark);
+  font-size: 27px;
+  font-weight: 650;
+  line-height: 1.23;
+}
+
+.generated-content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(240px, .75fr);
+  gap: 28px;
+  border-top: 1px solid var(--rec-line);
+  padding-top: 22px;
+}
+
+.generated-items {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px 20px;
   margin: 0;
   padding: 0;
-  border-top: 1px solid var(--line);
   list-style: none;
 }
 
-.outfit-list li {
+.generated-items li {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
-  gap: 13px;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 11px;
   align-items: center;
   min-width: 0;
-  padding: 15px 18px 15px 0;
-  border-bottom: 1px solid var(--line);
 }
 
-.outfit-list li:nth-child(odd) { border-right: 1px solid var(--line); }
-.outfit-list li:nth-child(even) { padding-left: 18px; }
-.garment-media,
-.trend-media {
+.generated-item-image {
+  width: 52px;
+  height: 58px;
   overflow: hidden;
-  background: var(--bg);
+  border-radius: 5px;
+  background: var(--rec-bg);
 }
 
-.garment-media { width: 58px; height: 66px; border-radius: 4px; }
-.garment-media img,
-.trend-media img { width: 100%; height: 100%; object-fit: cover; }
-.image-fallback {
+.generated-item-image + div {
   display: grid;
-  width: 100%;
-  height: 100%;
-  place-items: center;
-  color: var(--surface);
+  gap: 3px;
+  min-width: 0;
 }
 
-.outfit-list strong { display: block; overflow-wrap: anywhere; font-size: 13px; }
-.outfit-list p { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
-.result-details { display: grid; grid-template-columns: 1.6fr .65fr 1fr; border-bottom: 1px solid var(--line); }
-.result-details > div { padding: 20px 20px 20px 0; }
-.result-details > div + div { border-left: 1px solid var(--line); padding-left: 20px; }
-.result-details span { color: var(--accent); font-size: 11px; font-weight: 700; }
-.result-details p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
-.result-details p small { color: var(--muted); font-size: 11px; }
-.result-actions {
+.generated-item-image + div span,
+.generated-item-image + div small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generated-item-image + div span {
+  font-size: 9px;
+}
+
+.generated-item-image + div strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generated-item-image + div small {
+  font-size: 10px;
+}
+
+.generated-reason {
+  border-left: 1px solid var(--rec-line);
+  padding-left: 22px;
+}
+
+.generated-reason > span {
+  color: var(--rec-accent);
+  font-weight: 700;
+}
+
+.generated-reason p {
+  margin: 8px 0 0;
+  line-height: 1.7;
+}
+
+.generated-weather {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 22px;
-  padding-top: 20px;
+  gap: 5px;
+  margin-top: 16px;
 }
 
-.rating-control { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
-.rating-control > div { display: flex; gap: 2px; }
+.generated-weather svg {
+  color: var(--rec-accent);
+}
+
+.generated-actions {
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 24px;
+  border-top: 1px solid var(--rec-line);
+  padding-top: 18px;
+}
+
+.rating-control {
+  gap: 13px;
+  color: var(--rec-muted);
+  font-size: 11px;
+}
+
+.rating-control > div {
+  gap: 1px;
+}
+
 .rating-control button {
   display: grid;
-  width: 31px;
-  height: 31px;
+  width: 27px;
+  height: 27px;
   place-items: center;
-  border: 0;
-  padding: 0;
-  color: var(--line);
+  color: var(--rec-line-dark);
   background: transparent;
 }
 
 .rating-control button:hover,
 .rating-control button:focus-visible,
-.rating-control button.rated { color: var(--accent); }
-.save-button.saved { border-color: var(--line); color: var(--accent); background: var(--accent-soft); }
-.loading-state,
-.empty-state {
+.rating-control button.rated {
+  color: var(--rec-rust);
+}
+
+.save-button {
+  min-width: 148px;
+}
+
+.save-button.saved {
+  color: var(--rec-accent);
+  background: var(--rec-accent-soft);
+}
+
+.signal-grid {
   display: grid;
-  min-height: 360px;
-  place-items: center;
-  place-content: center;
-  gap: 11px;
+  grid-template-columns: 1.1fr .9fr;
+  gap: 28px;
+  padding-top: 72px;
+}
+
+.signal-panel > .panel-header > svg {
+  color: var(--rec-rust);
+}
+
+.trend-signal-content {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 18px;
+  align-items: stretch;
   margin-top: 24px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  color: var(--muted);
-  background: var(--surface);
-  text-align: center;
 }
 
-.loading-state > svg,
-.empty-state > svg { color: var(--accent); }
-.loading-state strong,
-.empty-state strong { color: var(--ink); font-family: Georgia, "Songti SC", serif; font-size: 21px; font-weight: 500; }
-.loading-state span,
-.empty-state span { max-width: 440px; font-size: 12px; line-height: 1.7; }
-.empty-state button { margin-top: 7px; }
-.insight-grid {
-  display: grid;
-  grid-template-columns: .8fr 1.2fr;
-  gap: 36px;
-  padding: 64px 0 76px;
+.trend-signal-content > img {
+  height: 150px;
+  border-radius: 8px;
 }
 
-.coverage-panel,
-.trend-panel { min-width: 0; border-top: 1px solid var(--line); padding-top: 24px; }
-.compact-heading h2 { font-size: 21px; }
-.compact-heading > svg { color: var(--accent); }
-.coverage-value { display: grid; gap: 5px; margin: 34px 0 15px; }
-.coverage-value strong { font-family: Georgia, serif; font-size: 42px; font-weight: 500; }
-.coverage-value span,
-.coverage-empty { color: var(--muted); font-size: 11px; line-height: 1.6; }
-.coverage-panel progress { width: 100%; height: 7px; border: 0; background: var(--line); }
-.coverage-panel progress::-webkit-progress-bar { background: var(--line); }
-.coverage-panel progress::-webkit-progress-value { background: var(--accent); }
-.coverage-panel progress::-moz-progress-bar { background: var(--accent); }
-.coverage-facts { display: grid; grid-template-columns: repeat(3, 1fr); margin: 28px 0 0; }
-.coverage-facts div { padding-right: 14px; }
-.coverage-facts div + div { border-left: 1px solid var(--line); padding-left: 14px; }
-.coverage-facts dt { color: var(--muted); font-size: 10px; }
-.coverage-facts dd { margin: 7px 0 0; font-family: Georgia, serif; font-size: 23px; }
-.trend-list { display: grid; margin-top: 24px; border-top: 1px solid var(--line); }
-.trend-list article {
-  display: grid;
-  grid-template-columns: 76px minmax(0, 1fr) 34px;
-  gap: 14px;
-  align-items: center;
+.trend-signal-content > div {
+  display: flex;
   min-width: 0;
-  padding: 13px 0;
-  border-bottom: 1px solid var(--line);
+  flex-direction: column;
+  align-items: flex-start;
 }
 
-.trend-media { width: 76px; height: 58px; border-radius: 4px; }
-.trend-fallback { color: var(--accent); background: var(--accent-soft); }
-.trend-copy { min-width: 0; }
-.trend-copy > span { display: flex; align-items: center; gap: 4px; color: var(--accent); font-size: 10px; }
-.trend-copy strong { display: block; overflow: hidden; margin-top: 5px; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.trend-copy p { overflow: hidden; margin: 4px 0 0; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.trend-list a {
+.trend-signal-content span {
+  color: var(--rec-accent);
+}
+
+.trend-signal-content strong {
+  margin-top: 7px;
+  color: var(--rec-ink);
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.trend-signal-content p {
+  margin: 7px 0 0;
+  line-height: 1.55;
+}
+
+.trend-signal-content button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding: 0;
+  color: var(--rec-ink);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.trend-signal-content button:hover {
+  color: var(--rec-accent);
+}
+
+.signal-empty {
+  justify-content: center;
+  min-height: 150px;
+  gap: 8px;
+  color: var(--rec-muted);
+  font-size: 11px;
+}
+
+.note-signal ul {
   display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 50%;
-  color: var(--ink);
+  gap: 0;
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
 }
 
-.trend-empty { display: flex; min-height: 170px; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 12px; }
-.spinning { animation: spin 1s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-
-@media (max-width: 900px) {
-  .page-hero { align-items: start; padding-top: 54px; }
-  .page-hero h1 { font-size: 42px; }
-  .stats-band { grid-template-columns: repeat(2, 1fr); }
-  .stats-band article:nth-child(2) { border-right: 0; }
-  .stats-band article:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
-  .result-details { grid-template-columns: 1fr; }
-  .result-details > div { padding: 17px 0; }
-  .result-details > div + div { border-top: 1px solid var(--line); border-left: 0; padding-left: 0; }
-  .insight-grid { grid-template-columns: 1fr; gap: 44px; }
+.note-signal li {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 8px;
+  border-bottom: 1px solid var(--rec-line);
+  padding: 13px 0;
 }
 
-@media (max-width: 680px) {
-  .page-hero { flex-direction: column; gap: 26px; padding: 42px 0 30px; }
-  .page-hero h1 { font-size: 36px; }
-  .primary-action { width: 100%; }
-  .stats-band { grid-template-columns: 1fr; }
-  .stats-band article { border-right: 0; border-bottom: 1px solid var(--line); padding: 20px; }
-  .stats-band article:last-child { border-bottom: 0; }
-  .generator-panel,
-  .recommendation-result { padding: 20px; }
-  .panel-heading,
-  .section-heading { align-items: start; }
+.note-signal li:first-child {
+  border-top: 1px solid var(--rec-line);
+}
+
+.note-signal li > span {
+  color: var(--rec-rust);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.note-signal p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.note-signal p strong {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--rec-ink);
+  font-size: 12px;
+}
+
+.spinning {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 1120px) {
+  .recommendation-canvas {
+    width: min(calc(100% - 48px), 960px);
+  }
+
+  .hero-grid {
+    grid-template-columns: minmax(0, 1fr) 290px;
+    gap: 48px;
+  }
+
+  .overview-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .overview-source {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--rec-line);
+    border-left: 0;
+    padding: 18px 0 20px;
+  }
+
+  .overview-source p {
+    display: inline;
+    margin-left: 10px;
+  }
+
+  .ootd-workspace {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .ootd-stack-panel {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .ootd-stack-stage {
+    width: min(100%, 460px);
+    height: 620px;
+  }
+}
+
+@media (max-width: 840px) {
+  .hero-grid,
+  .ootd-workspace,
+  .workbench-grid,
+  .signal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-grid {
+    gap: 45px;
+  }
+
+  .weather-brief {
+    max-width: 440px;
+  }
+
+  .ootd-stack-panel {
+    min-height: 0;
+  }
+
+  .closet-panel {
+    padding-top: 24px;
+  }
+
+  .closet-score {
+    margin-top: 25px;
+  }
+}
+
+@media (max-width: 620px) {
+  .recommendation-view {
+    min-height: calc(100vh - 112px);
+  }
+
+  .recommendation-canvas {
+    width: calc(100% - 32px);
+    padding-top: 30px;
+    padding-bottom: 64px;
+  }
+
+  .hero-overline {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .hero-grid {
+    padding-top: 40px;
+  }
+
+  .hero-copy h1 {
+    font-size: 42px;
+  }
+
+  .hero-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .hero-primary,
+  .hero-secondary {
+    width: 100%;
+  }
+
+  .overview-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview-item,
+  .overview-source {
+    padding: 18px 14px 19px 0;
+  }
+
+  .overview-item:nth-child(2n),
+  .overview-source {
+    border-left: 1px solid var(--rec-line);
+    padding-left: 14px;
+  }
+
+  .overview-item:nth-child(3) {
+    border-top: 1px solid var(--rec-line);
+  }
+
+  .overview-source {
+    grid-column: 1 / -1;
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .overview-source p {
+    display: block;
+    margin: 6px 0 0;
+  }
+
+  .section-header,
+  .panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ootd-controls {
+    align-self: flex-end;
+  }
+
+  .ootd-workspace {
+    gap: 9px;
+    margin-top: 24px;
+  }
+
+  .ootd-stack-panel {
+    padding: 18px 16px 15px;
+  }
+
+  .ootd-stack-stage {
+    width: min(100%, 324px);
+    height: 500px;
+  }
+
+  .ootd-detail {
+    min-height: 0;
+    padding: 23px 20px 22px;
+  }
+
+  .ootd-detail-kicker {
+    margin-top: 32px;
+  }
+
+  .ootd-detail h3 {
+    margin-top: 24px;
+    font-size: 29px;
+  }
+
+  .ootd-item-list,
+  .generated-items,
+  .generated-content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ootd-detail-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ootd-detail-actions button {
+    width: 100%;
+  }
+
+  .generated-reason {
+    border-top: 1px solid var(--rec-line);
+    border-left: 0;
+    padding: 16px 0 0;
+  }
+
   .form-fields,
-  .form-footer,
-  .outfit-list { grid-template-columns: 1fr; }
-  .wide-field { grid-column: auto; }
-  .weather-preview { align-items: start; }
-  .weather-preview small { display: none; }
-  .generate-button { width: 100%; }
-  .outfit-list li,
-  .outfit-list li:nth-child(even) { border-right: 0; padding: 13px 0; }
-  .recommendation-result > h3 { font-size: 27px; }
-  .result-actions,
-  .rating-control { align-items: stretch; flex-direction: column; }
-  .save-button { width: 100%; }
-  .coverage-facts { grid-template-columns: 1fr; }
-  .coverage-facts div { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--line); }
-  .coverage-facts div + div { border-left: 0; padding-left: 0; }
-  .coverage-facts dd { margin: 0; }
-  .compact-heading .quiet-button { padding: 8px; font-size: 0; }
+  .form-footer {
+    grid-template-columns: 1fr;
+  }
+
+  .wide-field {
+    grid-column: auto;
+  }
+
+  .generate-button {
+    width: 100%;
+  }
+
+  .generated-card {
+    padding: 22px 18px 19px;
+  }
+
+  .generated-actions,
+  .rating-control {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .save-button {
+    width: 100%;
+  }
+
+  .trend-signal-content {
+    grid-template-columns: 112px minmax(0, 1fr);
+  }
+
+  .trend-signal-content > img {
+    height: 112px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ootd-stack-card,
+  .panel-toggle svg,
+  .closet-progress span {
+    transition: none;
+  }
 }
 </style>

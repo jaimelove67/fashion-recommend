@@ -89,9 +89,9 @@ function formatRating(value) {
 }
 
 function formatDate(value) {
-  if (!value) return '时间未记录'
+  if (!value) return '暂无时间'
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '时间未记录'
+  if (Number.isNaN(date.getTime())) return '暂无时间'
   return new Intl.DateTimeFormat('zh-CN', {
     year: 'numeric',
     month: '2-digit',
@@ -115,45 +115,45 @@ function clearFilters() {
   <section class="history-view">
     <header class="page-hero">
       <div>
-        <p class="eyebrow"><History :size="15" aria-hidden="true" />推荐历史</p>
-        <h1>每一次生成，都有据可查。</h1>
-        <p>搜索真实推荐记录，回看当时使用的衣物、天气快照、收藏状态和评分。</p>
+        <p class="eyebrow"><History :size="15" aria-hidden="true" />推荐记录</p>
+        <h1>你生成过的每一套搭配</h1>
+        <p>按场合、城市、搭配名称或衣物搜索，查看当时的天气、搭配理由、收藏和评分。</p>
       </div>
       <button class="refresh-button" type="button" :disabled="app.state.historyLoading" @click="app.loadHistory">
         <LoaderCircle v-if="app.state.historyLoading" class="spinning" :size="17" />
         <RefreshCw v-else :size="17" aria-hidden="true" />
-        刷新记录
+        刷新历史
       </button>
     </header>
 
     <section class="stats-band" aria-label="历史记录统计">
       <article>
-        <span>全部方案</span>
+        <span>搭配总数</span>
         <strong>{{ app.recommendationStats.total }}</strong>
-        <small>服务端返回记录</small>
+        <small>当前账户记录</small>
       </article>
       <article>
-        <span>已加载收藏</span>
+        <span>已收藏</span>
         <strong>{{ app.savedHistory.length }}</strong>
-        <small>已确认保存</small>
+        <small>当前记录</small>
       </article>
       <article>
-        <span>已加载评分</span>
+        <span>已评分</span>
         <strong>{{ ratedCount }}</strong>
-        <small>提交过反馈的方案</small>
+        <small>收到评分的搭配</small>
       </article>
       <article>
         <span>平均评分</span>
         <strong>{{ formatRating(app.recommendationStats.averageRating) }}<em v-if="app.recommendationStats.averageRating"> / 5</em></strong>
-        <small>{{ app.recommendationStats.averageRating ? '仅统计有效评分' : '尚无评分数据' }}</small>
+        <small>{{ app.recommendationStats.averageRating ? '按已有评分计算' : '暂无评分' }}</small>
       </article>
     </section>
 
     <section class="trend-section" aria-labelledby="history-trend-title">
       <header class="section-heading">
         <div>
-          <p class="section-kicker">已加载记录 · 最近 7 天</p>
-          <h2 id="history-trend-title">生成方案的收藏构成</h2>
+          <p class="section-kicker">最近 7 天的记录</p>
+          <h2 id="history-trend-title">最近 7 天的收藏情况</h2>
         </div>
         <div class="chart-legend" aria-label="图例">
           <span><i class="saved-mark"></i>已收藏</span>
@@ -161,7 +161,7 @@ function clearFilters() {
         </div>
       </header>
 
-      <div class="history-chart" role="img" aria-label="最近七天按生成日期统计的推荐方案收藏构成图">
+      <div class="history-chart" role="img" aria-label="最近 7 天生成的搭配中，已收藏和未收藏的数量">
         <svg viewBox="0 0 440 320" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
           <line x1="24" y1="262" x2="416" y2="262" class="chart-baseline" />
           <g v-for="day in historyRungs" :key="day.key">
@@ -193,20 +193,20 @@ function clearFilters() {
           <text x="220" y="307" class="chart-note">ONE RUNG = ONE GENERATED RECOMMENDATION · DARK = SAVED</text>
         </svg>
       </div>
-      <p class="chart-source">按当前已加载记录的生成日期统计 · 已收藏表示该推荐记录当前状态，不代表收藏操作发生日期</p>
+      <p class="chart-source">按生成日期统计当前载入的记录。已收藏表示搭配当前状态，不是收藏操作日期。</p>
     </section>
 
     <section class="records-section" aria-labelledby="records-title">
       <header class="records-header">
         <div>
           <p class="section-kicker">全部记录</p>
-          <h2 id="records-title">方案档案</h2>
+          <h2 id="records-title">搭配记录</h2>
         </div>
-        <span>当前显示 {{ filteredHistory.length }} / 已加载 {{ app.state.history.length }} / 共 {{ app.state.historyTotal }} 条</span>
+        <span>显示 {{ filteredHistory.length }} 条，已加载 {{ app.state.history.length }} 条，共 {{ app.state.historyTotal }} 条</span>
       </header>
 
       <div class="record-tools">
-        <div class="filter-group" role="group" aria-label="筛选推荐历史">
+        <div class="filter-group" role="group" aria-label="筛选搭配记录">
           <button
             v-for="filter in filters"
             :key="filter.id"
@@ -220,15 +220,15 @@ function clearFilters() {
         </div>
         <label class="search-field">
           <Search :size="17" aria-hidden="true" />
-          <input v-model="query" type="search" placeholder="搜索场合、城市、方案或衣物" aria-label="搜索推荐历史" />
+          <input v-model="query" type="search" placeholder="搜索场合、城市、搭配名称或衣物" aria-label="搜索搭配记录" />
           <button v-if="query" type="button" aria-label="清空搜索" @click="query = ''"><X :size="15" /></button>
         </label>
       </div>
 
       <div v-if="app.state.historyLoading" class="state-panel" aria-live="polite">
         <LoaderCircle class="spinning" :size="27" />
-        <strong>正在读取推荐历史</strong>
-        <span>服务端数据返回后会保留当前筛选条件。</span>
+        <strong>正在加载搭配记录</strong>
+        <span>记录加载完成后会保留当前筛选条件。</span>
       </div>
 
       <div v-else-if="filteredHistory.length" class="history-list">
@@ -244,7 +244,7 @@ function clearFilters() {
 
           <div class="card-title">
             <div>
-              <p>{{ item.occasion || '未标注场合' }}</p>
+              <p>{{ item.occasion || '未填写场合' }}</p>
               <h3>{{ item.summary }}</h3>
             </div>
             <button type="button" :aria-expanded="expandedId === item.id" @click="expandedId = expandedId === item.id ? null : item.id">
@@ -253,7 +253,7 @@ function clearFilters() {
             </button>
           </div>
 
-          <ul class="garment-strip" :aria-label="`${item.summary}的衣物`">
+          <ul class="garment-strip" :aria-label="`${item.summary}包含的衣物`">
             <li v-for="garment in item.items || []" :key="`${item.id}-${garment.id}`">
               <div class="garment-media">
                 <img
@@ -269,17 +269,17 @@ function clearFilters() {
           </ul>
 
           <div v-if="expandedId === item.id" class="record-details">
-            <div><span>推荐理由</span><p>{{ item.reason }}</p></div>
-            <div><span>生成来源</span><p>{{ app.engineLabel(item.engine) }}<small v-if="item.generationAudit?.modelName"> · {{ item.generationAudit.modelName }}</small><small v-if="item.generationAudit?.fallbackReason"> · {{ app.fallbackReasonLabel(item.generationAudit.fallbackReason) }}</small></p></div>
+            <div><span>搭配理由</span><p>{{ item.reason }}</p></div>
+            <div><span>生成方式</span><p>{{ app.engineLabel(item.engine) }}<small v-if="item.generationAudit?.modelName"> · {{ item.generationAudit.modelName }}</small><small v-if="item.generationAudit?.fallbackReason"> · {{ app.fallbackReasonLabel(item.generationAudit.fallbackReason) }}</small></p></div>
             <div v-if="item.weather">
-              <span>天气快照</span>
+              <span>当时天气</span>
               <p>{{ item.weather.temperatureC }}°C · 体感 {{ item.weather.apparentTemperatureC }}°C · 降水 {{ item.weather.precipitationMm }} mm · 风速 {{ item.weather.windSpeedKmh }} km/h · {{ app.weatherSourceLabel(item.weather.source) }}</p>
             </div>
           </div>
 
           <footer class="card-footer">
             <div class="rating-control">
-              <span>{{ item.feedback?.rating ? `已评 ${item.feedback.rating} 星` : '为这套方案评分' }}</span>
+              <span>{{ item.feedback?.rating ? `已评 ${item.feedback.rating} 星` : '给这套搭配评分' }}</span>
               <div>
                 <button
                   v-for="rating in 5"
@@ -287,7 +287,7 @@ function clearFilters() {
                   type="button"
                   :class="{ rated: item.feedback?.rating >= rating }"
                   :disabled="app.state.feedbackSavingId === item.id"
-                  :aria-label="`为方案 ${item.id} 评 ${rating} 星`"
+                  :aria-label="`给搭配 ${item.id} 打 ${rating} 分`"
                   @click="app.rateRecommendation(item, rating)"
                 >
                   <Star :size="18" :fill="item.feedback?.rating >= rating ? 'currentColor' : 'none'" />
@@ -303,7 +303,7 @@ function clearFilters() {
             >
               <LoaderCircle v-if="app.state.saving && !item.saved" class="spinning" :size="16" />
               <Bookmark v-else :size="16" :fill="item.saved ? 'currentColor' : 'none'" />
-              {{ item.saved ? '已收藏' : '收藏方案' }}
+              {{ item.saved ? '已收藏' : '收藏搭配' }}
             </button>
           </footer>
         </article>
@@ -316,16 +316,16 @@ function clearFilters() {
         >
           <LoaderCircle v-if="app.state.historyLoading" class="spinning" :size="16" />
           <ChevronDown v-else :size="16" />
-          加载更多记录
+          加载更多
         </button>
       </div>
 
       <div v-else class="state-panel empty-state">
         <Sparkles :size="29" aria-hidden="true" />
-        <strong>{{ app.state.history.length ? '没有符合条件的记录' : '还没有推荐历史' }}</strong>
-        <span>{{ app.state.history.length ? '试着清空搜索或切换筛选条件。' : '完成一次真实推荐后，记录会自动出现在这里。' }}</span>
+        <strong>{{ app.state.history.length ? '没有找到相符的记录' : '还没有搭配记录' }}</strong>
+        <span>{{ app.state.history.length ? '换个关键词，或清除筛选条件。' : '生成一套搭配后，记录会出现在这里。' }}</span>
         <button v-if="app.state.history.length" type="button" @click="clearFilters">清空筛选</button>
-        <button v-else type="button" @click="app.selectView('recommend')">去生成第一套方案</button>
+        <button v-else type="button" @click="app.selectView('recommend')">去生成第一套搭配</button>
       </div>
     </section>
   </section>
@@ -362,11 +362,11 @@ function clearFilters() {
 
 .page-hero h1 {
   margin: 0;
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-display);
   font-size: 48px;
-  font-weight: 500;
+  font-weight: 700;
   line-height: 1.08;
-  letter-spacing: 0;
+  letter-spacing: -.055em;
 }
 
 .page-hero > div > p:last-child { margin: 19px 0 0; color: var(--muted); font-size: 14px; line-height: 1.8; }
@@ -378,28 +378,37 @@ function clearFilters() {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--accent-strong);
   border-radius: 5px;
   padding: 9px 15px;
   color: var(--surface);
-  background: var(--ink);
+  background: var(--accent-strong);
   font-size: 12px;
   font-weight: 700;
+}
+
+.refresh-button:hover:not(:disabled),
+.save-button:hover:not(:disabled),
+.empty-state > button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent);
+  transform: translateY(-1px);
 }
 
 .stats-band {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 14px;
   background: var(--surface);
+  box-shadow: 0 14px 34px rgba(25, 70, 60, .05);
 }
 
 .stats-band article { min-width: 0; padding: 24px 27px; border-right: 1px solid var(--line); }
 .stats-band article:last-child { border-right: 0; }
 .stats-band span,
 .stats-band small { display: block; color: var(--muted); font-size: 11px; }
-.stats-band strong { display: block; margin: 8px 0 7px; font-family: Georgia, serif; font-size: 31px; font-weight: 500; line-height: 1; }
+.stats-band strong { display: block; margin: 8px 0 7px; font-family: var(--font-mono); font-size: 31px; font-weight: 600; line-height: 1; }
 .stats-band em { color: var(--muted); font: 400 13px/1 sans-serif; }
 
 .trend-section { padding: 64px 0 0; }
@@ -414,7 +423,7 @@ function clearFilters() {
 .section-heading h2,
 .records-header h2 {
   margin: 0;
-  font-family: Georgia, "Songti SC", serif;
+  font-family: var(--font-display);
   font-size: 27px;
   font-weight: 500;
   line-height: 1.2;
@@ -450,7 +459,7 @@ function clearFilters() {
 .day-total,
 .day-label,
 .chart-note {
-  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--font-sans);
   text-anchor: middle;
 }
 .segment-value { font-size: 8px; font-weight: 800; text-anchor: start; }
@@ -515,7 +524,8 @@ function clearFilters() {
   color: var(--ink);
   background: var(--surface);
 }
-.history-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; background: var(--surface); }
+.history-card { border: 1px solid var(--line); border-radius: 14px; padding: 24px; background: var(--surface); box-shadow: 0 14px 34px rgba(25, 70, 60, .045); transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease; }
+.history-card:hover { border-color: var(--line-strong); box-shadow: 0 18px 40px rgba(25, 70, 60, .08); transform: translateY(-2px); }
 .card-header,
 .card-title,
 .card-footer {
@@ -532,7 +542,7 @@ function clearFilters() {
 .saved-label.saved { color: var(--accent); }
 .card-title { align-items: end; margin-top: 15px; }
 .card-title p { margin: 0 0 5px; color: var(--accent); font-size: 11px; }
-.card-title h3 { max-width: 780px; margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 25px; font-weight: 500; line-height: 1.3; letter-spacing: 0; }
+.card-title h3 { max-width: 780px; margin: 0; font-family: var(--font-display); font-size: 25px; font-weight: 600; line-height: 1.3; letter-spacing: -.03em; }
 .card-title > button {
   display: inline-flex;
   flex: 0 0 auto;
@@ -601,7 +611,7 @@ function clearFilters() {
 }
 
 .state-panel > svg { color: var(--accent); }
-.state-panel strong { color: var(--ink); font-family: Georgia, "Songti SC", serif; font-size: 21px; font-weight: 500; }
+.state-panel strong { color: var(--ink); font-family: var(--font-display); font-size: 21px; font-weight: 600; }
 .state-panel span { max-width: 420px; font-size: 12px; line-height: 1.7; }
 .empty-state > button { margin-top: 7px; }
 .spinning { animation: spin 1s linear infinite; }
