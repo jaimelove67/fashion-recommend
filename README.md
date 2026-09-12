@@ -16,6 +16,8 @@
 
 新增的 [tools/douyin-extractor](tools/douyin-extractor/README.md) 可以从一条抖音分享链接中提取视频或图集，保存媒体文件及作品信息 JSON。工具使用 Python 和 Playwright，带本地网页、任务进度、取消和下载入口。
 
+另提供 [直接解析 API](tools/douyin-extractor/API.md)：日常请求不启动浏览器，支持 Bearer 鉴权、`POST /v1/parse`、异步下载和文件获取，可供 Java 后端调用。接口文档默认在 `http://127.0.0.1:8766/docs`，首次使用需要配置抖音会话。
+
 - macOS：双击工具目录内的 `启动.command`。
 - Windows：安装 Python 3.10+ 后，双击工具目录内的 `启动.bat`。
 - 首次启动会安装依赖和 Chromium；如作品要求登录或验证，请在弹出的独立浏览器中完成。

@@ -1,5 +1,11 @@
 # 抖音视频 / 图集提取工具
 
+## API 模式（2026-09-12 新增）
+
+需要后端接口时，请使用 [API 启动和调用说明](API.md)：`api.py` 直接请求抖音作品详情接口，提供 Bearer 鉴权、在线接口文档、视频／图集解析、异步下载及文件获取。日常解析不启动浏览器，首次配置或更新会话时运行 `setup_session.py`。
+
+以下说明对应原来的 `app.py` 浏览器桌面模式。两种模式使用不同端口，可以分别运行。
+
 本地运行的小程序。粘贴一条抖音分享文本或作品链接，保存视频文件或图集中的每张图片，并生成作品信息 `metadata.json`。
 
 ## 启动
@@ -56,6 +62,7 @@ downloads/6eac0c48d0b13234/
 ## 测试
 
 ```bash
+python -m pip install -r requirements-api.txt
 python -m unittest discover -s tests -v
 ```
 

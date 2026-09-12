@@ -126,7 +126,7 @@ class MediaRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def media_opener(cookies: list[dict]):
+def media_opener(cookies: list[dict], *, proxies=None):
     jar = http.cookiejar.CookieJar()
     for c in cookies:
         jar.set_cookie(http.cookiejar.Cookie(
@@ -135,7 +135,10 @@ def media_opener(cookies: list[dict]):
             path=c.get("path", "/"), path_specified=True, secure=c.get("secure", False),
             expires=int(c["expires"]) if c.get("expires", -1) > 0 else None,
             discard=True, comment=None, comment_url=None, rest={}))
-    return urllib.request.build_opener(MediaRedirect(), urllib.request.HTTPCookieProcessor(jar))
+    handlers = [MediaRedirect(), urllib.request.HTTPCookieProcessor(jar)]
+    if proxies is not None:
+        handlers.append(urllib.request.ProxyHandler(proxies))
+    return urllib.request.build_opener(*handlers)
 
 
 def media_extension(head: bytes, kind: str) -> str:

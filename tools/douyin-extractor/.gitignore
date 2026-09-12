@@ -4,3 +4,8 @@ downloads/
 __pycache__/
 *.pyc
 .DS_Store
+.api-profile/
+.api-session.json
+.api-session.tmp
+.api-key
+.api-data/
