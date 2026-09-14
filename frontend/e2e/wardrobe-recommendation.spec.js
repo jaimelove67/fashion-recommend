@@ -185,18 +185,20 @@ test('adds a garment, generates an outfit, saves it, and persists feedback', asy
     await expect(page.getByRole('heading', { name: 'E2E 雾蓝牛津纺衬衫' })).toBeVisible()
 
     await page.getByRole('button', { name: '推荐', exact: true }).click()
-    await expect(page.getByRole('heading', { name: '今天有 5 套搭配可选。' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '先从一个方向，开始今天的搭配。' })).toBeVisible()
     await expect(page.getByRole('heading', { name: '今天的搭配', exact: true })).toBeVisible()
     await expect(page.locator('.ootd-stack-card')).toHaveCount(5)
-    await page.getByLabel('场合', { exact: true }).fill('E2E 答辩通勤')
-    await page.getByLabel('城市', { exact: true }).fill(process.env.E2E_CITY || '杭州')
-    await page.getByLabel(/^风格提示/).fill('正式、简洁、适合室内汇报')
+
+    await page.getByRole('button', { name: '问问知己', exact: true }).first().click()
+    const assistant = page.getByRole('dialog')
+    await expect(assistant).toBeVisible()
+    await assistant.getByRole('textbox', { name: '告诉知己你的穿搭需求' }).fill(`杭州 E2E 答辩通勤，正式、简洁、适合室内汇报`)
 
     const recommendationResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url())
       return url.pathname === '/api/v1/recommendations' && response.request().method() === 'POST'
     })
-    await page.getByRole('button', { name: '生成搭配' }).click()
+    await assistant.getByRole('button', { name: '发送给知己' }).click()
     const recommendationResponse = await recommendationResponsePromise
     expect(recommendationResponse.ok()).toBeTruthy()
     const recommendationBody = await recommendationResponse.json()
@@ -213,6 +215,7 @@ test('adds a garment, generates an outfit, saves it, and persists feedback', asy
     expect(recommendationBody.data.generationAudit.promptVersion).toBeNull()
     expect(recommendationBody.data.generationAudit.providerCallId).toBeNull()
 
+    await assistant.getByRole('button', { name: '关闭知己助手' }).click()
     await expect(page.getByText(`搭配 #${recommendationId}`, { exact: true })).toBeVisible()
     await expect(page.getByText(recommendationBody.data.summary, { exact: true })).toBeVisible()
 

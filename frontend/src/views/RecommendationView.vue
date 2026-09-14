@@ -11,8 +11,7 @@ import {
   Compass,
   Flame,
   LoaderCircle,
-  MapPin,
-  RefreshCw,
+  MessageCircle,
   Shirt,
   Sparkles,
   Star,
@@ -22,15 +21,16 @@ import {
   Wind
 } from '@lucide/vue'
 import Stack from '../components/Stack.vue'
+import RecommendationAssistant from '../components/RecommendationAssistant.vue'
 
 const props = defineProps({
   app: { type: Object, required: true }
 })
 
-const formOpen = ref(!props.app.state.currentRecommendation)
 const brokenImages = ref(new Set())
 const dailyOffset = ref(0)
 const selectedLookId = ref(null)
+const assistantRef = ref(null)
 const today = new Date()
 const weekdayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
@@ -258,6 +258,18 @@ const dailyWeather = computed(() => {
   }
 })
 
+const weatherBriefCity = computed(() => {
+  const city = state.value.recommendationForm?.city || actualWeather.value?.city || '你的常用城市'
+  return dailyOffset.value === 0 ? city : `${city} · 计划参考`
+})
+
+const weatherBriefDetail = computed(() => {
+  if (dailyOffset.value === 0 && actualWeather.value) {
+    return `体感 ${Number(actualWeather.value.apparentTemperatureC).toFixed(0)}° · 风速 ${Number(actualWeather.value.windSpeedKmh).toFixed(0)} km/h`
+  }
+  return dailyOffset.value === 0 ? '填好城市后，这里会显示天气' : '非当天日期使用搭配计划参考，不代表实时预报'
+})
+
 const dailyLooks = computed(() => dailyLookModes.map((mode, lookIndex) => {
   const source = recommendationPool.value[lookIndex] || null
   const items = itemsForLook(lookIndex, dailyDayIndex.value, source)
@@ -285,12 +297,24 @@ const dailyLooks = computed(() => dailyLookModes.map((mode, lookIndex) => {
     dayName: dailyDayName.value,
     dateLabel: dailyDateLabel.value,
     isToday: dailyOffset.value === 0,
-    isGenerated: Boolean(source?.id)
+    isGenerated: Boolean(source?.id),
+    isInspiration: !source?.id
   }
 }))
 
-const selectedLook = computed(() => dailyLooks.value.find((look) => look.id === selectedLookId.value) || dailyLooks.value.at(-1) || null)
+const stackLooks = computed(() => [
+  ...dailyLooks.value.filter((look) => look.isInspiration),
+  ...dailyLooks.value.filter((look) => !look.isInspiration)
+])
+const selectedLook = computed(() => (
+  dailyLooks.value.find((look) => look.id === selectedLookId.value)
+  || dailyLooks.value.find((look) => !look.isInspiration)
+  || dailyLooks.value[0]
+  || null
+))
 const dailyLookCount = computed(() => dailyLooks.value.length)
+const realLookCount = computed(() => dailyLooks.value.filter((look) => !look.isInspiration).length)
+const hasRealLooks = computed(() => realLookCount.value > 0)
 const coveragePercent = computed(() => {
   const total = props.app.wardrobeStats.total
   if (!total) return null
@@ -304,10 +328,6 @@ const profileTags = computed(() => {
 
 const heroCondition = computed(() => dailyWeather.value.label || '晴朗')
 const heroTemperature = computed(() => dailyWeather.value.temperature || '--')
-
-function formatRating(value) {
-  return Number.isFinite(value) ? value.toFixed(1) : '--'
-}
 
 function formatDate(value) {
   if (!value) return '暂无时间'
@@ -347,22 +367,14 @@ function jumpToToday() {
   dailyOffset.value = 0
 }
 
-function openGenerator(plan = selectedLook.value) {
-  formOpen.value = true
-  if (plan?.occasion) props.app.state.recommendationForm.occasion = plan.occasion
-  if (plan?.palette) props.app.state.recommendationForm.styleHint = plan.palette
-  if (plan?.city && plan.city !== '当前城市') props.app.state.recommendationForm.city = plan.city
-  window.setTimeout(() => document.querySelector('#generator-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0)
-}
-
-async function handleGenerate() {
-  const recommendation = await props.app.generateRecommendation()
-  if (recommendation) formOpen.value = false
+function openAssistant(plan = null, prompt = '') {
+  assistantRef.value?.open(plan, prompt)
 }
 
 watch(dailyLooks, (looks) => {
-  if (!looks.some((look) => look.id === selectedLookId.value)) {
-    selectedLookId.value = looks.at(-1)?.id || null
+  const selected = looks.find((look) => look.id === selectedLookId.value)
+  if (!selected || (selected.isInspiration && looks.some((look) => !look.isInspiration))) {
+    selectedLookId.value = looks.find((look) => !look.isInspiration)?.id || looks[0]?.id || null
   }
 }, { immediate: true })
 </script>
@@ -379,11 +391,12 @@ watch(dailyLooks, (looks) => {
         <div class="hero-grid">
           <div class="hero-copy">
             <div class="hero-index"><span>01</span><span>今天穿哪一套？</span></div>
-            <h1>今天有 {{ dailyLookCount }} 套搭配可选。</h1>
-            <p class="hero-lead">天气、场合和衣橱已经放在一起。先看看今天的搭配，再选你愿意穿的那一套。</p>
+            <h1 v-if="hasRealLooks">今天有 {{ realLookCount }} 套衣橱搭配可选。</h1>
+            <h1 v-else>先从一个方向，开始今天的搭配。</h1>
+            <p class="hero-lead">天气、场合和衣橱已经放在一起。先看看今天的搭配，不确定时也可以直接问知己。</p>
             <div class="hero-actions">
-              <button class="hero-primary" type="button" @click="openGenerator()">
-                <Sparkles :size="17" aria-hidden="true" />重新生成<ArrowRight :size="17" aria-hidden="true" />
+              <button class="hero-primary" type="button" @click="openAssistant()">
+                <MessageCircle :size="17" aria-hidden="true" />问问知己<ArrowRight :size="17" aria-hidden="true" />
               </button>
               <button class="hero-secondary" type="button" @click="jumpToToday">
                 <CalendarDays :size="16" aria-hidden="true" />回到今天
@@ -398,7 +411,7 @@ watch(dailyLooks, (looks) => {
           <aside class="weather-brief" aria-label="今天的天气和穿衣提示">
             <div class="weather-brief-top">
               <div>
-                <span class="brief-label">{{ dailyOffset === 0 ? 'TODAY / 今日' : 'DAY / 当日' }}</span>
+                <span class="brief-label">{{ dailyOffset === 0 ? 'TODAY / 今日' : 'DAY / 当日参考' }}</span>
                 <strong>{{ heroCondition }}</strong>
               </div>
               <component :is="dailyTemplate?.icon || CloudSun" :size="24" aria-hidden="true" />
@@ -406,25 +419,24 @@ watch(dailyLooks, (looks) => {
             <div class="weather-reading">
               <strong>{{ heroTemperature }}</strong>
               <div>
-                <span>{{ actualWeather?.city || '你的常用城市' }}</span>
-                <small v-if="actualWeather">体感 {{ Number(actualWeather.apparentTemperatureC).toFixed(0) }}° · 风速 {{ Number(actualWeather.windSpeedKmh).toFixed(0) }} km/h</small>
-                <small v-else>填好城市后，这里会显示天气</small>
+                <span>{{ weatherBriefCity }}</span>
+                <small>{{ weatherBriefDetail }}</small>
               </div>
             </div>
             <div class="weather-note">
               <Thermometer :size="15" aria-hidden="true" />
               <span>{{ selectedLook?.note || dailyTemplate.note }}</span>
             </div>
-            <button class="weather-link" type="button" @click="openGenerator()">修改场合和城市 <ArrowRight :size="14" /></button>
+            <button class="weather-link" type="button" @click="openAssistant()">问问知己修改条件 <ArrowRight :size="14" /></button>
           </aside>
         </div>
       </header>
 
       <section class="overview-strip" aria-label="今日搭配概览">
         <div class="overview-item">
-          <span>今日搭配</span>
-          <strong>{{ dailyLookCount }} <small>套</small></strong>
-          <em>拖动或点击切换搭配</em>
+          <span>{{ hasRealLooks ? '衣橱搭配' : '灵感方向' }}</span>
+          <strong>{{ hasRealLooks ? realLookCount : dailyLookCount }} <small>{{ hasRealLooks ? '套' : '个' }}</small></strong>
+          <em>{{ hasRealLooks ? '来自你的衣橱' : '生成后才会落到衣橱' }}</em>
         </div>
         <div class="overview-item">
           <span>可用衣物</span>
@@ -432,14 +444,14 @@ watch(dailyLooks, (looks) => {
           <em>{{ props.app.wardrobeStats.review ? `${props.app.wardrobeStats.review} 件衣物待补充` : (props.app.wardrobeStats.ready ? '衣物信息齐全' : '至少添加两类衣物') }}</em>
         </div>
         <div class="overview-item overview-item-accent">
-          <span>衣橱覆盖率</span>
-          <strong>{{ coveragePercent === null ? '--' : `${coveragePercent}%` }}</strong>
-          <em>{{ props.app.recommendationStats.coveredItems }} 件衣物参与过推荐</em>
+          <span>风格线索</span>
+          <strong class="overview-style-value">{{ profileTags[0] || '待建立' }}</strong>
+          <em>{{ profileTags.slice(1).join(' · ') || '完善档案后更精准' }}</em>
         </div>
         <div class="overview-source">
           <span>推荐依据</span>
-          <strong>先浏览，再生成</strong>
-          <p>每套搭配都会参考你的衣橱、天气和场合。</p>
+          <strong>天气 × 衣橱 × 场合</strong>
+          <p>问问知己时，会把这些信息一起考虑。</p>
         </div>
       </section>
 
@@ -448,7 +460,7 @@ watch(dailyLooks, (looks) => {
           <div>
             <div class="section-number">02 / DAILY OOTD</div>
             <h2 id="ootd-title">今天的搭配</h2>
-            <p>{{ dailyDateHeading }} · {{ dailyWeather.label }} {{ dailyWeather.temperature }} · {{ dailyOffset === 0 ? '今日' : '当日' }} {{ dailyLookCount }} 套搭配可选。</p>
+            <p>{{ dailyDateHeading }} · {{ dailyWeather.label }} {{ dailyWeather.temperature }} · {{ hasRealLooks ? `${realLookCount} 套来自衣橱` : `${dailyLookCount} 个灵感方向` }}</p>
           </div>
           <div class="ootd-controls">
             <button class="round-control" type="button" aria-label="前一天" title="前一天" @click="shiftDay(-1)"><ChevronLeft :size="17" /></button>
@@ -462,7 +474,7 @@ watch(dailyLooks, (looks) => {
             <div class="ootd-stack-stage">
               <Stack
                 :key="dailyDateKey"
-                :cards-data="dailyLooks"
+                :cards-data="stackLooks"
                 :random-rotation="true"
                 :sensitivity="150"
                 :send-to-back-on-click="true"
@@ -485,7 +497,7 @@ watch(dailyLooks, (looks) => {
 
           <article v-if="selectedLook" class="ootd-detail" role="tabpanel" :aria-label="`${selectedLook.dayName} ${selectedLook.title}`">
             <div class="ootd-detail-topline"><span>{{ selectedLook.dayName }} / {{ selectedLook.dateLabel }}</span><strong>{{ selectedLook.weatherLabel }} {{ selectedLook.temperature }} · {{ selectedLook.low }}</strong></div>
-            <div class="ootd-detail-kicker"><span>{{ selectedLook.lookLabel }} / SELECTED LOOK</span><span class="ootd-fit-label">{{ selectedLook.fitLabel }}</span></div>
+            <div class="ootd-detail-kicker"><span>{{ selectedLook.lookLabel }} / SELECTED LOOK</span><span class="ootd-source-state" :class="{ inspiration: selectedLook.isInspiration }">{{ selectedLook.isInspiration ? '灵感方向' : '来自衣橱' }}</span><span class="ootd-fit-label">{{ selectedLook.fitLabel }}</span></div>
             <h3>{{ selectedLook.title }}</h3>
             <p class="ootd-detail-lead">{{ selectedLook.note }}</p>
             <div class="ootd-detail-palette">
@@ -511,58 +523,21 @@ watch(dailyLooks, (looks) => {
             <div v-else class="ootd-empty"><Shirt :size="20" aria-hidden="true" /><span>添加至少两类衣物后，这里会换成你衣橱里的搭配。</span></div>
             <div class="ootd-editor-note"><Compass :size="18" aria-hidden="true" /><div><span>EDITOR'S NOTE</span><p>{{ selectedLook.note }}</p></div></div>
             <div class="ootd-detail-actions">
-              <button class="detail-secondary" type="button" @click="openGenerator(selectedLook)">修改条件</button>
-              <button class="detail-primary" type="button" @click="openGenerator(selectedLook)"><Sparkles :size="15" />生成类似搭配</button>
+              <button class="detail-secondary" type="button" @click="openAssistant(selectedLook)">调整条件</button>
+              <button class="detail-primary" type="button" @click="openAssistant(selectedLook, '参考这套搭配，再给我一套相近但不同的组合')"><Sparkles :size="15" />生成类似搭配</button>
             </div>
           </article>
         </div>
       </section>
 
-      <section id="generator-panel" class="workbench-grid" aria-label="生成新的搭配">
-        <article class="generator-panel">
-          <header class="panel-header">
-            <div>
-              <div class="section-number">03 / CUSTOM EDIT</div>
-              <h2>按条件生成搭配</h2>
-              <p>填入场合和城市，系统只会从已确认的衣物中选择。</p>
-            </div>
-            <button class="panel-toggle" type="button" :aria-expanded="formOpen" @click="formOpen = !formOpen">
-              {{ formOpen ? '收起' : '展开' }}<ChevronRight :size="15" :class="{ rotated: formOpen }" />
-            </button>
-          </header>
-
-          <form v-show="formOpen" class="recommendation-form" @submit.prevent="handleGenerate">
-            <div class="form-fields">
-              <label>
-                <span>场合</span>
-                <input v-model.trim="state.recommendationForm.occasion" aria-label="场合" required maxlength="80" placeholder="例如：通勤、约会或周末出行" />
-              </label>
-              <label>
-                <span>城市</span>
-                <input v-model.trim="state.recommendationForm.city" aria-label="城市" required maxlength="80" placeholder="例如：杭州" @input="props.app.clearWeather" />
-              </label>
-              <label class="wide-field">
-                <span>风格提示 <small>可选</small></span>
-                <input v-model.trim="state.recommendationForm.styleHint" aria-label="风格提示（可选）" maxlength="120" placeholder="例如：低饱和、利落、适合步行" />
-              </label>
-            </div>
-
-            <div class="form-footer">
-              <div v-if="actualWeather" class="form-weather">
-                <CloudSun :size="18" aria-hidden="true" />
-                <div><strong>{{ actualWeather.city }}</strong><span>{{ Number(actualWeather.temperatureC).toFixed(0) }}° · 体感 {{ Number(actualWeather.apparentTemperatureC).toFixed(0) }}° · {{ props.app.weatherConditionLabel(actualWeather.weatherCode) }}</span></div>
-                <button type="button" :disabled="state.weatherLoading" @click="props.app.refreshWeather"><RefreshCw :size="14" />刷新天气</button>
-              </div>
-              <p v-else class="form-weather-empty"><MapPin :size="17" aria-hidden="true" />填好城市后查看天气</p>
-              <button class="generate-button" type="submit" :disabled="state.generating">
-                <LoaderCircle v-if="state.generating" class="spinning" :size="17" />
-                <Sparkles v-else :size="17" aria-hidden="true" />
-                {{ state.generating ? '正在生成搭配' : '生成搭配' }}
-              </button>
-            </div>
-          </form>
-          <div v-if="!formOpen" class="collapsed-hint"><Sparkles :size="15" />已选条件：{{ state.recommendationForm.occasion || '未填写场合' }} · {{ state.recommendationForm.city || '未填写城市' }}<button type="button" @click="formOpen = true">修改条件</button></div>
-        </article>
+      <section class="workbench-grid assistant-workbench" aria-label="AI 穿搭助手与衣橱状态">
+        <RecommendationAssistant
+          ref="assistantRef"
+          :app="props.app"
+          :selected-look="selectedLook"
+          :actual-weather="actualWeather"
+          :profile-tags="profileTags"
+        />
 
         <aside class="closet-panel">
           <header class="panel-header compact">
@@ -576,7 +551,7 @@ watch(dailyLooks, (looks) => {
             <strong>{{ coveragePercent === null ? '--' : `${coveragePercent}%` }}</strong>
             <span>已有衣物参与推荐</span>
           </div>
-          <div class="closet-progress" role="progressbar" :aria-valuenow="coveragePercent || 0" aria-valuemin="0" aria-valuemax="100" aria-label="衣橱参与推荐的比例"><span :style="{ width: `${coveragePercent || 0}%` }"></span></div>
+          <div class="closet-progress" role="progressbar" :aria-valuenow="coveragePercent || 0" aria-valuemin="0" aria-valuemax="100" aria-label="衣橱参与推荐的比例"><span :style="{ transform: `scaleX(${(coveragePercent || 0) / 100})` }"></span></div>
           <div class="closet-facts">
             <div><span>衣橱衣物数</span><strong>{{ props.app.wardrobeStats.total }}</strong></div>
             <div><span>历史搭配</span><strong>{{ props.app.recommendationStats.total }}</strong></div>
@@ -624,8 +599,8 @@ watch(dailyLooks, (looks) => {
 
           <div v-else class="generated-empty">
           <div><Sparkles :size="19" aria-hidden="true" /><strong>还没有生成搭配</strong></div>
-          <span>选择上面的日期，或填写场合和城市开始生成。</span>
-          <button type="button" @click="openGenerator()">填写搭配条件 <ArrowRight :size="14" /></button>
+          <span>选择上面的日期，或问问知己生成一套搭配。</span>
+          <button type="button" @click="openAssistant()"><MessageCircle :size="14" />问问知己 <ArrowRight :size="14" /></button>
         </div>
       </section>
 
@@ -721,10 +696,6 @@ watch(dailyLooks, (looks) => {
 .weather-note,
 .weather-link,
 .section-number,
-.panel-toggle,
-.form-weather,
-.form-weather-empty,
-.collapsed-hint,
 .generated-card-topline,
 .engine-line,
 .generated-actions,
@@ -809,7 +780,6 @@ watch(dailyLooks, (looks) => {
 .hero-secondary,
 .detail-primary,
 .detail-secondary,
-.generate-button,
 .save-button,
 .generated-empty button {
   min-height: 42px;
@@ -821,7 +791,6 @@ watch(dailyLooks, (looks) => {
 
 .hero-primary,
 .detail-primary,
-.generate-button,
 .save-button {
   display: inline-flex;
   justify-content: center;
@@ -831,7 +800,6 @@ watch(dailyLooks, (looks) => {
 
 .hero-primary:hover,
 .detail-primary:hover,
-.generate-button:hover:not(:disabled),
 .save-button:hover:not(:disabled) {
   background: var(--rec-accent);
   transform: translateY(-1px);
@@ -1011,6 +979,15 @@ watch(dailyLooks, (looks) => {
   font: 400 11px/1 var(--font-sans);
 }
 
+.overview-style-value {
+  overflow: hidden;
+  font-family: var(--font-display) !important;
+  font-size: 18px !important;
+  letter-spacing: -.035em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .overview-item-accent strong {
   color: var(--rec-accent);
 }
@@ -1077,8 +1054,7 @@ watch(dailyLooks, (looks) => {
 }
 
 .ootd-today,
-.round-control,
-.panel-toggle {
+.round-control {
   color: var(--rec-muted);
   background: transparent;
   font-size: 11px;
@@ -1216,6 +1192,19 @@ watch(dailyLooks, (looks) => {
   font-size: 10px;
   letter-spacing: 0;
   text-transform: none;
+}
+
+.ootd-source-state {
+  color: var(--rec-rust);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.ootd-source-state.inspiration {
+  color: var(--rec-muted);
 }
 
 .ootd-detail h3 {
@@ -1389,7 +1378,6 @@ watch(dailyLooks, (looks) => {
   padding-top: 64px;
 }
 
-.generator-panel,
 .closet-panel,
 .signal-panel {
   min-width: 0;
@@ -1407,160 +1395,6 @@ watch(dailyLooks, (looks) => {
 
 .panel-header p {
   max-width: 430px;
-}
-
-.panel-toggle {
-  gap: 5px;
-  padding: 7px 0;
-}
-
-.panel-toggle:hover {
-  color: var(--rec-accent);
-}
-
-.panel-toggle svg {
-  transition: transform 180ms ease;
-}
-
-.panel-toggle svg.rotated {
-  transform: rotate(90deg);
-}
-
-.recommendation-form {
-  margin-top: 27px;
-}
-
-.form-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 17px 20px;
-}
-
-.recommendation-form label {
-  display: grid;
-  gap: 8px;
-}
-
-.recommendation-form label > span {
-  color: var(--rec-muted);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.recommendation-form label small {
-  margin-left: 4px;
-  color: var(--rec-muted);
-  font-size: 10px;
-  font-weight: 400;
-}
-
-.wide-field {
-  grid-column: 1 / -1;
-}
-
-.recommendation-form input {
-  width: 100%;
-  min-height: 44px;
-  border: 1px solid var(--rec-line);
-  border-radius: 3px;
-  outline: 0;
-  padding: 10px 12px;
-  color: var(--rec-ink);
-  background: var(--rec-paper);
-  font-size: 13px;
-}
-
-.recommendation-form input:focus {
-  border-color: var(--rec-accent);
-  box-shadow: 0 0 0 3px var(--rec-accent-soft);
-}
-
-.recommendation-form input::placeholder {
-  color: #a5aaa1;
-}
-
-.form-footer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 18px;
-  align-items: center;
-  margin-top: 22px;
-  border-top: 1px solid var(--rec-line);
-  padding-top: 17px;
-}
-
-.form-weather,
-.form-weather-empty {
-  min-width: 0;
-  gap: 9px;
-  margin: 0;
-  color: var(--rec-muted);
-}
-
-.form-weather > svg,
-.form-weather-empty > svg {
-  flex: 0 0 auto;
-  color: var(--rec-accent);
-}
-
-.form-weather > div {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.form-weather strong {
-  color: var(--rec-ink);
-  font-size: 12px;
-}
-
-.form-weather span {
-  overflow: hidden;
-  color: var(--rec-muted);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.form-weather button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  padding: 0;
-  color: var(--rec-accent);
-  background: transparent;
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.form-weather-empty {
-  font-size: 11px;
-}
-
-.generate-button {
-  min-width: 164px;
-}
-
-.collapsed-hint {
-  gap: 8px;
-  margin-top: 26px;
-  border-top: 1px solid var(--rec-line);
-  padding-top: 17px;
-  color: var(--rec-muted);
-  font-size: 11px;
-}
-
-.collapsed-hint svg {
-  color: var(--rec-accent);
-}
-
-.collapsed-hint button {
-  margin-left: auto;
-  color: var(--rec-ink);
-  background: transparent;
-  font-size: 11px;
-  font-weight: 700;
 }
 
 .closet-panel > .panel-header > svg {
@@ -1600,8 +1434,9 @@ watch(dailyLooks, (looks) => {
 .closet-progress span {
   display: block;
   height: 100%;
+  transform-origin: left center;
   background: var(--rec-accent);
-  transition: width 300ms ease;
+  transition: transform 300ms ease;
 }
 
 .closet-facts {
@@ -2195,19 +2030,6 @@ watch(dailyLooks, (looks) => {
     padding: 16px 0 0;
   }
 
-  .form-fields,
-  .form-footer {
-    grid-template-columns: 1fr;
-  }
-
-  .wide-field {
-    grid-column: auto;
-  }
-
-  .generate-button {
-    width: 100%;
-  }
-
   .generated-card {
     padding: 22px 18px 19px;
   }
@@ -2233,7 +2055,6 @@ watch(dailyLooks, (looks) => {
 
 @media (prefers-reduced-motion: reduce) {
   .ootd-stack-card,
-  .panel-toggle svg,
   .closet-progress span {
     transition: none;
   }
