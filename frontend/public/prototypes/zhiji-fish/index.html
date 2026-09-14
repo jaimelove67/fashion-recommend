@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>知己 · 双鱼游动交互原型</title>
+<link rel="icon" href="data:,">
+<style>
+:root{color-scheme:light;--ink:#214d3b;--muted:#627467;--gold:#ac8951;--line:#dce5dc;--ease:cubic-bezier(.22,1,.36,1)}
+*{box-sizing:border-box}body{margin:0;background:#fff;color:var(--ink);font-family:"Microsoft YaHei","PingFang SC",sans-serif;font-size:14px}button,input,select{font:inherit}button{cursor:pointer}button:disabled{cursor:wait;opacity:.65}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--gold);outline-offset:5px}::selection{background:#d7e5d6}button{color:inherit}canvas{position:fixed;inset:0;pointer-events:none;z-index:3}header{position:fixed;top:30px;left:42px;right:42px;display:flex;justify-content:space-between;align-items:center;z-index:6}.brand{font-family:"STKaiti","KaiTi",serif;font-size:25px;letter-spacing:5px}.brand small{font:9px Georgia,serif;letter-spacing:4px;display:block;margin-top:5px}.text-button{border:0;background:none;padding:9px 0;color:var(--muted);font-size:12px;border-bottom:1px solid #d6ded5}.stage{position:relative;min-height:100svh;overflow:hidden}.intro{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:4;transition:opacity .35s}.intro-inner{display:flex;flex-direction:column;align-items:center;transform:translateY(38px)}.logo-trigger{width:330px;height:310px;border:0;background:transparent;border-radius:50%;position:relative}.logo-trigger:focus-visible{outline-offset:8px}.logo-trigger:hover{background:radial-gradient(ellipse,#e9f0e520,transparent 65%)}.wordmark{font:58px "STKaiti","KaiTi",serif;letter-spacing:12px;padding-left:12px;margin:6px 0 7px}.roman{font:11px Georgia,serif;letter-spacing:9px;padding-left:9px}.invitation{margin:29px 0 0;font-size:12px;letter-spacing:3px;color:var(--muted);display:flex;align-items:center;gap:14px}.invitation:before,.invitation:after{content:"";width:24px;height:1px;background:#cbb88e}.intro-note{font-size:11px;color:#788477;margin-top:15px;letter-spacing:1px}.login{position:absolute;top:50%;left:50%;width:min(360px,calc(100% - 56px));transform:translate(-50%,calc(-50% + 18px));opacity:0;visibility:hidden;z-index:5;transition:opacity .7s var(--ease),transform .7s var(--ease),visibility .7s}.login.visible{opacity:1;visibility:visible;transform:translate(-50%,-50%)}.login h1{font:36px "STKaiti","KaiTi",serif;font-weight:400;margin:0 0 14px;text-align:center;letter-spacing:5px}.subtitle{text-align:center;color:var(--muted);font-size:12px;letter-spacing:2px;margin:0 0 37px}.field{margin:0 0 20px}.field label{display:block;font-size:12px;margin-bottom:10px}.field input{display:block;width:100%;border:1px solid var(--line);border-radius:4px;background:#ffffffec;padding:14px 15px;color:var(--ink);caret-color:var(--ink);outline-offset:3px}.field input::placeholder{color:#788575}.password-wrap{position:relative}.password-wrap input{padding-right:52px}.eye{position:absolute;right:7px;top:5px;bottom:5px;border:0;background:transparent;padding:7px}.eye svg{width:19px;height:19px;display:block;fill:none;stroke:currentColor;stroke-width:1.5}.primary{border:1px solid var(--ink);width:100%;border-radius:4px;background:var(--ink);color:#fff;padding:14px;transition:background .2s}.primary:hover{background:#316147}.primary span{display:inline-block;margin-left:12px}.demo-note{text-align:center;font-size:11px;color:var(--muted);line-height:1.8;margin-top:15px}.error{font-size:12px;color:#a23b34;min-height:21px;margin:0 0 8px}.back{display:block;margin:19px auto 0;border:0;background:none;font-size:12px;color:var(--muted);padding:7px}.home{position:absolute;inset:0;background:#f4f5ee;z-index:1;padding:150px max(8vw,28px) 100px;visibility:hidden;opacity:0;transition:opacity .7s}.home.visible{visibility:visible;opacity:1}.home-layout{display:grid;grid-template-columns:1fr 1fr;gap:8vw;align-items:center;max-width:1180px;margin:0 auto}.home h1{font:clamp(38px,5vw,68px)/1.4 "STKaiti","KaiTi",serif;font-weight:400;letter-spacing:3px;margin:24px 0}.home p{color:var(--muted);line-height:2;max-width:390px}.home .date{font:12px Georgia,serif;letter-spacing:3px;color:var(--gold)}.home img{width:100%;max-height:530px;object-fit:cover;aspect-ratio:4/5;border-radius:2px}.home .primary{width:auto;margin-top:22px;padding:14px 27px}.home-caption{font-size:11px;margin-top:10px;letter-spacing:2px}.curtain{position:absolute;top:0;bottom:0;width:50.1%;background:white;z-index:2;pointer-events:none}.curtain.left{left:0}.curtain.right{right:0}.controls{position:fixed;bottom:24px;left:42px;right:42px;z-index:7;display:flex;justify-content:space-between;align-items:center;gap:18px;font-size:11px;color:var(--muted)}.controls-left,.controls-right{display:flex;align-items:center;gap:16px}.prototype-label{letter-spacing:1px}.status{display:flex;gap:7px;align-items:center}.status:before{content:"";width:5px;height:5px;border-radius:50%;background:var(--gold)}select{border:0;background:transparent;color:var(--muted);font-size:11px;padding:5px;cursor:pointer}.controls button{border:0;background:none;font-size:11px;padding:5px;color:var(--muted)}[hidden]{display:none!important}.loading-note{position:fixed;top:45%;left:0;right:0;text-align:center;color:var(--muted);z-index:8;background:white;padding:25px}
+@media(max-width:650px){header{top:22px;left:24px;right:24px}.brand{font-size:22px}.logo-trigger{width:280px;height:280px}.intro-inner{transform:translateY(20px)}.wordmark{font-size:49px}.invitation{letter-spacing:2px}.login{width:min(330px,calc(100% - 64px))}.login h1{font-size:32px}.subtitle{margin-bottom:28px}.controls{bottom:14px;left:20px;right:20px;align-items:flex-end}.controls-left{align-items:flex-start;flex-direction:column;gap:7px}.controls-right{gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:210px}.prototype-label{font-size:10px}.home{padding:115px 28px 120px;overflow:auto}.home-layout{grid-template-columns:1fr;gap:20px}.home h1{font-size:39px;margin:15px 0}.home img{max-height:280px;aspect-ratio:4/3}.home .primary{margin-top:12px}.home p{font-size:12px}.home-caption{display:none}}
+@media(max-height:670px){.login{top:48%}.field{margin-bottom:13px}.subtitle{margin-bottom:19px}.login h1{font-size:28px}.intro-inner{transform:translateY(0)}.logo-trigger{height:230px}.wordmark{font-size:42px}.invitation{margin-top:18px}.intro-note{display:none}.back{margin-top:9px}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{transition-duration:.01ms!important;animation-duration:.01ms!important}}
+</style>
+</head>
+<body>
+<header><div class="brand">知己<small>ZHI JI</small></div><button class="text-button" id="skip">直接登录</button></header>
+<main class="stage">
+ <section class="home" id="home" inert aria-label="首页预览">
+  <div class="home-layout"><div><div class="date">今日穿搭</div><h1>今天想穿什么？<br>知己陪你一起挑。</h1><p>想穿的衣服、喜欢的风格，<br>都可以告诉我。</p><button class="primary" id="again">再看一次开场 <span aria-hidden="true">→</span></button><p class="demo-note" style="text-align:left">模拟登录成功，这是首页预览。</p></div><div><img src="../../assets/look-commute-flatlay.png" alt="日常通勤服饰搭配示意"><div class="home-caption">通勤搭配参考</div></div></div>
+ </section>
+ <div class="curtain left" id="leftDoor"></div><div class="curtain right" id="rightDoor"></div>
+ <section class="intro" id="intro"><div class="intro-inner"><button class="logo-trigger" id="start" aria-label="轻触双鱼，走近知己" disabled></button><div class="wordmark">知己</div><div class="roman">ZHI JI</div><p class="invitation">轻触双鱼，走近知己</p><p class="intro-note">你的穿衣心事，和知己聊聊。</p></div></section>
+ <section class="login" id="login" inert aria-label="模拟登录"><h1>欢迎回来</h1><p class="subtitle">今天想怎么穿，从你的喜好说起。</p><form id="form"><div class="field"><label for="account">账号</label><input id="account" autocomplete="off" placeholder="请输入账号" value="zhiji_demo" required></div><div class="field"><label for="password">密码</label><div class="password-wrap"><input id="password" type="password" autocomplete="off" placeholder="请输入密码" value="demo1234" required><button class="eye" type="button" id="eye" aria-label="显示密码" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div><p class="error" id="error" role="alert"></p><button class="primary" id="submit" type="submit">登录知己 <span aria-hidden="true">→</span></button><p class="demo-note">已填好演示账号，可直接登录。<br>输入内容不会上传或保存。</p></form><button class="back" id="back">返回开场</button></section>
+</main>
+<canvas id="water" aria-hidden="true"></canvas>
+<div class="controls"><div class="controls-left"><span class="prototype-label">双鱼登录 · 交互预览</span><span class="status" id="status" role="status" aria-live="polite">正在加载</span></div><div class="controls-right"><label>速度 <select id="speed" aria-label="动画速度"><option value="1">正常</option><option value="1.8">慢放</option></select></label><label>登录 <select id="result" aria-label="模拟登录结果"><option value="success">成功</option><option value="failure">失败</option></select></label><button id="replay">重播</button></div></div>
+<div class="loading-note" id="loading">正在加载双鱼…</div>
+<script>
+const $=id=>document.getElementById(id),canvas=$('water'),ctx=canvas.getContext('2d');
+const atlas=new Image(),logo=new Image();
+const reduced=matchMedia('(prefers-reduced-motion: reduce)');
+let width=innerWidth,height=innerHeight,phase='loading',started=0,token=0,raf=0;
+let lastFrame=0,swimClock=0,stepSeconds=0,restStarted=0,centerCache=null;
+const pathTables=new Map();
+const motion=[0,1].map(i=>({wave:i*1.8,energy:.35,bend:0,angle:null,bob:0,exitBob:0}));
+const duration=()=>reduced.matches?80:3000;
+const clamp=n=>Math.max(0,Math.min(1,n));
+const smooth=n=>n*n*(3-2*n);
+const glide=n=>n*n*n*(10+n*(-15+6*n));
+function resize(){centerCache=null;pathTables.clear();width=innerWidth;height=innerHeight;const dpr=Math.min(devicePixelRatio||1,2);canvas.width=width*dpr;canvas.height=height*dpr;canvas.style.width=width+'px';canvas.style.height=height+'px';ctx.setTransform(dpr,0,0,dpr,0,0);if(!raf)draw(performance.now());}
+function status(text){$('status').textContent=text;document.body.dataset.phase=phase;}
+function revealLogin(){ $('login').classList.add('visible');$('login').inert=false; }
+function hideLogin(){ $('login').classList.remove('visible');$('login').inert=true; }
+function setPhase(next,text){
+ if(next==='login' && phase!=='submitting')restStarted=swimClock;
+ if(next==='leaving')motion.forEach(m=>{m.exitBob=m.bob;});
+ phase=next;started=swimClock;status(text);wake();
+}
+function wake(){if(!raf)raf=requestAnimationFrame(frame);}
+function frame(now){raf=0;draw(now);if(phase!=='home' && phase!=='intro' && phase!=='loading' && !(reduced.matches&&phase==='login'))wake();}
+function geometry(){const mobile=width<650;const fishSize=mobile?Math.min(width*.40,180):Math.min(width*.29,390);return{mobile,size:fishSize,spread:mobile?width*.31:Math.min(width*.32,440),y:height*.48};}
+function initialCenter(){if(!centerCache){const rect=$('start').getBoundingClientRect();centerCache={x:rect.x+rect.width/2,y:rect.y+rect.height/2,size:Math.min(rect.width-20,rect.height)};}return centerCache;}
+// Follow the annotated arrows: dark fish goes right then down;
+// pale fish goes left along the lower arc, then turns upward at the left edge.
+function swimPose(index,t,g,c){
+ const sign=index===0?1:-1;
+ const start={x:width/2+sign*30,y:c.y-sign*43};
+ const end={x:width/2+sign*g.spread,y:g.y+sign*(g.mobile?height*.36:30)};
+ const bend=Math.min(height*.24,g.mobile?170:190);
+ const a={x:start.x+sign*g.spread*.65,y:start.y+(index===0?10:65)};
+ const b={x:end.x-sign*12,y:Math.max(start.y+(index===0?25:80),end.y-sign*bend)};
+ const u=1-t;
+ const x=u*u*u*start.x+3*u*u*t*a.x+3*u*t*t*b.x+t*t*t*end.x;
+ const y=u*u*u*start.y+3*u*u*t*a.y+3*u*t*t*b.y+t*t*t*end.y;
+ const dx=3*u*u*(a.x-start.x)+6*u*t*(b.x-a.x)+3*t*t*(end.x-b.x);
+ const dy=3*u*u*(a.y-start.y)+6*u*t*(b.y-a.y)+3*t*t*(end.y-b.y);
+ return{x,y,angle:Math.atan2(dy,dx)};
+}
+// Sample arc length once per layout so bends do not unexpectedly change swim speed.
+function swimAtDistance(index,progress,g,c){
+ let table=pathTables.get(index);
+ if(!table){
+  table=[{t:0,d:0}];let previous=swimPose(index,0,g,c),distance=0;
+  for(let k=1;k<=160;k++){
+   const pose=swimPose(index,k/160,g,c);
+   distance+=Math.hypot(pose.x-previous.x,pose.y-previous.y);
+   table.push({t:k/160,d:distance});previous=pose;
+  }
+  pathTables.set(index,table);
+ }
+ const target=clamp(progress)*table[160].d;
+ let lo=0,hi=160;
+ while(hi-lo>1){const mid=(lo+hi)>>1;if(table[mid].d<target)lo=mid;else hi=mid;}
+ const a=table[lo],b=table[hi];
+ return swimPose(index,a.t+(b.t-a.t)*(target-a.d)/(b.d-a.d),g,c);
+}
+function fish(index,x,y,size,angle,alpha,energy){
+ if(alpha<=0)return;
+ const m=motion[index],dt=stepSeconds,blend=1-Math.exp(-dt*6);
+ m.energy+=(energy-m.energy)*blend;
+ // Integrate the wave instead of multiplying absolute time by the changing speed.
+ m.wave+=dt*(1.5+m.energy*4.2);
+ const turn=m.angle===null||dt===0?0:Math.atan2(Math.sin(angle-m.angle),Math.cos(angle-m.angle))/dt;
+ const bendTarget=Math.max(-1,Math.min(1,turn*.28));
+ m.bend+=(bendTarget-m.bend)*(1-Math.exp(-dt*8));m.angle=angle;
+ ctx.save();ctx.translate(x,y);ctx.rotate(angle);ctx.globalAlpha=alpha;
+ const sw=atlas.width/2,sh=atlas.height,scale=size/sw,destH=sh*scale;
+ const strips=110,slice=sw/strips;
+ for(let j=0;j<strips;j++){
+  const u=j/strips,tail=Math.pow(1-u,2.3);
+  // The head stays steady; the turn and travelling wave grow toward the tail.
+  const wave=reduced.matches?0:Math.sin(m.wave+u*5.8)*size*.027*tail*m.energy;
+  const bend=reduced.matches?0:-m.bend*size*.13*tail;
+  ctx.drawImage(atlas,index*sw+j*slice,0,slice+.3,sh,
+   -size/2+j*slice*scale,-destH/2+wave+bend,slice*scale+.65,destH);
+ }
+ ctx.restore();
+}
+function ripples(progress){if(reduced.matches)return;const p=clamp(progress);ctx.save();ctx.strokeStyle='#b8c9b5';ctx.lineWidth=.7;for(let i=0;i<3;i++){const t=clamp((p-i*.09)/.8);ctx.globalAlpha=(1-t)*.28;ctx.beginPath();ctx.ellipse(width/2,height*.46,90+t*width*.47,45+t*height*.3,-.12,0,Math.PI*2);ctx.stroke();}ctx.restore();}
+function draw(now){stepSeconds=lastFrame?Math.min(Math.max(0,now-lastFrame),50)/1000/Number($('speed').value):0;lastFrame=now;swimClock+=stepSeconds*1000;ctx.clearRect(0,0,width,height);if(phase==='loading'||phase==='home')return;const g=geometry(),c=initialCenter(),cx=width/2;if(phase==='intro'){ctx.drawImage(logo,280,140,700,680,c.x-c.size/2,c.y-c.size*680/700/2,c.size,c.size*680/700);return;}
+ if(phase==='opening'){
+  const p=clamp((swimClock-started)/duration());ripples(p);
+  if(p<.32){ctx.save();ctx.translate(c.x,c.y);ctx.globalAlpha=1-smooth(clamp(p/.32));ctx.drawImage(logo,280,140,700,680,-c.size/2,-c.size*680/700/2,c.size,c.size*680/700);ctx.restore();}
+  for(let i=0;i<2;i++){
+   const travel=clamp((p-i*.035)/.965),q=glide(travel);
+   const pose=swimAtDistance(i,q,g,c);
+   const effort=.34+1.05*Math.sin(Math.PI*travel);
+   fish(i,pose.x,pose.y,g.size*(.68+.32*q),pose.angle,glide(clamp((p-.025)/.23)),effort);
+  }
+  if(p>.72)revealLogin();if(p===1){setPhase('login','等待登录');$('account').focus({preventScroll:true});}
+ }else if(phase==='login'||phase==='submitting'){
+  for(let i=0;i<2;i++){
+   const pose=swimPose(i,1,g,c);
+   const age=swimClock-restStarted;
+   const bob=reduced.matches?0:Math.sin(age*.00085+i*1.8)*3*glide(clamp(age/900));
+   motion[i].bob=bob;
+   fish(i,pose.x,pose.y+bob,g.size,pose.angle,1,.34);
+  }
+ }else if(phase==='leaving'){
+  const p=clamp((swimClock-started)/(reduced.matches?80:1500));
+  const q=p*p*p,theta=q*Math.PI/2;
+  for(let i=0;i<2;i++){
+   const sign=i===0?1:-1,pose=swimPose(i,1,g,c);
+   const distance=width*.7+g.size,drop=Math.min(height*.25,180);
+   const forwardX=Math.cos(pose.angle)*drop,forwardY=Math.sin(pose.angle)*drop;
+   const x=pose.x+forwardX*Math.sin(theta)+sign*distance*(1-Math.cos(theta));
+   const y=pose.y+motion[i].exitBob+forwardY*Math.sin(theta);
+   const angle=Math.atan2(forwardY*Math.cos(theta),forwardX*Math.cos(theta)+sign*distance*Math.sin(theta));
+   fish(i,x,y,g.size,angle,1,.34+1.4*smooth(clamp(p*1.8)));
+  }
+  $('leftDoor').style.transform=`translateX(${-q*102}%)`;$('rightDoor').style.transform=`translateX(${q*102}%)`;
+  if(p===1){setPhase('home','首页预览');$('home').inert=false;$('again').focus({preventScroll:true});$('skip').hidden=true;}
+ }
+}
+function reset(){const hadFocus=phase!=='loading';centerCache=null;pathTables.clear();lastFrame=0;motion.forEach((m,i)=>Object.assign(m,{wave:i*1.8,energy:.35,bend:0,angle:null,bob:0,exitBob:0}));token++;hideLogin();$('intro').style.opacity='1';$('intro').inert=false;$('intro').style.visibility='visible';$('home').classList.remove('visible');$('home').inert=true;$('leftDoor').style.transform='';$('rightDoor').style.transform='';$('error').textContent='';$('submit').disabled=false;$('submit').innerHTML='登录知己 <span aria-hidden="true">→</span>';$('skip').hidden=false;$('start').disabled=false;setPhase('intro','点击双鱼开始');if(hadFocus)$('start').focus({preventScroll:true});}
+function open(skip=false){if(phase!=='intro')return;$('intro').style.opacity='0';$('intro').inert=true;$('skip').hidden=true;if(skip||reduced.matches){revealLogin();setPhase('login','等待登录');$('account').focus({preventScroll:true});}else setPhase('opening','正在展开登录');}
+$('start').onclick=()=>open();$('skip').onclick=()=>open(true);
+for(const id of ['back','replay','again'])$(id).onclick=()=>{if(phase!=='loading')reset();};
+$('eye').onclick=()=>{const shown=$('password').type==='password';$('password').type=shown?'text':'password';$('eye').setAttribute('aria-pressed',String(shown));$('eye').setAttribute('aria-label',shown?'隐藏密码':'显示密码');};
+$('form').onsubmit=async e=>{e.preventDefault();if(phase!=='login')return;const current=++token;const fail=$('result').value==='failure';$('error').textContent='';$('submit').disabled=true;$('submit').textContent='正在登录…';setPhase('submitting','正在模拟登录');await new Promise(r=>setTimeout(r,900));if(current!==token)return;if(fail){$('error').textContent='当前为失败演示。将底部“登录”选为“成功”后重试。';$('submit').disabled=false;$('submit').textContent='重试';setPhase('login','登录失败，可重试');return;}hideLogin();$('home').classList.add('visible');setPhase('leaving','登录成功，正在进入首页');};
+addEventListener('resize',resize);reduced.addEventListener('change',wake);
+Promise.all([new Promise((resolve,reject)=>{atlas.onload=resolve;atlas.onerror=reject;atlas.src='assets/fish-atlas.png';}),new Promise((resolve,reject)=>{logo.onload=resolve;logo.onerror=reject;logo.src='assets/original-logo.png';})]).then(()=>{$('loading').hidden=true;resize();reset();}).catch(()=>{$('loading').textContent='双鱼图片没有加载出来，请刷新重试。';});
+</script>
+</body>
+</html>

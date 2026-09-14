@@ -7,16 +7,17 @@
   --font-sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --font-display: "Noto Serif SC", "Songti SC", "STSong", "SimSun", serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  --bg: #f5f2ed;
-  --surface: #fffdf9;
-  --surface-soft: #edf0eb;
-  --ink: #1e2c27;
-  --muted: #68746e;
-  --line: #d9e0da;
+  --bg: #f3efe7;
+  --surface: #fcfaf5;
+  --surface-soft: #e9eee7;
+  --ink: #1f2e28;
+  --muted: #626f67;
+  --line: #d7ded6;
   --line-strong: #b9c7bd;
-  --accent: #2a7468;
-  --accent-strong: #1b554d;
-  --accent-soft: #e2eeea;
+  --accent: #174f42;
+  --accent-strong: #0b3028;
+  --accent-soft: #e3ece5;
+  --gold: #c6a061;
   --green: var(--accent);
   --green-soft: var(--accent-soft);
   --coral: #b76450;
@@ -165,7 +166,7 @@ img {
   align-items: center;
   border-bottom: 1px solid var(--line);
   padding: 0 max(24px, calc((100vw - var(--page-width)) / 2));
-  background: color-mix(in srgb, var(--bg) 91%, transparent);
+  background: color-mix(in srgb, var(--surface) 95%, transparent);
   backdrop-filter: blur(18px);
   box-shadow: 0 10px 28px rgba(37, 59, 52, .04);
 }

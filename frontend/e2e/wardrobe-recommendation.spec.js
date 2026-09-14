@@ -14,13 +14,17 @@ function uniqueUsername(label, testInfo) {
 }
 
 async function expectCurrentAuthCopy(page) {
-  await expect(page.getByRole('heading', { name: '先把你的衣橱记下来。', exact: true })).toBeVisible()
+  const heading = page.locator('.fish-auth-login h1')
+  if (!(await heading.isVisible())) {
+    await expect(page.getByRole('button', { name: '直接登录', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '直接登录', exact: true }).click()
+  }
+
+  await expect(heading).toHaveText(/^(欢迎回来|创建你的风格档案)$/)
+  await expect(page.getByText('双鱼登录 · 知己认证', { exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: '登录', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: '注册', exact: true })).toBeVisible()
-  await expect(page.getByText('欢迎回来', { exact: true })).toHaveCount(0)
-  await expect(page.getByText('建立你的账户', { exact: true })).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: '登录知己', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: '注册知己', exact: true })).toHaveCount(0)
+  await expect(page.locator('.fish-auth-submit')).toBeVisible()
 }
 
 async function registerThroughUi(page, username, onLoginReady) {
@@ -37,28 +41,71 @@ async function registerThroughUi(page, username, onLoginReady) {
   await expect(page.getByRole('heading', { name: '今天穿什么，从衣橱开始。' })).toBeVisible()
 }
 
-test('uses a warm 4:6 image-to-login composition', async ({ page }) => {
+test('uses the double-fish login experience', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/')
-  await expectCurrentAuthCopy(page)
+  await expect(page.getByRole('button', { name: '轻触双鱼，走近知己', exact: true })).toBeVisible()
+  await expect(page.getByText('双鱼登录 · 知己认证', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '直接登录', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '欢迎回来', exact: true })).toBeVisible()
 
   const layout = await page.evaluate(() => {
-    const view = document.querySelector('.auth-view')
-    const visual = document.querySelector('.auth-visual')
-    const panel = document.querySelector('.auth-panel')
-    const submit = document.querySelector('.auth-submit')
+    const view = document.querySelector('.fish-auth')
+    const canvas = document.querySelector('.fish-auth-canvas')
+    const login = document.querySelector('.fish-auth-login')
     return {
       viewWidth: view.getBoundingClientRect().width,
-      visualWidth: visual.getBoundingClientRect().width,
-      panelWidth: panel.getBoundingClientRect().width,
-      submitBackground: getComputedStyle(submit).backgroundColor
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height,
+      loginVisibility: getComputedStyle(login).visibility,
+      loginPointerEvents: getComputedStyle(login).pointerEvents
     }
   })
 
-  expect(layout.visualWidth / layout.viewWidth).toBeCloseTo(0.4, 1)
-  expect(layout.panelWidth / layout.viewWidth).toBeCloseTo(0.6, 1)
-  expect(layout.submitBackground).toBe('rgb(42, 33, 31)')
-  await expect(page.locator('.auth-visual img')).toHaveAttribute('src', '/assets/look-urban.jpg')
+  expect(layout.viewWidth).toBe(1440)
+  expect(layout.canvasWidth).toBeGreaterThan(0)
+  expect(layout.canvasHeight).toBeGreaterThan(0)
+  expect(layout.loginVisibility).toBe('visible')
+  expect(layout.loginPointerEvents).toBe('auto')
+
+  const canvasSamples = await page.locator('.fish-auth-canvas').evaluate(async (canvas) => {
+    const sample = () => {
+      const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data
+      let alphaPixels = 0
+      let checksum = 0
+      for (let index = 0; index < data.length; index += 4) {
+        if (data[index + 3] > 0) alphaPixels += 1
+        checksum = (checksum + data[index] + data[index + 1] * 3 + data[index + 2] * 7 + data[index + 3] * 11) % 1000000007
+      }
+      return { alphaPixels, checksum }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 160))
+    const first = sample()
+    await new Promise((resolve) => setTimeout(resolve, 160))
+    const second = sample()
+    return { first, second }
+  })
+
+  expect(canvasSamples.first.alphaPixels).toBeGreaterThan(100)
+  expect(canvasSamples.second.checksum).not.toBe(canvasSamples.first.checksum)
+})
+
+test('logs in through the double-fish form and restores the session', async ({ page, context }, testInfo) => {
+  const username = uniqueUsername('login', testInfo)
+
+  await registerThroughUi(page, username)
+  await page.getByRole('button', { name: '退出登录' }).click()
+  await expectCurrentAuthCopy(page)
+
+  await page.locator('input[name="username"]').fill(username)
+  await page.locator('input[name="password"]').fill(password)
+  await page.getByRole('button', { name: '登录知己', exact: true }).click()
+
+  await expect(page.getByRole('button', { name: '退出登录' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '今天穿什么，从衣橱开始。' })).toBeVisible()
+  const authenticated = await context.request.get('/api/v1/auth/me')
+  await expect(await authenticated.json()).toMatchObject({ code: 0, data: { username } })
 })
 
 async function csrfHeaders(api) {

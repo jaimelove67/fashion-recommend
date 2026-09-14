@@ -140,10 +140,10 @@ onBeforeUnmount(() => fashion.dispose())
         :active-href="`#${fashion.state.activeView}`"
         :on-item-click="handleNavigationClick"
         ease="power3.out"
-        base-color="#1e2c27"
-        pill-color="#fffdf9"
-        hovered-pill-text-color="#fffdf9"
-        pill-text-color="#1e2c27"
+        base-color="var(--accent-strong)"
+        pill-color="var(--surface)"
+        hovered-pill-text-color="var(--surface)"
+        pill-text-color="var(--accent)"
       />
 
       <div class="header-actions">
