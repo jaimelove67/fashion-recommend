@@ -392,8 +392,9 @@ watch(dailyLooks, (looks) => {
           <div class="hero-copy">
             <div class="hero-index"><span>01</span><span>今天穿哪一套？</span></div>
             <h1 v-if="hasRealLooks">今天有 {{ realLookCount }} 套衣橱搭配可选。</h1>
-            <h1 v-else>先从一个方向，开始今天的搭配。</h1>
-            <p class="hero-lead">天气、场合和衣橱已经放在一起。先看看今天的搭配，不确定时也可以直接问知己。</p>
+            <h1 v-else>今天还没想好穿什么？</h1>
+            <p v-if="hasRealLooks" class="hero-lead">天气、场合和衣橱已经放在一起。先看看今天的搭配，不确定时也可以直接问知己。</p>
+            <p v-else class="hero-lead">告诉知己去哪里、做什么，或想要什么感觉。我会结合天气和衣橱，帮你搭出一套可以直接穿的组合。</p>
             <div class="hero-actions">
               <button class="hero-primary" type="button" @click="openAssistant()">
                 <MessageCircle :size="17" aria-hidden="true" />问问知己<ArrowRight :size="17" aria-hidden="true" />

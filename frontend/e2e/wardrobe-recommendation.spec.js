@@ -185,7 +185,7 @@ test('adds a garment, generates an outfit, saves it, and persists feedback', asy
     await expect(page.getByRole('heading', { name: 'E2E 雾蓝牛津纺衬衫' })).toBeVisible()
 
     await page.getByRole('button', { name: '推荐', exact: true }).click()
-    await expect(page.getByRole('heading', { name: '先从一个方向，开始今天的搭配。' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '今天还没想好穿什么？' })).toBeVisible()
     await expect(page.getByRole('heading', { name: '今天的搭配', exact: true })).toBeVisible()
     await expect(page.locator('.ootd-stack-card')).toHaveCount(5)
 
