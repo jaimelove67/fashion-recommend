@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue'
 import {
   ArrowRight,
   Bookmark,
-  CalendarDays,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -399,9 +398,6 @@ watch(dailyLooks, (looks) => {
               <button class="hero-primary" type="button" @click="openAssistant()">
                 <MessageCircle :size="17" aria-hidden="true" />问问知己<ArrowRight :size="17" aria-hidden="true" />
               </button>
-              <button class="hero-secondary" type="button" @click="jumpToToday">
-                <CalendarDays :size="16" aria-hidden="true" />回到今天
-              </button>
             </div>
             <div class="hero-footnote">
               <span v-for="tag in profileTags" :key="tag">#{{ tag }}</span>
@@ -778,7 +774,6 @@ watch(dailyLooks, (looks) => {
 }
 
 .hero-primary,
-.hero-secondary,
 .detail-primary,
 .detail-secondary,
 .save-button,
@@ -806,7 +801,6 @@ watch(dailyLooks, (looks) => {
   transform: translateY(-1px);
 }
 
-.hero-secondary,
 .detail-secondary,
 .generated-empty button {
   display: inline-flex;
@@ -816,7 +810,6 @@ watch(dailyLooks, (looks) => {
   background: transparent;
 }
 
-.hero-secondary:hover,
 .detail-secondary:hover,
 .generated-empty button:hover {
   border-color: var(--rec-accent);
@@ -1937,8 +1930,7 @@ watch(dailyLooks, (looks) => {
     grid-template-columns: 1fr;
   }
 
-  .hero-primary,
-  .hero-secondary {
+  .hero-primary {
     width: 100%;
   }
 
