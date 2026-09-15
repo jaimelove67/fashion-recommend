@@ -24,7 +24,7 @@ import org.springframework.web.client.RestClient;
 public class ConfiguredJsonTrendSourceAdapter implements TrendSourceAdapter {
     private static final Set<String> REQUIRED_ITEM_FIELDS = Set.of(
             "id", "platform", "title", "topicTags", "heatScore", "publishedAt", "sourceUrl", "imageUrl");
-    private static final Set<String> OPTIONAL_ITEM_FIELDS = Set.of("summary");
+    private static final Set<String> OPTIONAL_ITEM_FIELDS = Set.of("summary", "evidence", "fetchedAt");
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
@@ -71,6 +71,10 @@ public class ConfiguredJsonTrendSourceAdapter implements TrendSourceAdapter {
 
     private List<TrendItem> fetchAndValidate() {
         String response = restClient.get().uri(endpoint).retrieve().body(String.class);
+        return parseFeed(response);
+    }
+
+    public List<TrendItem> parseFeed(String response) {
         try {
             JsonNode root = objectMapper.readTree(response);
             if (!root.isObject() || root.size() != 1 || !root.has("items") || !root.get("items").isArray()) {
@@ -115,8 +119,36 @@ public class ConfiguredJsonTrendSourceAdapter implements TrendSourceAdapter {
         Instant publishedAt = parseInstant(requiredText(node, "publishedAt", 60), "publishedAt");
         String sourceUrl = requiredHttpUrl(node, "sourceUrl");
         String imageUrl = optionalHttpUrl(node, "imageUrl");
-        return new TrendItem(id, itemPlatform, title, tags, heatScore, publishedAt, fetchedAt,
-                sourceUrl, false, imageUrl, optionalText(node, "summary", 600));
+        Instant observedAt = node.has("fetchedAt") ? parseInstant(requiredText(node, "fetchedAt", 60), "fetchedAt") : fetchedAt;
+        if (observedAt.isAfter(fetchedAt.plusSeconds(60)) || publishedAt.isAfter(fetchedAt.plusSeconds(60)))
+            throw new TrendSourceException("趋势时间不能在未来");
+        TrendEvidence evidence = null;
+        if (node.hasNonNull("evidence")) {
+            JsonNode detail = node.get("evidence");
+            if (!detail.isObject()) throw new TrendSourceException("互动数据格式不合法");
+            List<String> images = new ArrayList<>();
+            if (detail.has("images")) {
+                if (!detail.get("images").isArray() || detail.get("images").size() > 20)
+                    throw new TrendSourceException("图集最多 20 张图片");
+                for (JsonNode image : detail.get("images")) {
+                    var holder = objectMapper.createObjectNode().set("url", image);
+                    images.add(requiredHttpUrl(holder, "url"));
+                }
+            }
+            evidence = new TrendEvidence(optionalText(detail, "author", 120), optionalText(detail, "mediaType", 20), images,
+                    counter(detail, "likes"), counter(detail, "favorites"), counter(detail, "comments"), counter(detail, "reposts"),
+                    "来源内评分", null);
+        }
+        return new TrendItem(id, itemPlatform, title, tags, heatScore, publishedAt, observedAt,
+                sourceUrl, false, imageUrl, optionalText(node, "summary", 600), evidence);
+    }
+
+    private static Long counter(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        if (value == null || value.isNull()) return null;
+        if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0 || value.longValue() > 1_000_000_000_000L)
+            throw new TrendSourceException("互动计数必须是非负整数或 null");
+        return value.longValue();
     }
 
     private static Set<String> fieldNames(JsonNode node) {

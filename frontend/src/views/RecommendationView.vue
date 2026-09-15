@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import TrendDiscovery from '../components/TrendDiscovery.vue'
 import {
   ArrowRight,
   Bookmark,
@@ -160,7 +161,6 @@ const dailyLookModes = [
 const state = computed(() => props.app.state || {})
 const wardrobe = computed(() => state.value.wardrobe || [])
 const history = computed(() => state.value.history || [])
-const trendPreview = computed(() => state.value.trends?.[0] || null)
 const profile = computed(() => state.value.profile || null)
 const actualWeather = computed(() => state.value.weather || null)
 
@@ -429,6 +429,11 @@ watch(dailyLooks, (looks) => {
         </div>
       </header>
 
+      <div v-if="state.selectedTrendReference" class="trend-reference-banner" role="status" tabindex="-1">
+        <div><strong>已选择穿搭参考</strong><p>{{ state.selectedTrendReference.title }}</p><small>生成时只从你的衣橱选择单品，参考图不会加入衣橱。</small></div>
+        <button type="button" @click="openAssistant(null, '参考我选中的穿搭风格，用我的衣橱搭一套')">填写场合并生成</button>
+        <button type="button" @click="props.app.clearTrendReference()">取消参考</button>
+      </div>
       <section class="overview-strip" aria-label="今日搭配概览">
         <div class="overview-item">
           <span>{{ hasRealLooks ? '衣橱搭配' : '灵感方向' }}</span>
@@ -601,18 +606,8 @@ watch(dailyLooks, (looks) => {
         </div>
       </section>
 
+      <TrendDiscovery :app="app" />
       <section class="signal-grid" aria-label="搭配参考">
-        <article class="signal-panel trend-signal">
-          <header class="panel-header compact">
-              <div><div class="section-number">06 / TREND SIGNAL</div><h2>本周趋势参考</h2></div>
-            <Flame :size="19" aria-hidden="true" />
-          </header>
-          <div v-if="trendPreview" class="trend-signal-content">
-            <img :src="trendPreview.imageUrl || fallbackImages[1]" :alt="trendPreview.title" />
-            <div><span>{{ trendPreview.platform || '趋势样本' }} · 热度 {{ trendPreview.heatScore ?? '—' }}</span><strong>{{ trendPreview.title }}</strong><p>{{ (trendPreview.topicTags || []).slice(0, 3).join(' · ') || '先从趋势里挑一个方向' }}</p><button type="button" @click="props.app.selectView('trend')">查看全部趋势 <ArrowRight :size="14" /></button></div>
-          </div>
-          <div v-else class="signal-empty"><Flame :size="18" />加载趋势数据后，这里会显示一条参考。</div>
-        </article>
         <article class="signal-panel note-signal">
           <header class="panel-header compact"><div><div class="section-number">07 / NOTES</div><h2>搭配小提示</h2></div><Wind :size="19" aria-hidden="true" /></header>
           <ul>
@@ -627,6 +622,10 @@ watch(dailyLooks, (looks) => {
 </template>
 
 <style scoped>
+.trend-reference-banner { display:flex; flex-wrap:wrap; align-items:center; gap:20px; padding:24px; margin:20px 0; background:#e6ece2; color:#263e32; }
+.trend-reference-banner > div { flex:1 1 260px; }
+.trend-reference-banner p { margin:8px 0; overflow-wrap:anywhere; }
+.trend-reference-banner button { cursor:pointer; min-height:44px; padding:10px 14px; color:inherit; border:1px solid #345647; background:transparent; }
 .recommendation-view {
   --rec-bg: #f4f1eb;
   --rec-paper: #fbfaf6;

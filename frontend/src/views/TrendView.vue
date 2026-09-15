@@ -1,13 +1,14 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import TrendDiscovery from '../components/TrendDiscovery.vue'
 import { ArrowRight, ArrowUpRight, Flame, Layers3, LoaderCircle, RefreshCw, Sparkles, Tag, TrendingUp } from '@lucide/vue'
 
 const props = defineProps({
   app: { type: Object, required: true }
 })
 
-const fallbackLooks = ['/assets/look-urban.jpg', '/assets/look-tailoring.jpg', '/assets/look-color.jpg']
-const platformNames = { douyin: '抖音', xiaohongshu: '小红书', weibo: '微博' }
+const fallbackLooks = ['', '', '']
+const platformNames = { douyin: '抖音', xiaohongshu: '小红书', weibo: '微博', editorial: '时尚编辑精选' }
 const activeTag = ref('全部')
 const state = computed(() => props.app.state || {})
 const trends = computed(() => state.value.trends || [])
@@ -34,16 +35,13 @@ const selectedTrend = computed(() => {
 
 const selectedRank = computed(() => {
   if (!selectedTrend.value) return null
-  const ordered = [...trends.value].sort((a, b) => (Number(b.heatScore) || 0) - (Number(a.heatScore) || 0))
+  const ordered = trends.value
   const index = ordered.findIndex((item) => item.id === selectedTrend.value.id)
   return index >= 0 ? index + 1 : null
 })
 
 const heroImage = computed(() => selectedTrend.value?.imageUrl || fallbackLooks[0])
-const topTenTrends = computed(() => [...trends.value]
-  .sort((a, b) => (Number(b.heatScore) || 0) - (Number(a.heatScore) || 0)
-    || String(a.id || '').localeCompare(String(b.id || '')))
-  .slice(0, 10))
+const topTenTrends = computed(() => filteredTrends.value.slice(0, 10))
 const galleryIndex = ref(0)
 const galleryShift = ref(126)
 const galleryStage = ref(null)
@@ -53,7 +51,7 @@ const galleryPaused = ref(false)
 let galleryTimer = null
 let galleryMounted = false
 let galleryMediaQuery = null
-const visibleCards = computed(() => filteredTrends.value.slice(0, 3))
+const visibleCards = computed(() => filteredTrends.value)
   const metricRail = computed(() => [
   {
     label: '当前条目',
@@ -63,10 +61,10 @@ const visibleCards = computed(() => filteredTrends.value.slice(0, 3))
     icon: Layers3
   },
   {
-    label: `平均${scoreLabel.value}`,
-    value: trendStats.value.count ? trendStats.value.averageHeat : '—',
-    unit: trendStats.value.count ? '分' : '',
-    note: '按当前条目计算',
+    label: '内容来源',
+    value: new Set(trends.value.map(item => item.platform)).size,
+    unit: '个',
+    note: '各来源独立排序',
     icon: TrendingUp
   },
   {
@@ -83,9 +81,9 @@ const selectedFacts = computed(() => {
   if (!item) return []
   return [
     {
-      label: `${scoreLabel.value}与排名`,
-      value: item.heatScore ?? '—',
-      note: selectedRank.value ? `当前条目排名第 ${selectedRank.value}` : '暂无排名'
+      label: item.evidence?.scoreLabel || scoreLabel.value,
+      value: item.platform === 'editorial' ? '编辑精选' : item.heatScore ?? '—',
+      note: '仅表示当前采集范围，不代表全网排名'
     },
     {
       label: '主题标签',
@@ -314,6 +312,7 @@ function handleImageError(event, fallback) {
 
 function useSuggestion(suggestion) {
   if (!state.value.recommendationForm) state.value.recommendationForm = {}
+  props.app.clearTrendReference()
   state.value.recommendationForm.styleHint = suggestion
   props.app.selectView('recommend')
 }
@@ -321,14 +320,15 @@ function useSuggestion(suggestion) {
 
 <template>
   <div class="trend-page">
-    <section class="trend-hero" aria-labelledby="trend-title">
+    <TrendDiscovery :app="app" controls-only @filter-style="activeTag = $event" />
+    <section v-if="trends.length && !state.trendsLoading" class="trend-hero" aria-labelledby="trend-title">
       <div class="hero-intro">
         <div v-if="trendMeta.demoMode" class="demo-banner" role="status">
           <strong>开发样本数据</strong>
           <span>当前内容用于演示，接入趋势源后会替换</span>
         </div>
         <h1 id="trend-title">趋势观察</h1>
-        <p>这里展示已返回的公开趋势数据。查看标签、热度和发布时间，再决定哪些方向值得试试。</p>
+        <p>查看公开穿搭内容、来源和发布时间，再决定哪些风格值得试试。</p>
         <div class="hero-update">
           <span>更新时间 {{ formatDateTime(trendMeta.fetchedAt) }}</span>
           <button
@@ -372,9 +372,8 @@ function useSuggestion(suggestion) {
     <section class="trend-gallery-section" aria-labelledby="trend-gallery-title">
       <header class="gallery-heading">
         <div>
-          <p>DAILY TOP 10</p>
           <h2 id="trend-gallery-title">趋势穿搭精选</h2>
-          <span>{{ trendMeta.demoMode ? '开发样本 · 接入趋势源后更新' : `按${scoreLabel}从高到低排列 · 每日更新` }}</span>
+          <span>{{ trendMeta.demoMode ? '开发样本 · 接入趋势源后更新' : '各平台独立排序后交替展示 · 非全网榜单' }}</span>
         </div>
       </header>
 
@@ -456,7 +455,7 @@ function useSuggestion(suggestion) {
               :alt="selectedTrend.title"
               @error="handleImageError($event, fallbackLooks[0])"
             />
-            <span><Flame :size="16" />{{ scoreLabel }} {{ selectedTrend.heatScore ?? '—' }}</span>
+            <span><Flame :size="16" />{{ selectedTrend.evidence?.scoreLabel || scoreLabel }} {{ selectedTrend.platform === 'editorial' ? '' : selectedTrend.heatScore }}</span>
           </div>
           <div class="feature-copy">
             <div class="feature-number">NO. {{ String(selectedRank || 1).padStart(2, '0') }}</div>
@@ -466,6 +465,17 @@ function useSuggestion(suggestion) {
             <div class="feature-tags" aria-label="主题标签">
               <span v-for="tagName in selectedTrend.topicTags || []" :key="tagName">{{ tagName }}</span>
               <span v-if="!(selectedTrend.topicTags || []).length">未设置标签</span>
+            </div>
+            <button type="button" class="source-action" @click="app.useTrend(selectedTrend)">用我的衣橱搭一套 <ArrowRight :size="17" /></button>
+            <div v-if="selectedTrend.evidence" class="evidence-counts">
+              <span v-if="selectedTrend.evidence.likes != null">点赞 {{ selectedTrend.evidence.likes }}</span>
+              <span v-if="selectedTrend.evidence.favorites != null">收藏 {{ selectedTrend.evidence.favorites }}</span>
+              <span v-if="selectedTrend.evidence.comments != null">评论 {{ selectedTrend.evidence.comments }}</span>
+              <span v-if="selectedTrend.evidence.interactionGrowth != null">本期互动增加 {{ selectedTrend.evidence.interactionGrowth }}</span>
+              <span v-if="selectedTrend.stale">等待更新，当前为上次收录内容</span>
+            </div>
+            <div v-if="selectedTrend.evidence?.images?.length > 1" class="source-gallery" aria-label="原文图集">
+              <a v-for="url in selectedTrend.evidence.images" :key="url" :href="selectedTrend.sourceUrl" target="_blank" rel="noopener noreferrer"><img :src="url" :alt="selectedTrend.title" loading="lazy" referrerpolicy="no-referrer" @error="handleImageError($event, '')" /></a>
             </div>
             <a
               v-if="selectedTrend.sourceUrl"
@@ -518,7 +528,7 @@ function useSuggestion(suggestion) {
               <span>NO. {{ String(index + 1).padStart(2, '0') }}</span>
             </span>
             <span class="card-copy">
-              <span class="card-meta"><span>{{ formatPlatform(item.platform) }}</span><span>{{ scoreLabel }} {{ item.heatScore ?? '—' }}</span></span>
+              <span class="card-meta"><span>{{ formatPlatform(item.platform) }}</span><span>{{ item.evidence?.scoreLabel || scoreLabel }} {{ item.platform === 'editorial' ? '' : item.heatScore }}</span></span>
               <strong>{{ item.title }}</strong>
               <span class="card-tags">{{ (item.topicTags || []).join(' / ') || '未设置标签' }}</span>
             </span>
@@ -562,6 +572,9 @@ function useSuggestion(suggestion) {
 </template>
 
 <style scoped>
+.evidence-counts { display:flex; flex-wrap:wrap; gap:12px; color:#596259; font-size:13px; margin:16px 0; }
+.source-gallery { display:flex; overflow:auto; gap:10px; margin:16px 0; }
+.source-gallery img { width:100px; height:130px; object-fit:cover; }
 .trend-page {
   width: min(calc(100% - 48px), 1240px);
   margin: 0 auto;

@@ -1,7 +1,8 @@
-import { computed, reactive } from 'vue'
+import { computed, reactive, nextTick } from 'vue'
 
-const VALID_VIEWS = new Set(['home', 'trend', 'recommend', 'wardrobe', 'history', 'profile'])
+const VALID_VIEWS = new Set(['home', 'trend', 'recommend', 'wardrobe', 'history', 'profile', 'admin'])
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+const ADMIN_PAGE_SIZE = 20
 
 const COLOR_MAP = {
   '低饱和': '#9da6a1',
@@ -91,6 +92,7 @@ export function useFashionApp() {
   const categories = ['上装', '下装', '鞋履', '外套', '配饰']
   let csrf = null
   let sessionVersion = 0
+  let trendRequestVersion = 0
   const state = reactive({
     authPhase: 'checking',
     authUser: null,
@@ -98,6 +100,11 @@ export function useFashionApp() {
     authError: '',
     activeView: 'home',
     trends: [],
+    trendPeriod: 'week',
+    trendPlatform: '',
+    trendStyles: [],
+    trendError: '',
+    selectedTrendReference: null,
     trendMeta: { primarySource: '', fetchedAt: null, demoMode: false, scoreLabel: '热度' },
     selectedTrendId: null,
     wardrobe: [],
@@ -123,6 +130,39 @@ export function useFashionApp() {
     editingId: null,
     selectedImage: null,
     allowAiRecognition: false,
+    adminOverview: null,
+    adminOverviewLoading: false,
+    adminUsers: [],
+    adminUsersTotal: 0,
+    adminUsersPage: 0,
+    adminUsersHasNext: false,
+    adminUsersLoading: false,
+    adminUserAction: null,
+    adminQuery: '',
+    adminFeedback: [],
+    adminFeedbackTotal: 0,
+    adminFeedbackPage: 0,
+    adminFeedbackHasNext: false,
+    adminFeedbackLoading: false,
+    adminFeedbackAction: null,
+    adminFeedbackStatus: 'PENDING',
+    adminFeedbackQuery: '',
+    adminTrendContents: [],
+    adminTrendTotal: 0,
+    adminTrendPage: 0,
+    adminTrendHasNext: false,
+    adminTrendLoading: false,
+    adminTrendAction: null,
+    adminTrendStatus: 'PENDING_HUMAN',
+    adminTrendQuery: '',
+    adminTrendRun: null,
+    adminAuditLogs: [],
+    adminAuditTotal: 0,
+    adminAuditPage: 0,
+    adminAuditHasNext: false,
+    adminAuditLoading: false,
+    adminAuditAction: '',
+    adminAuditOutcome: '',
     globalQuery: '',
     searchOpen: false,
     notificationsOpen: false,
@@ -132,6 +172,7 @@ export function useFashionApp() {
   })
 
   function resetPrivateState() {
+    state.selectedTrendReference = null
     sessionVersion += 1
     state.wardrobe = []
     state.history = []
@@ -154,6 +195,39 @@ export function useFashionApp() {
     state.editingId = null
     state.selectedImage = null
     state.allowAiRecognition = false
+    state.adminOverview = null
+    state.adminOverviewLoading = false
+    state.adminUsers = []
+    state.adminUsersTotal = 0
+    state.adminUsersPage = 0
+    state.adminUsersHasNext = false
+    state.adminUsersLoading = false
+    state.adminUserAction = null
+    state.adminQuery = ''
+    state.adminFeedback = []
+    state.adminFeedbackTotal = 0
+    state.adminFeedbackPage = 0
+    state.adminFeedbackHasNext = false
+    state.adminFeedbackLoading = false
+    state.adminFeedbackAction = null
+    state.adminFeedbackStatus = 'PENDING'
+    state.adminFeedbackQuery = ''
+    state.adminTrendContents = []
+    state.adminTrendTotal = 0
+    state.adminTrendPage = 0
+    state.adminTrendHasNext = false
+    state.adminTrendLoading = false
+    state.adminTrendAction = null
+    state.adminTrendStatus = 'PENDING_HUMAN'
+    state.adminTrendQuery = ''
+    state.adminTrendRun = null
+    state.adminAuditLogs = []
+    state.adminAuditTotal = 0
+    state.adminAuditPage = 0
+    state.adminAuditHasNext = false
+    state.adminAuditLoading = false
+    state.adminAuditAction = ''
+    state.adminAuditOutcome = ''
     state.globalQuery = ''
     state.searchOpen = false
     state.notificationsOpen = false
@@ -162,6 +236,8 @@ export function useFashionApp() {
     state.profileForm = createProfileForm()
     state.error = ''
   }
+
+  const isAdmin = computed(() => state.authUser?.authorities?.includes('ROLE_ADMIN') === true)
 
   function isCurrentSession(version) {
     return state.authPhase === 'authenticated' && version === sessionVersion
@@ -251,7 +327,14 @@ export function useFashionApp() {
   }
 
   async function loadPrivateData() {
-    return Promise.allSettled([loadWardrobe(), loadHistory(), loadProfile()])
+    const requests = [loadWardrobe(), loadHistory(), loadProfile()]
+    if (isAdmin.value) requests.push(
+      loadAdminOverview(),
+      loadAdminUsers(),
+      loadAdminFeedback(),
+      loadAdminTrendContents(),
+      loadAdminAuditLogs())
+    return Promise.allSettled(requests)
   }
 
   async function completeLogin(username, password) {
@@ -266,6 +349,13 @@ export function useFashionApp() {
     state.authUser = user
     state.authPhase = 'authenticated'
     state.authError = ''
+    if (state.activeView === 'admin' && !isAdmin.value) {
+      state.activeView = 'home'
+      window.history.replaceState(null, '', '#home')
+    } else if (isAdmin.value && state.activeView === 'home') {
+      state.activeView = 'admin'
+      window.history.replaceState(null, '', '#admin')
+    }
     await loadPrivateData()
   }
 
@@ -330,24 +420,54 @@ export function useFashionApp() {
   }
 
   async function loadTrends() {
+    const version = ++trendRequestVersion
     state.trendsLoading = true
+    state.trendError = ''
     try {
-      const feed = await request('/api/v1/trends')
+      const params = new URLSearchParams({ period: state.trendPeriod, platform: state.trendPlatform })
+      const feed = await request(`/api/v1/trends?${params}`)
+      if (version !== trendRequestVersion) return
       state.trends = feed.items || []
+      state.trendStyles = feed.styles || []
       state.trendMeta = {
         primarySource: feed.primarySource || '',
         fetchedAt: feed.fetchedAt || null,
         demoMode: Boolean(feed.demoMode),
-        scoreLabel: feed.scoreLabel || '热度'
+        scoreLabel: feed.scoreLabel || '来源内评分',
+        sources: feed.sources || [],
+        notice: feed.notice || ''
       }
       if (!state.selectedTrendId || !state.trends.some((item) => item.id === state.selectedTrendId)) {
         state.selectedTrendId = state.trends[0]?.id || null
       }
     } catch (cause) {
-      showError(cause)
+      if (version === trendRequestVersion) state.trendError = '趋势暂时无法加载，请稍后重试。'
     } finally {
-      state.trendsLoading = false
+      if (version === trendRequestVersion) state.trendsLoading = false
     }
+  }
+
+  async function useTrend(item) {
+    state.selectedTrendReference = item
+    state.recommendationForm.trendId = item.id
+    state.recommendationForm.styleHint = (item.topicTags || []).join('、').slice(0, 120)
+    await selectView('recommend')
+    await nextTick()
+    document.querySelector('.trend-reference-banner')?.focus()
+  }
+
+  function clearTrendReference() {
+    state.selectedTrendReference = null
+    delete state.recommendationForm.trendId
+  }
+
+  async function refreshTrendSources() {
+    if (!isAdmin.value || state.trendsLoading) return
+    state.trendsLoading = true
+    try {
+      await request('/api/v1/admin/trends/refresh', { method: 'POST' })
+    } catch (cause) { showError(cause) }
+    finally { await loadTrends() }
   }
 
   async function loadWardrobe() {
@@ -414,6 +534,278 @@ export function useFashionApp() {
       return null
     } finally {
       if (isCurrentSession(version)) state.profileLoading = false
+    }
+  }
+
+  async function loadAdminOverview() {
+    if (!isAdmin.value || state.adminOverviewLoading) return null
+    const version = sessionVersion
+    state.adminOverviewLoading = true
+    try {
+      const overview = await request('/api/v1/admin/overview')
+      if (isCurrentSession(version)) state.adminOverview = overview
+      return overview
+    } catch (cause) {
+      showError(cause)
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminOverviewLoading = false
+    }
+  }
+
+  async function loadAdminUsers(options = {}) {
+    if (!isAdmin.value || state.adminUsersLoading) return null
+    const append = options.append === true
+    const page = Number.isInteger(options.page)
+      ? options.page
+      : (append ? state.adminUsersPage + 1 : 0)
+    const version = sessionVersion
+    state.adminUsersLoading = true
+    try {
+      const params = new URLSearchParams({ page: String(page), size: String(ADMIN_PAGE_SIZE) })
+      const query = state.adminQuery.trim()
+      if (query) params.set('query', query)
+      const result = await request(`/api/v1/admin/users?${params.toString()}`)
+      if (isCurrentSession(version)) {
+        state.adminUsers = result.items || []
+        state.adminUsersTotal = Number(result.totalElements || 0)
+        state.adminUsersPage = Number(result.page || 0)
+        state.adminUsersHasNext = Boolean(result.hasNext)
+      }
+      return result
+    } catch (cause) {
+      showError(cause)
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminUsersLoading = false
+    }
+  }
+
+  async function updateAdminUserStatus(username, enabled) {
+    if (!isAdmin.value || !username || state.adminUserAction) return null
+    const version = sessionVersion
+    state.adminUserAction = username
+    clearError()
+    try {
+      const updated = await request(`/api/v1/admin/users/${encodeURIComponent(username)}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ enabled })
+      })
+      if (isCurrentSession(version)) {
+        const index = state.adminUsers.findIndex((item) => item.username === username)
+        if (index >= 0) state.adminUsers.splice(index, 1, updated)
+        await loadAdminOverview()
+        await loadAdminAuditLogs({ page: 0 })
+      }
+      return updated
+    } catch (cause) {
+      showError(cause)
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminUserAction = null
+    }
+  }
+
+  async function loadAdminFeedback(options = {}) {
+    if (!isAdmin.value || state.adminFeedbackLoading) return null
+    const page = Number.isInteger(options.page) ? options.page : 0
+    const version = sessionVersion
+    state.adminFeedbackLoading = true
+    try {
+      const params = new URLSearchParams({ page: String(page), size: String(ADMIN_PAGE_SIZE) })
+      if (state.adminFeedbackStatus && state.adminFeedbackStatus !== 'ALL') {
+        params.set('status', state.adminFeedbackStatus)
+      }
+      const query = state.adminFeedbackQuery.trim()
+      if (query) params.set('query', query)
+      const result = await request(`/api/v1/admin/feedback?${params.toString()}`)
+      if (isCurrentSession(version)) {
+        state.adminFeedback = result.items || []
+        state.adminFeedbackTotal = Number(result.totalElements || 0)
+        state.adminFeedbackPage = Number(result.page || 0)
+        state.adminFeedbackHasNext = Boolean(result.hasNext)
+      }
+      return result
+    } catch (cause) {
+      showError(cause)
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminFeedbackLoading = false
+    }
+  }
+
+  async function updateAdminFeedbackStatus(recommendationId, status) {
+    if (!isAdmin.value || !recommendationId || state.adminFeedbackAction) return null
+    const version = sessionVersion
+    state.adminFeedbackAction = `${recommendationId}:${status}`
+    clearError()
+    try {
+      const updated = await request(`/api/v1/admin/feedback/${recommendationId}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status })
+      })
+      if (isCurrentSession(version)) {
+        const index = state.adminFeedback.findIndex((item) => item.recommendationId === recommendationId)
+        if (index >= 0) state.adminFeedback.splice(index, 1, updated)
+        await loadAdminOverview()
+        await loadAdminAuditLogs({ page: 0 })
+        if (state.adminFeedbackStatus !== 'ALL' && state.adminFeedbackStatus !== updated.moderationStatus) {
+          await loadAdminFeedback({ page: state.adminFeedbackPage })
+        }
+      }
+      return updated
+    } catch (cause) {
+      showError(cause)
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminFeedbackAction = null
+    }
+  }
+
+  async function loadAdminTrendContents(options = {}) {
+    if (!isAdmin.value || state.adminTrendLoading) return null
+    const page = Number.isInteger(options.page) ? options.page : 0
+    const version = sessionVersion
+    state.adminTrendLoading = true
+    try {
+      const params = new URLSearchParams({ page: String(page), size: String(ADMIN_PAGE_SIZE) })
+      if (state.adminTrendStatus && state.adminTrendStatus !== 'ALL') {
+        params.set('status', state.adminTrendStatus)
+      }
+      const query = state.adminTrendQuery.trim()
+      if (query) params.set('query', query)
+      const result = await request(`/api/v1/admin/trends/contents?${params.toString()}`)
+      if (isCurrentSession(version)) {
+        state.adminTrendContents = result.items || []
+        state.adminTrendTotal = Number(result.totalElements || 0)
+        state.adminTrendPage = Number(result.page || 0)
+        state.adminTrendHasNext = Boolean(result.hasNext)
+      }
+      return result
+    } catch (cause) {
+      showError(cause)
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminTrendLoading = false
+    }
+  }
+
+  async function runAdminTrendAiReview(limit = 10) {
+    if (!isAdmin.value || state.adminTrendAction) return null
+    const version = sessionVersion
+    state.adminTrendAction = 'ai-review'
+    clearError()
+    try {
+      const run = await request(`/api/v1/admin/trends/ai-review?limit=${encodeURIComponent(limit)}`, {
+        method: 'POST'
+      })
+      if (isCurrentSession(version)) {
+        state.adminTrendRun = run
+        await loadAdminTrendContents({ page: state.adminTrendPage })
+        await loadAdminAuditLogs({ page: 0 })
+      }
+      return run
+    } catch (cause) {
+      showError(cause)
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminTrendAction = null
+    }
+  }
+
+  async function retryAdminTrendAi(id) {
+    if (!isAdmin.value || !id || state.adminTrendAction) return null
+    const version = sessionVersion
+    state.adminTrendAction = `retry:${id}`
+    clearError()
+    try {
+      const updated = await request(`/api/v1/admin/trends/contents/${encodeURIComponent(id)}/retry-ai`, {
+        method: 'POST'
+      })
+      if (isCurrentSession(version)) {
+        await loadAdminTrendContents({ page: state.adminTrendPage })
+        await loadAdminAuditLogs({ page: 0 })
+      }
+      return updated
+    } catch (cause) {
+      showError(cause)
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminTrendAction = null
+    }
+  }
+
+  async function finalizeAdminTrendReview(id, status, note = '') {
+    if (!isAdmin.value || !id || !status || state.adminTrendAction) return null
+    const version = sessionVersion
+    state.adminTrendAction = `review:${id}`
+    clearError()
+    try {
+      const updated = await request(`/api/v1/admin/trends/contents/${encodeURIComponent(id)}/review`, {
+        method: 'PUT',
+        body: JSON.stringify({ status, note })
+      })
+      if (isCurrentSession(version)) {
+        await loadAdminTrendContents({ page: state.adminTrendPage })
+        await loadAdminAuditLogs({ page: 0 })
+        await loadTrends()
+      }
+      return updated
+    } catch (cause) {
+      showError(cause)
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminTrendAction = null
+    }
+  }
+
+  async function updateAdminTrendVisibility(id, hidden) {
+    if (!isAdmin.value || !id || state.adminTrendAction) return null
+    const version = sessionVersion
+    state.adminTrendAction = `visibility:${id}`
+    clearError()
+    try {
+      const updated = await request(`/api/v1/admin/trends/${encodeURIComponent(id)}/visibility`, {
+        method: 'PUT',
+        body: JSON.stringify({ hidden })
+      })
+      if (isCurrentSession(version)) {
+        const index = state.adminTrendContents.findIndex((item) => item.id === id)
+        if (index >= 0) state.adminTrendContents.splice(index, 1, updated)
+        await loadAdminAuditLogs({ page: 0 })
+        await loadTrends()
+      }
+      return updated
+    } catch (cause) {
+      showError(cause)
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminTrendAction = null
+    }
+  }
+
+  async function loadAdminAuditLogs(options = {}) {
+    if (!isAdmin.value || state.adminAuditLoading) return null
+    const page = Number.isInteger(options.page) ? options.page : 0
+    const version = sessionVersion
+    state.adminAuditLoading = true
+    try {
+      const params = new URLSearchParams({ page: String(page), size: String(ADMIN_PAGE_SIZE) })
+      if (state.adminAuditAction) params.set('action', state.adminAuditAction)
+      if (state.adminAuditOutcome) params.set('outcome', state.adminAuditOutcome)
+      const result = await request(`/api/v1/admin/audit-logs?${params.toString()}`)
+      if (isCurrentSession(version)) {
+        state.adminAuditLogs = result.items || []
+        state.adminAuditTotal = Number(result.totalElements || 0)
+        state.adminAuditPage = Number(result.page || 0)
+        state.adminAuditHasNext = Boolean(result.hasNext)
+      }
+      return result
+    } catch (cause) {
+      showError(cause)
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminAuditLoading = false
     }
   }
 
@@ -829,10 +1221,20 @@ export function useFashionApp() {
     if (view === 'wardrobe' && !state.wardrobe.length) await loadWardrobe()
     if (view === 'history') await loadHistory()
     if (view === 'profile' && !state.profile) await loadProfile()
+    if (view === 'admin' && isAdmin.value) {
+      if (!state.adminOverview) await loadAdminOverview()
+      if (!state.adminUsers.length && !state.adminUsersTotal) await loadAdminUsers()
+      if (!state.adminFeedback.length && !state.adminFeedbackTotal) await loadAdminFeedback()
+      if (!state.adminTrendContents.length && !state.adminTrendTotal) await loadAdminTrendContents()
+      if (!state.adminAuditLogs.length && !state.adminAuditTotal) await loadAdminAuditLogs()
+    }
   }
 
   async function selectView(view, options = {}) {
-    const nextView = VALID_VIEWS.has(view) ? view : 'home'
+    const requestedView = VALID_VIEWS.has(view) ? view : 'home'
+    const nextView = requestedView === 'admin' && state.authPhase === 'authenticated' && !isAdmin.value
+      ? 'home'
+      : requestedView
     state.activeView = nextView
     state.searchOpen = false
     state.notificationsOpen = false
@@ -845,7 +1247,12 @@ export function useFashionApp() {
 
   function syncViewFromLocation() {
     const view = window.location.hash.slice(1)
-    const nextView = VALID_VIEWS.has(view) ? view : 'home'
+    const requestedView = VALID_VIEWS.has(view) ? view : 'home'
+    const nextView = requestedView === 'admin' && state.authPhase === 'authenticated' && !isAdmin.value
+      ? 'home'
+      : requestedView === 'home' && state.authPhase === 'authenticated' && isAdmin.value
+        ? 'admin'
+        : requestedView
     if (view !== nextView) window.history.replaceState(null, '', `#${nextView}`)
     selectView(nextView, { updateHistory: false, instant: true })
   }
@@ -865,6 +1272,13 @@ export function useFashionApp() {
       state.authUser = user
       state.authPhase = 'authenticated'
       state.authError = ''
+      if (state.activeView === 'admin' && !isAdmin.value) {
+        state.activeView = 'home'
+        window.history.replaceState(null, '', '#home')
+      } else if (isAdmin.value && state.activeView === 'home') {
+        state.activeView = 'admin'
+        window.history.replaceState(null, '', '#admin')
+      }
       await loadPrivateData()
       await loadStartupWeather()
     } catch (cause) {
@@ -884,6 +1298,7 @@ export function useFashionApp() {
 
   return {
     state,
+    isAdmin,
     categories,
     wardrobeStats,
     savedHistory,
@@ -906,9 +1321,23 @@ export function useFashionApp() {
     clearError,
     clearWeather,
     loadTrends,
+    useTrend,
+    clearTrendReference,
+    refreshTrendSources,
     loadWardrobe,
     loadHistory,
     loadProfile,
+    loadAdminOverview,
+    loadAdminUsers,
+    updateAdminUserStatus,
+    loadAdminFeedback,
+    updateAdminFeedbackStatus,
+    loadAdminTrendContents,
+    runAdminTrendAiReview,
+    retryAdminTrendAi,
+    finalizeAdminTrendReview,
+    updateAdminTrendVisibility,
+    loadAdminAuditLogs,
     saveProfile,
     loadWeather,
     loadLocalWeather,

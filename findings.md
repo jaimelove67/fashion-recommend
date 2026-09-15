@@ -345,3 +345,104 @@
 - 浏览器验收中的 1440px 页面 `scrollWidth` 与视口一致，助手抽屉为 460px 宽并锁定页面滚动；390px 下改为底部抽屉，输入、快捷按钮和关闭操作均留在视口内。
 - 对抗用例验证：不含城市的自然语言输入停留在助手内提示补充，不发送不完整请求；Escape 和遮罩点击均关闭抽屉；图片失败继续走已有 fallback；减少动效偏好下抽屉和发送按钮不再播放动画。
 - 端到端测试需使用仓库定义的 `docker-compose.e2e.yml` 关闭模型调用；普通开发配置下模型请求失败会得到 `request-failed`，属于运行配置差异，不应被误判为助手 UI 失败。
+
+## 2026-09-14 管理员功能第一批初始发现
+
+- 当前后端已有 `app_users(username, password_hash, enabled)` 和 `app_authorities(username, authority)`；普通注册只授予 `ROLE_USER`，暂未提供管理员 API、管理员控制器或管理页。
+- 现有安全边界以登录 Session/CSRF 和认证 Principal 为基础，个人业务接口已按 Principal 隔离；管理员路径必须新增服务端 `ROLE_ADMIN` 保护，不能只依赖前端导航隐藏。
+- 第一批最小闭环确定为管理员概览、分页账号查询、启用/停用账号；统计只返回聚合计数，账号列表不返回密码哈希或衣橱/推荐明细。
+- `app_users.enabled` 可直接支持账号停用并影响 Spring Security 后续认证，无需新建状态表；停用当前管理员的自锁风险需要在服务层拒绝。
+- 管理员页面是否显示取决于 `/api/v1/auth/me` 的 authority 响应；若当前响应不含 authority，需要先扩展认证响应而不改变已有 username 字段。
+
+## 2026-09-14 管理员功能权限审计补充
+
+- `SecurityConfig` 当前只对公开接口放行，其余请求统一 `.authenticated()`，尚无 `/api/v1/admin/**` 的 `ROLE_ADMIN` 匹配；新增管理路径必须在通用 authenticated 规则之前声明管理员角色。
+- `AuthUserResponse` 当前只有 `username`；登录成功处理器和 `/auth/me` 都只构造用户名，前端无法从会话响应可靠判断管理员身份。扩展为附加 authorities 字段可保持旧的 `data.username` 兼容。
+- `AuthService.register` 只创建 `ROLE_USER`，管理员账号应通过受控数据库种子/测试夹具授予 `ROLE_ADMIN`，不能开放普通注册自选角色。
+- `app_users` 没有创建时间字段；本轮账号列表不伪造注册时间，返回用户名、启用状态和角色即可；后续若需审计时间再单独迁移。
+- 现有个人数据仓储都以 `user_id` 过滤；管理员概览可通过聚合 `COUNT(*)` 读取数量，但账号列表不应复用或扩展到衣物/推荐明细查询。
+
+## 2026-09-14 管理员功能测试反例
+
+- 首次 `AdminControllerTest` 的 H2 执行账号模糊查询失败，错误为 `Error in LIKE ESCAPE: "\\\\"`；根因是 Java SQL 字符串生成了两个反斜杠作为 ESCAPE 字符，而 SQL 只接受单个字符。
+- 该失败证明需要同时关注 H2/PostgreSQL 方言下的 LIKE 转义；修复目标是让 SQL 产生 `ESCAPE '\\'`（SQL 层单个反斜杠），并保留 `%`、`_`、反斜杠的输入转义。
+
+## 2026-09-14 管理员功能全量回归发现
+
+- 新增管理员测试独立运行 5/5 通过；全量 `mvn test` 汇总 81 项时，`AuthenticationIntegrationTest` 的 CSRF 契约失败，`/api/v1/auth/csrf` 返回 `headerName=X-CSRF-TOKEN` 而既有前端/测试契约要求 `X-XSRF-TOKEN`。
+- 该现象不能直接归因于管理员代码；需要对比单类运行与全量运行的 Spring TestContext、`SecurityConfig` 和 `SessionCookieConfigurationTest`，确认是否有测试配置缓存/覆盖后再做最小修复。
+- 单独运行 `AuthenticationIntegrationTest` 已通过，说明 `SecurityConfig` 的 `CookieCsrfTokenRepository` 在干净上下文中确实返回 `X-XSRF-TOKEN`；全量失败与测试顺序/共享上下文相关，当前未发现第二条安全过滤链或显式测试覆盖。
+- 最小顺序复现第一次被 PowerShell 命令解析器拦截，原因是 `-Dtest` 值中的逗号未加引号；这次失败不涉及 Java/Maven，后续改用带引号的系统属性。
+- 带引号的组合运行已完成：管理员测试 5/5 通过，认证测试 2 项中 1 项失败；失败响应仍为 Session CSRF 的 `X-CSRF-TOKEN`。`SecurityConfig` 源码与编译产物都仍配置为 Cookie CSRF + `X-XSRF-TOKEN`，且未找到第二条过滤器链或测试配置覆盖。
+- 进一步隔离确认：不含 `.with(csrf())` 的管理员测试可与认证测试组合通过，含写请求 CSRF 的管理员测试才触发污染。Spring Security Test 的 `csrf()` 会通过 `WebTestUtils` 反射修改共享 `CsrfFilter.tokenRepository`，替换为包裹 `HttpSessionCsrfTokenRepository` 的测试仓储；这属于测试上下文共享副作用，不是生产配置变化。
+
+### 管理员浏览器对抗补充
+
+- 运行容器重建后，唯一临时管理员登录成功；管理导航出现，概览返回聚合计数，账号列表支持分页和用户名搜索，当前登录账号的状态按钮被禁用。
+- 普通 `demo-user` 从 `#admin` 登录后自动回到 `#home`，导航不显示“管理”；该验证发现并修复了登录流程遗漏的路由纠正。
+- 临时管理员登录会按现有应用启动逻辑自动生成 1 条空风格档案；清理时必须显式删除该档案，再删除唯一 authority 和用户记录。
+## 2026-09-14 管理员账号写入
+
+- 用户请求更新数据库后，先确认 `demo-admin` 不存在，再在当前 PostgreSQL 只插入启用的 `demo-admin` 与 `ROLE_ADMIN`。
+- 未执行会重置 `demo-user` 的完整 seed；写后校验结果为 `demo-admin:true:1`，表示账号已启用且拥有一个管理员角色。
+
+## 2026-09-14 管理员运营后台第二批初步决策
+
+- 当前系统已有 `recommendation_feedback`、推荐审计字段和图片清理任务，适合先实现“反馈审核 + 推荐运行概览 + 操作审计”；仓库没有独立公共服装目录表，不新增没有数据来源支撑的服装 CRUD。
+- 管理后台保留统一登录和品牌外壳，但管理区应使用独立侧栏/工作台信息架构；普通用户首页不需要复制到后台。
+- 数据库更新必须采用新的 Flyway 迁移并兼容 H2/PostgreSQL；完整 demo seed 会重置 `demo-user`，本轮只增加结构和可追踪的管理员操作数据，不直接重跑完整 seed。
+- 管理概览的“成功率”不能把所有推荐都称为模型成功：`engine = 'llm'` 视为实际 LLM 结果，`fallback_reason IS NOT NULL` 视为规则降级；零推荐时前端应显示“暂无数据”而不是 0% 的误导性成功率。
+- 反馈审核状态使用稳定枚举 `PENDING`、`REVIEWED`、`RESOLVED`；用户编辑反馈后重新进入 `PENDING`，否则后台会把旧处理结果误认为当前反馈状态。
+- 管理审计日志不使用目标表外键，保证未来账号清理不会删除治理证据；操作者仍由已认证的 `Principal` 提供，不能由请求体传入。
+
+## 2026-09-14 管理员运营后台第二批最终验证
+
+- H2 全量测试 84/84 通过；Flyway 测试覆盖空库迁移、基线升级和 V4 表/索引存在性，未修改既有 V1–V3 迁移。
+- 运行中的 PostgreSQL schema history 已到 v4；`admin_audit_logs` 和反馈治理字段存在，`demo-admin`/`demo-user` 角色分别为 `ROLE_ADMIN`/`ROLE_USER`，业务数据计数保持为 132/13/31/17。
+- 管理概览实际显示 132 个账号、31 条推荐、17 条待处理反馈、9 条 LLM 结果和 18 条规则降级结果；这些数字直接来自数据库聚合，而不是前端硬编码。
+- 浏览器管理员流程通过：登录自动进入 `#admin`，运营总览、账号与权限、反馈审核、操作日志均可切换；反馈页只返回用户、评分、处理状态和推荐上下文元数据，不返回推荐正文、衣物图片或私有衣橱。
+- 浏览器普通用户反例通过：`demo-user` 登录后为 `#home`，导航无管理入口；在保持普通用户会话时用 `goto #admin`，应用仍回到 `#home`。
+- 390px 视口反例通过：管理工作台侧栏折叠为页面菜单，四个分区仍可访问，概览内容没有发现根布局横向溢出。
+- 浏览器首次加载的 401 仅来自未认证会话检查；另发现并修复了 LoginView 账号 pattern 中未转义连字符导致的 Chromium Unicode Sets 控制台错误，重新构建后该错误消失。
+
+## 2026-09-14 管理员运营后台实现边界
+
+- 后台没有公共服装目录 CRUD，因为当前 schema 没有公共服装数据来源；使用真实业务聚合和衣物识别/图片清理队列指标表达运营状态。
+- 推荐运行卡将 `engine = 'llm'` 与 `fallback_reason IS NOT NULL` 分开统计，不把规则降级结果包装成模型成功；基础设施监控和趋势写入仍属于后续扩展。
+
+## 2026-09-15 趋势实现开始
+- 当前 TrendService 只取首个成功源，失败回退开发样本；无日周快照和多源合并。
+- Douyin 分支 db6d734 只支持单链接图集/视频下载，无内容发现、封面或抽帧。18 项基础离线测试本轮复跑通过；真实图集尚未验证。
+- 推荐页主图来自衣橱；现有趋势源使用 freshness/completeness 评分，不能标为平台热度。
+- 官方抖音主题榜单公开列表未含穿搭；小红书/微博权限须实测。当前工具无现成社交连接器，CLI xhs 未安装。
+
+## 2026-09-15 管理员容器旧页面根因与验证
+
+- 运行容器内的前端静态目录已经是新版本，但已有浏览器实际加载旧入口引用的 `index-CFraNbe7.js`；新镜像中的当前包为带新 hash 的前端资产。根因之一是 Nginx 没有为 SPA 入口页设置重新验证策略。
+- 管理员首次登录路径已有 `#home -> #admin`，但页面重新加载/初始 hash 同步时，`syncViewFromLocation()` 仍允许已认证管理员停留在 `#home`；这解释了“导航栏多一个管理入口但主页面仍是普通用户首页”。
+- 修复后，`syncViewFromLocation()` 同时保护两种方向：管理员从 `#home` 进入 `#admin`，普通用户从 `#admin` 回到 `#home`；后端 `ROLE_ADMIN` API 保护不变。
+- 对抗用例：管理员登录后强制访问 `/#home`。修复前 E2E 失败并停在 `#home`；修复后 E2E 1/1 通过，当前 Docker 可视化检查地址为 `#admin` 且标题为“管理工作台”。
+- Docker 初次干净构建还暴露了趋势模块测试与当前 `TrendService(List<TrendSourceAdapter>, TrendRepository)` 契约不一致；当前工作树测试已对齐，未通过删除测试或跳过测试编译掩盖问题。
+
+## 2026-09-15 趋势审核 Workflow 设计决策
+
+- Workflow 是业务状态流转，不等同于 LangChain；本项目继续使用 Spring Boot `@Scheduled`、服务层状态机、PostgreSQL/H2 和现有百炼客户端即可实现。
+- 新趋势内容必须经过 `PENDING_AI → PENDING_HUMAN → APPROVED/REJECTED`；AI 失败进入 `AI_FAILED`，不能直接展示。人工通过后仍可被管理员下架，恢复时保留原审核证据。
+- AI 输出只允许结构化的审核建议（是否相关、风险等级、理由、建议标签），管理员拥有最终决定权，且可推翻 AI 结论。
+- 普通趋势查询的发布条件应为“人工通过 + 未隐藏”；抓取、AI 初审和管理员终审都不应把用户私有衣橱或完整外部页面正文带入审核记录。
+
+## 2026-09-15 趋势审核 Workflow 实现与验证
+
+- 最小实现由 `@Scheduled` + 数据库状态机 + `RestClient` 组成，不需要引入 LangChain、LangGraph、Camunda 或 Temporal；状态和审计记录本身就是可恢复的流程上下文。
+- V6 迁移后旧趋势内容默认进入 `PENDING_AI`，因此升级不会把历史抓取内容直接暴露给普通用户。当前运行库 Flyway 版本为 6，自动初审后 3 条内容均为 `PENDING_HUMAN`。
+- AI 客户端使用严格 JSON 契约，只接受 `PASS/REVIEW/REJECT` 与 `LOW/MEDIUM/HIGH`，并截断审核理由长度；禁用、缺少密钥、请求失败和响应非法都会进入稳定的 `AI_FAILED` 原因，不持久化原始异常。
+- 验证到的关键反例：AI 初审成功不能直接让公共查询返回内容；AI 失败不能自动发布；普通用户访问管理员审核接口被拒绝；抓取刷新后人工通过状态仍保留；人工通过后设置 `hidden` 才能下架/恢复。
+- Docker 的 E2E 覆盖以临时关闭 AI 的配置验证降级路径，7/7 通过；恢复正常 Compose 后 backend healthy、`/actuator/health` 为 UP，生产配置仍可由 `TREND_AI_REVIEW_*` 环境变量调整。
+
+## 2026-09-15 运营总览 Lieflat Charts 实现
+
+- 数据边界：当前后端只有一次性运营聚合，没有按日快照；因此不能画“增长趋势”或伪造时间序列。本轮只画两个可由现有字段诚实支撑的结论：推荐生成结果构成、账号启用构成。
+- 模板审计：推荐结果比较至少审计 F1 Rung Bars、F5 Tick Rows、F7 Stacked Rungs，选择 F1，因为当前只有 3 个引擎结果类别且“一档=一条记录”可数；账号构成至少审计 L14 Hundred Field、F4 Tick Donut、G4 Dot Waffle，选择 F4，因为两段百分比在运营后台中更紧凑，且不需要编造个体记录。
+- 实现没有把 lieflat-charts 的独立 HTML 当成新页面，而是把其 SVG 几何、灰阶、卡片四件套和 reveal 语法迁移到 Vue 的现有管理工作台；这样继续使用后端真实数据、现有路由和本地图标依赖，不增加 Chart.js/ECharts/CDN。
+- 反例验证：总账号数为 0 时不绘制假的 100% 刻度；推荐分类未覆盖总量时增加“未标记”而不是把缺口算成 LLM；刷新页面后图表仍从 `/api/v1/admin/overview` 重算，不依赖固定演示数字。
+- 视觉修复：首次实现发现异步数据加载后 IntersectionObserver 目标未及时建立，导致 SVG 保持 opacity 0；补充数据监听和可视区兜底 reveal 后，Docker 浏览器实测两个 SVG 均为 `is-visible`，刻度和标签正常显示。浅灰“未标记”系列提升为中灰以满足可读性。

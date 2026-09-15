@@ -38,6 +38,7 @@ public class RecommendationService {
     private final WeatherService weatherService;
     private final LlmRecommendationClient llmRecommendationClient;
     private final TransactionTemplate transactionTemplate;
+    private final com.fashion.recommendation.trend.TrendService trendService;
 
     public RecommendationService(
             WardrobeRepository wardrobeRepository,
@@ -46,7 +47,8 @@ public class RecommendationService {
             PersonalStyleProfileService profileService,
             WeatherService weatherService,
             LlmRecommendationClient llmRecommendationClient,
-            TransactionTemplate transactionTemplate) {
+            TransactionTemplate transactionTemplate,
+            com.fashion.recommendation.trend.TrendService trendService) {
         this.wardrobeRepository = wardrobeRepository;
         this.recommendationRepository = recommendationRepository;
         this.feedbackRepository = feedbackRepository;
@@ -54,10 +56,16 @@ public class RecommendationService {
         this.weatherService = weatherService;
         this.llmRecommendationClient = llmRecommendationClient;
         this.transactionTemplate = transactionTemplate;
+        this.trendService = trendService;
     }
 
     public Recommendation generate(String userId, RecommendationRequest request) {
         Instant startedAt = Instant.now();
+        TrendReference reference = null;
+        if (request.trendId() != null && !request.trendId().isBlank()) {
+            var item = trendService.reference(request.trendId());
+            reference = new TrendReference(item.id(), item.title(), item.sourceUrl(), item.topicTags(), item.summary());
+        }
         List<WardrobeItem> wardrobe = wardrobeRepository.findByUserId(userId).stream()
                 .filter(item -> !"NEEDS_MANUAL_REVIEW".equals(item.recognitionStatus()))
                 .toList();
@@ -67,13 +75,14 @@ public class RecommendationService {
 
         Map<Long, Double> itemRatings = feedbackRepository.averageRatingByItem(userId);
         WeatherSnapshot weather = weatherService.current(request.city());
-        List<WardrobeItem> ruleSelected = selectItems(wardrobe, weather.temperatureC(), itemRatings);
+        List<WardrobeItem> ruleSelected = selectItems(wardrobe, weather.temperatureC(), itemRatings,
+                reference == null ? List.of() : reference.styleTags());
         if (ruleSelected.size() < 2 || distinctCategoryCount(ruleSelected) < 2) {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "当前衣橱缺少可组合的不同类别衣物");
         }
 
         StyleProfile profile = profileService.current(userId);
-        RecommendationAttempt attempt = tryLlmRecommendation(request, wardrobe, weather, profile, itemRatings);
+        RecommendationAttempt attempt = tryLlmRecommendation(request, wardrobe, weather, profile, itemRatings, reference);
         RecommendationDraft draft = attempt.draft()
                 .orElseGet(() -> buildRuleRecommendation(request, ruleSelected, weather, profile));
         long generationLatencyMs = Math.max(0L, Duration.between(startedAt, Instant.now()).toMillis());
@@ -180,12 +189,13 @@ public class RecommendationService {
     }
 
     private static List<WardrobeItem> selectItems(
-            List<WardrobeItem> wardrobe, double temperature, Map<Long, Double> itemRatings) {
+            List<WardrobeItem> wardrobe, double temperature, Map<Long, Double> itemRatings, List<String> referenceTags) {
         List<String> categoryOrder = temperature < 18
                 ? List.of("外套", "上装", "下装", "鞋履", "配饰")
                 : List.of("上装", "下装", "鞋履", "外套", "配饰");
         List<WardrobeItem> ranked = wardrobe.stream()
-                .sorted(Comparator.comparingDouble((WardrobeItem item) -> feedbackScore(item, itemRatings)).reversed())
+                .sorted(Comparator.comparingDouble((WardrobeItem item) -> feedbackScore(item, itemRatings)
+                        + referenceTags.stream().filter(tag -> (item.name() + " " + item.style() + " " + item.category()).contains(tag)).count()).reversed())
                 .toList();
         Map<Long, WardrobeItem> selected = new LinkedHashMap<>();
         for (String category : categoryOrder) {
@@ -209,9 +219,9 @@ public class RecommendationService {
 
     private RecommendationAttempt tryLlmRecommendation(
             RecommendationRequest request, List<WardrobeItem> wardrobe, WeatherSnapshot weather, StyleProfile profile,
-            Map<Long, Double> itemRatings) {
+            Map<Long, Double> itemRatings, TrendReference reference) {
         LlmRecommendationContext context = new LlmRecommendationContext(
-                request.occasion().trim(), request.styleHint(), wardrobe, weather, profile, itemRatings);
+                request.occasion().trim(), request.styleHint(), wardrobe, weather, profile, itemRatings, reference);
         Optional<LlmRecommendationResult> optionalResult;
         try {
             optionalResult = llmRecommendationClient.recommend(context);
@@ -318,6 +328,8 @@ public class RecommendationService {
         if (!profile.stylePreferences().isEmpty()) {
             reason.append("，并参考已保存的“").append(String.join("、", profile.stylePreferences())).append("”风格偏好");
         }
+        if (request.trendId() != null && !request.trendId().isBlank())
+            reason.append("。已按参考风格标签匹配现有衣物；当前为基础规则结果，不代表复现参考图");
         return reason.append("。").toString();
     }
 

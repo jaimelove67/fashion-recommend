@@ -25,7 +25,7 @@ try {
         throw 'Demo data seed failed. Confirm the backend has started once so Flyway has initialized the tables.'
     }
 
-    Write-Host 'Demo data is ready. Sign in with demo-user / demo-password-2026.'
+    Write-Host 'Demo data is ready. Sign in with demo-user / demo-password-2026, or demo-admin / demo-password-2026 for the admin surface.'
 }
 finally {
     Pop-Location

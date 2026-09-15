@@ -2,11 +2,11 @@
 
 “知己”是一个面向个人衣橱的智能穿搭推荐毕业设计项目。用户可以录入或上传衣物，填写城市、场合和风格要求，系统结合天气与衣橱数据生成可解释的搭配方案，并支持保存、反馈和历史查看。
 
-当前项目的验收边界是“账号注册/登录 -> 衣橱录入 -> 场景输入 -> 推荐生成 -> 保存反馈”的可运行闭环，属于毕业设计原型。账号系统采用本地用户名、密码和服务端会话，不包含第三方统一登录、找回密码、在线交易、虚拟试衣或后台管理。
+当前项目的验收边界是“账号注册/登录 -> 衣橱录入 -> 场景输入 -> 推荐生成 -> 保存反馈”的可运行闭环，另提供受 `ROLE_ADMIN` 保护的后台运营工作台（概览、账号治理、反馈审核、推荐运行数据和操作审计）。项目属于毕业设计原型，账号系统采用本地用户名、密码和服务端会话，暂不包含第三方统一登录、找回密码、在线交易或虚拟试衣。
 
 ## 技术栈
 
-- 前端：Vue 3、Vite、Lucide Vue，入口位于 frontend/。
+- 前端：Vue 3、Vite、Lucide Vue；运营总览使用本地 lieflat-charts 的 Lupi Basics 语法实现原生 SVG 图表，入口位于 frontend/。
 - 后端：Java 17、Spring Boot 3.4.2、Spring Web、Spring Security、JDBC、Validation、Flyway、Actuator，入口位于 backend/。
 - 数据与存储：PostgreSQL 16、MinIO 私有对象存储、Caffeine 进程内缓存。
 - 智能能力：阿里云百炼兼容 OpenAI Chat Completions 协议；文本推荐模型默认优先使用，视觉识别默认关闭。
@@ -106,6 +106,14 @@ mvn spring-boot:run
 密码：demo-password-2026
 ~~~
 
+管理员演示账号仅由本地 demo seed 创建，不应带入生产环境：
+
+~~~text
+用户名：demo-admin
+密码：demo-password-2026
+角色：ROLE_ADMIN
+~~~
+
 每次执行都会重置该演示账号的密码和业务数据，不影响其他账号。预置推荐标记为 `development-rule-v1`，不会伪装成真实模型结果；生产环境不应运行此脚本。
 
 ## 核心演示流程
@@ -117,6 +125,7 @@ mvn spring-boot:run
 5. 进入“推荐”，填写城市、场合和可选的风格要求，生成搭配。
 6. 查看天气、推荐单品和推荐理由，保存方案并提交满意度反馈。
 7. 进入“历史”查看已生成记录；“风潮”优先展示已配置的授权 JSON 趋势源，其次可读取服务端配置的公开网页源，不可用时显示明确标注的开发样本。
+8. 管理员进入独立的“管理工作台”，在“趋势内容审核”中运行 AI 初审，再对内容作人工终审；普通用户只看到人工通过且未下架的趋势。
 
 推荐至少需要两件可组合的、已完善的不同类别衣物。衣物为空、只剩待人工确认记录或类别无法组合时，接口会返回明确错误，不会伪造推荐结果。
 
@@ -126,15 +135,18 @@ mvn spring-boot:run
 - 每次生成都会持久化审计元数据：合法 LLM 结果保存真实 provider 元数据（provider call ID、模型名、prompt 版本与三类 token），规则降级只保存稳定的枚举式 fallback 原因，不保存异常原文。API 通过嵌套 `generationAudit` 返回这些字段，`engine` 仍保留在顶层。旧历史与降级路径保持为空，不伪造模型元数据。
 - BAILIAN_VISION_ENABLED 默认为 false。即使服务端已启用，仍需用户在每次上传时明确勾选 AI 识别；未同意、未启用或识别失败时，系统不会调用或不会采纳视觉模型结果，并要求人工确认不完整信息。
 - “风潮”在 `TREND_JSON_URL` 返回符合严格契约的授权数据，或 `TREND_WEB_URLS` 成功读取到公开网页内容时标记 `demoMode=false`；两类源均不可用时回退到明确标注的 10 条开发样本，风潮页按热度降序展示 Top 10 弧形画廊。网页适配器抽取 HTML/OpenGraph/JSON-LD 的标题、摘要、标签、发布时间、图片和来源链接，并生成“来源页信号评分”；该评分只表示新鲜度与内容完整度，不代表平台实时热度。
+- 趋势内容采用轻量审核工作流：抓取后进入 `PENDING_AI`，AI 只输出结构化的相关性、风险和理由，成功后进入 `PENDING_HUMAN`；AI 失败进入 `AI_FAILED`，管理员可以重试或填写说明后人工接管。只有人工 `APPROVED` 且 `hidden=false` 才能被普通趋势接口读取，AI 的 PASS/REJECT 都不能直接发布或驳回。
 - 登录后的全局天气条会优先请求浏览器当前位置；用户拒绝定位时可输入城市。天气由后端调用 Open-Meteo/wttr.in 并标注数据来源，当前位置坐标只保存在浏览器本地，不写入业务数据库。
 - 个人数据接口要求 Spring Security Session 认证，服务端从认证上下文取得用户身份；客户端自定义用户请求头不会改变身份。
 - 衣橱、推荐历史、反馈和个人风格档案均保存在 PostgreSQL 中。推荐历史接口按页返回，页码从 0 开始，默认每页 20 条、最大 50 条；`page * size` 不得超过 1,000,000，越界返回 400，限制深分页查询成本。到达此边界时 `hasNext=false`，`totalElements` 仍为该用户的实际记录总数。图片删除在数据库事务内写入清理任务，由后台调度器异步重试 MinIO 清理，避免对象存储瞬时故障阻塞业务删除。
+- 管理端接口由服务端 `ROLE_ADMIN` 强制保护：`/api/v1/admin/overview` 返回真实聚合指标，`/api/v1/admin/users` 与 `/api/v1/admin/users/{username}/status` 支持账号查询和启停治理，`/api/v1/admin/feedback` 与 `/api/v1/admin/feedback/{recommendationId}/status` 支持反馈筛选和处理，`/api/v1/admin/audit-logs` 支持管理操作审计查询。运营总览将推荐引擎结果和账号状态分别可视化，图表只使用当前数据库聚合，不虚构历史趋势。后台只返回脱敏元数据、反馈处理状态和推荐运行统计，不返回密码哈希、私有图片或推荐正文；普通用户、伪造 `X-User-Id` 或未认证请求均不能进入管理分支，当前管理员不能停用自己。
+- 趋势审核接口由同一 `ROLE_ADMIN` 边界保护：`/api/v1/admin/trends/contents` 查询审核队列，`/api/v1/admin/trends/ai-review` 触发 AI 初审，`/api/v1/admin/trends/contents/{id}/review` 完成人工终审，`/api/v1/admin/trends/{id}/visibility` 管理已通过内容的展示状态。
 
 ## 数据库迁移
 
-数据库结构由 Flyway 管理，运行时 SQL 初始化已关闭。V1 是兼容旧结构的基线迁移，V2 增加图片清理任务表，V3 为推荐增加审计元数据列：新数据库依次执行 V1、V2、V3；已有表但没有 Flyway 历史的旧数据库会先以版本 0 建立基线，再依次执行。迁移测试覆盖既有衣物数据保留、V2/V3 升级（旧推荐行保留且审计列为空）和重复启动不重复执行。
+数据库结构由 Flyway 管理，运行时 SQL 初始化已关闭。V1 是兼容旧结构的基线迁移，V2 增加图片清理任务表，V3 为推荐增加审计元数据列，V4 增加管理员治理，V5 增加趋势快照，V6 增加趋势 AI 初审与人工终审状态及审计字段：新数据库依次执行 V1 至 V6；已有表但没有 Flyway 历史的旧数据库会先以版本 0 建立基线，再依次执行。V6 不清除趋势内容，既有内容默认进入 `PENDING_AI` 隔离区，需完成 AI 初审和人工终审后才重新进入公共趋势。迁移测试覆盖既有衣物/推荐数据保留、V2/V3/V4/V5/V6 升级和重复启动不重复执行。
 
-`baseline-on-migrate=true` 只用于接管本项目旧数据库，`clean-disabled=true` 禁止 Flyway 清库。已执行的迁移文件不应修改；后续结构变化应新增 V2、V3 等迁移。迁移不能替代备份，升级包含重要数据的环境前仍应先备份 PostgreSQL。
+`baseline-on-migrate=true` 只用于接管本项目旧数据库，`clean-disabled=true` 禁止 Flyway 清库。已执行的迁移文件不应修改；后续结构变化应继续新增版本迁移。迁移不能替代备份，升级包含重要数据的环境前仍应先备份 PostgreSQL。
 
 这些边界的设计理由、安全失败方式和生产化替换方案见 [开发期边界与生产化路径](docs/development-boundaries.md)。
 
@@ -179,6 +191,10 @@ mvn spring-boot:run
 | BAILIAN_VISION_MODEL | qwen-vl-plus | 视觉识别模型 |
 | BAILIAN_ENDPOINT | 百炼兼容接口 | 模型请求地址 |
 | BAILIAN_CONNECT_TIMEOUT / BAILIAN_READ_TIMEOUT | 3s / 8s | 模型连接和读取超时 |
+| TREND_AI_REVIEW_ENABLED | true | 是否启用趋势 AI 初审；关闭时内容保持隔离 |
+| TREND_AI_REVIEW_MODEL | qwen-plus | 趋势 AI 初审使用的百炼模型 |
+| TREND_AI_REVIEW_INITIAL_DELAY / TREND_AI_REVIEW_INTERVAL | 30s / 300s | AI 初审调度器的首次延迟和间隔 |
+| TREND_AI_REVIEW_BATCH_SIZE | 10 | 每次自动初审最多处理的内容数 |
 
 授权趋势源变量：`TREND_JSON_URL`、`TREND_PLATFORM`、`TREND_WEB_URLS`、`TREND_WEB_PLATFORM`、`TREND_WEB_MAX_PAGE_CHARS`、`TREND_WEB_MAX_ARTICLES_PER_PAGE`、`TREND_CONNECT_TIMEOUT`、`TREND_READ_TIMEOUT`、`TREND_CACHE_TTL`。`TREND_JSON_URL` 与 `TREND_WEB_URLS` 都为空时使用开发样本。JSON 源必须返回只含 `items` 的对象；每条记录必须包含 `id`、`platform`、`title`、`topicTags`、`heatScore`、`publishedAt`、`sourceUrl`、`imageUrl`，可选 `summary`。条目数为 1-50，热度为 0-100 整数，时间为 ISO-8601，链接为 HTTP(S)，`imageUrl` 和 `summary` 可为 `null`。任一 JSON 条目约束失败时整批拒绝，不会把部分脏数据标记为实时趋势。
 

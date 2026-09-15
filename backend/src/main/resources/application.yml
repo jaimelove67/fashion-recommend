@@ -47,6 +47,13 @@ app:
     connect-timeout: ${BAILIAN_CONNECT_TIMEOUT:3s}
     read-timeout: ${BAILIAN_READ_TIMEOUT:8s}
   trends:
+    editorial-enabled: ${TREND_EDITORIAL_ENABLED:true}
+    import-directory: ${TREND_IMPORT_DIRECTORY:}
+    douyin-endpoint: ${TREND_DOUYIN_URL:}
+    xiaohongshu-endpoint: ${TREND_XIAOHONGSHU_URL:}
+    weibo-endpoint: ${TREND_WEIBO_URL:}
+    refresh-interval: ${TREND_REFRESH_INTERVAL:21600000}
+    initial-delay: ${TREND_INITIAL_DELAY:10000}
     endpoint: ${TREND_JSON_URL:}
     platform: ${TREND_PLATFORM:configured-feed}
     web-urls: ${TREND_WEB_URLS:}
@@ -56,6 +63,15 @@ app:
     connect-timeout: ${TREND_CONNECT_TIMEOUT:3s}
     read-timeout: ${TREND_READ_TIMEOUT:5s}
     cache-ttl: ${TREND_CACHE_TTL:15m}
+    # Trend content uses the same direct Bailian-compatible client for AI pre-review.
+    # AI can only move content into the human-review queue; it never publishes content.
+    ai-review-enabled: ${TREND_AI_REVIEW_ENABLED:true}
+    ai-review-model: ${TREND_AI_REVIEW_MODEL:${BAILIAN_MODEL:qwen-plus}}
+    ai-review-connect-timeout: ${TREND_AI_REVIEW_CONNECT_TIMEOUT:${BAILIAN_CONNECT_TIMEOUT:3s}}
+    ai-review-read-timeout: ${TREND_AI_REVIEW_READ_TIMEOUT:${BAILIAN_READ_TIMEOUT:8s}}
+    ai-review-initial-delay: ${TREND_AI_REVIEW_INITIAL_DELAY:30000}
+    ai-review-interval: ${TREND_AI_REVIEW_INTERVAL:300000}
+    ai-review-batch-size: ${TREND_AI_REVIEW_BATCH_SIZE:10}
   weather:
     primary-base-url: ${WEATHER_PRIMARY_BASE_URL:${WEATHER_BASE_URL:https://wttr.in}}
     fallback-geocoding-base-url: ${WEATHER_FALLBACK_GEOCODING_BASE_URL:https://geocoding-api.open-meteo.com}

@@ -20,6 +20,8 @@ app:
   bailian:
     model: qwen-plus-test
   trends:
+    editorial-enabled: false
+    initial-delay: 3600000
     endpoint: ""
     platform: configured-feed
     web-urls: ""
@@ -29,6 +31,10 @@ app:
     connect-timeout: 100ms
     read-timeout: 100ms
     cache-ttl: 1m
+    ai-review-enabled: false
+    ai-review-initial-delay: 3600000
+    ai-review-interval: 3600000
+    ai-review-batch-size: 10
   weather:
     primary-base-url: https://wttr.in
     fallback-geocoding-base-url: https://geocoding-api.open-meteo.com

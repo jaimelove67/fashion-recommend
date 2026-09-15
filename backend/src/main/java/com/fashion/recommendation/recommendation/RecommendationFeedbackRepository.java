@@ -36,20 +36,22 @@ public class RecommendationFeedbackRepository {
     public RecommendationFeedback save(String userId, Long recommendationId, RecommendationFeedbackRequest request) {
         Instant updatedAt = Instant.now();
         int updated = jdbcTemplate.update(
-                "UPDATE recommendation_feedback SET rating = ?, feedback_type = ?, comment = ?, updated_at = ? "
+                "UPDATE recommendation_feedback SET rating = ?, feedback_type = ?, comment = ?, updated_at = ?, "
+                        + "moderation_status = 'PENDING', handled_by = NULL, handled_at = NULL "
                         + "WHERE recommendation_id = ? AND user_id = ?",
                 request.rating(), request.feedbackType(), request.comment(), Timestamp.from(updatedAt), recommendationId, userId);
         if (updated == 0) {
             try {
                 jdbcTemplate.update(
-                        "INSERT INTO recommendation_feedback (recommendation_id, user_id, rating, feedback_type, comment, updated_at) "
-                                + "VALUES (?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO recommendation_feedback (recommendation_id, user_id, rating, feedback_type, comment, updated_at, moderation_status) "
+                                + "VALUES (?, ?, ?, ?, ?, ?, 'PENDING')",
                         recommendationId, userId, request.rating(), request.feedbackType(), request.comment(),
                         Timestamp.from(updatedAt));
             } catch (DuplicateKeyException exception) {
                 jdbcTemplate.update(
-                        "UPDATE recommendation_feedback SET rating = ?, feedback_type = ?, comment = ?, updated_at = ? "
-                                + "WHERE recommendation_id = ? AND user_id = ?",
+                        "UPDATE recommendation_feedback SET rating = ?, feedback_type = ?, comment = ?, updated_at = ?, "
+                                + "moderation_status = 'PENDING', handled_by = NULL, handled_at = NULL "
+                        + "WHERE recommendation_id = ? AND user_id = ?",
                         request.rating(), request.feedbackType(), request.comment(), Timestamp.from(updatedAt),
                         recommendationId, userId);
             }

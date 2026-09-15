@@ -64,6 +64,7 @@ public class SecurityConfig {
                                 "/api/v1/auth/csrf", "/api/v1/trends", "/api/v1/weather/**").permitAll()
                         .requestMatchers(HttpMethod.POST,
                                 "/api/v1/auth/login", "/api/v1/auth/register").permitAll()
+                        .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers(EndpointRequest.to("health", "info")).permitAll()
                         .requestMatchers(EndpointRequest.toAnyEndpoint()).denyAll()
                         .anyRequest().authenticated())
@@ -76,7 +77,7 @@ public class SecurityConfig {
                         .loginProcessingUrl("/api/v1/auth/login")
                         .successHandler((request, response, authentication) -> writeJson(
                                 response, objectMapper, HttpStatus.OK,
-                                ApiResponse.ok(new AuthUserResponse(authentication.getName()))))
+                                ApiResponse.ok(AuthUserResponse.from(authentication))))
                         .failureHandler((request, response, exception) -> writeJson(
                                 response, objectMapper, HttpStatus.UNAUTHORIZED,
                                 new ApiResponse<>(401, "用户名或密码错误", null)))

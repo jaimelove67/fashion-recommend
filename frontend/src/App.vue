@@ -21,12 +21,13 @@ import RecommendationView from './views/RecommendationView.vue'
 import HistoryView from './views/HistoryView.vue'
 import ProfileView from './views/ProfileView.vue'
 import LoginView from './views/LoginView.vue'
+import AdminView from './views/AdminView.vue'
 
 const fashion = reactive(useFashionApp())
 const searchInput = ref(null)
 const weatherOpen = ref(false)
 
-const navigation = [
+const baseNavigation = [
   { id: 'home', label: '首页', href: '#home' },
   { id: 'trend', label: '趋势', href: '#trend' },
   { id: 'recommend', label: '推荐', href: '#recommend' },
@@ -34,13 +35,22 @@ const navigation = [
   { id: 'history', label: '历史', href: '#history' }
 ]
 
+const isAdminWorkspace = computed(() => fashion.isAdmin && fashion.state.activeView === 'admin')
+const navigation = computed(() => {
+  if (isAdminWorkspace.value) return [{ id: 'admin', label: '管理后台', href: '#admin' }]
+  return fashion.state.authUser?.authorities?.includes('ROLE_ADMIN')
+    ? [...baseNavigation, { id: 'admin', label: '管理', href: '#admin' }]
+    : baseNavigation
+})
+
 const viewComponents = {
   home: HomeView,
   trend: TrendView,
   recommend: RecommendationView,
   wardrobe: WardrobeView,
   history: HistoryView,
-  profile: ProfileView
+  profile: ProfileView,
+  admin: AdminView
 }
 
 const currentView = computed(() => viewComponents[fashion.state.activeView] || HomeView)
@@ -48,7 +58,7 @@ const normalizedQuery = computed(() => fashion.state.globalQuery.trim().toLocale
 const searchResults = computed(() => {
   const query = normalizedQuery.value
   if (!query) return []
-  const views = navigation
+  const views = navigation.value
     .filter((item) => item.label.includes(query))
     .map((item) => ({ id: `view-${item.id}`, type: 'view', view: item.id, title: item.label, meta: '页面' }))
   const trends = fashion.state.trends
@@ -130,7 +140,7 @@ onBeforeUnmount(() => fashion.dispose())
 
   <LoginView v-else-if="fashion.state.authPhase === 'guest'" :app="fashion" />
 
-  <div v-else class="app-shell" @keydown.esc="closePanels">
+  <div v-else class="app-shell" :class="{ 'admin-workspace-shell': isAdminWorkspace }" @keydown.esc="closePanels">
     <header class="app-header">
       <PillNav
         class="app-pill-nav"

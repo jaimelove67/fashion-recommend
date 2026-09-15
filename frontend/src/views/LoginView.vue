@@ -653,7 +653,7 @@ onBeforeUnmount(() => {
                 autocomplete="username"
                 autocapitalize="none"
                 spellcheck="false"
-                pattern="[a-z0-9][a-z0-9_-]{2,31}"
+                pattern="[a-z0-9][a-z0-9_\-]{2,31}"
                 minlength="3"
                 maxlength="32"
                 required

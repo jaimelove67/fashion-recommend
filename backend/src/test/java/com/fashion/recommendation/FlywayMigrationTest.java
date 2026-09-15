@@ -35,14 +35,19 @@ class FlywayMigrationTest {
 
         MigrateResult firstMigration = flyway.migrate();
 
-        assertEquals(3, firstMigration.migrationsExecuted);
-        assertEquals("3", flyway.info().current().getVersion().getVersion());
+        assertEquals(6, firstMigration.migrationsExecuted);
+        assertEquals("6", flyway.info().current().getVersion().getVersion());
         assertEquals("旧衣物", jdbcTemplate.queryForObject(
                 "SELECT name FROM wardrobe_items WHERE id = 41", String.class));
         assertEquals("MANUAL", jdbcTemplate.queryForObject(
                 "SELECT recognition_status FROM wardrobe_items WHERE id = 41", String.class));
         assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM app_users", Integer.class));
         V1_INDEXES.forEach(indexName -> assertIndexExists(jdbcTemplate, indexName));
+        assertTableExists(jdbcTemplate, "admin_audit_logs");
+        assertIndexExists(jdbcTemplate, "idx_admin_audit_logs_created_id");
+        assertColumnExists(jdbcTemplate, "trend_contents", "moderation_status");
+        assertColumnExists(jdbcTemplate, "trend_contents", "ai_decision");
+        assertIndexExists(jdbcTemplate, "idx_trend_moderation_queue");
 
         int appliedBeforeRestart = flyway.info().applied().length;
         MigrateResult secondMigration = flyway.migrate();
@@ -68,7 +73,7 @@ class FlywayMigrationTest {
 
         MigrateResult migration = flyway.migrate();
 
-        assertEquals("3", flyway.info().current().getVersion().getVersion());
+        assertEquals("6", flyway.info().current().getVersion().getVersion());
         assertEquals("旧场合推荐", jdbcTemplate.queryForObject(
                 "SELECT summary FROM recommendations WHERE id = 91", String.class));
         assertEquals("development-rule-v1", jdbcTemplate.queryForObject(
@@ -87,6 +92,7 @@ class FlywayMigrationTest {
                 "SELECT generation_latency_ms FROM recommendations WHERE id = 91", Long.class));
         assertNull(jdbcTemplate.queryForObject(
                 "SELECT fallback_reason FROM recommendations WHERE id = 91", String.class));
+        assertTableExists(jdbcTemplate, "admin_audit_logs");
     }
 
     private static JdbcDataSource legacyDataSource() {
@@ -150,5 +156,23 @@ class FlywayMigrationTest {
                 Integer.class,
                 indexName.toUpperCase(Locale.ROOT));
         assertEquals(1, count, "missing index " + indexName);
+    }
+
+    private static void assertTableExists(JdbcTemplate jdbcTemplate, String tableName) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE UPPER(TABLE_NAME) = ?",
+                Integer.class,
+                tableName.toUpperCase(Locale.ROOT));
+        assertEquals(1, count, "missing table " + tableName);
+    }
+
+    private static void assertColumnExists(JdbcTemplate jdbcTemplate, String tableName, String columnName) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS "
+                        + "WHERE UPPER(TABLE_NAME) = ? AND UPPER(COLUMN_NAME) = ?",
+                Integer.class,
+                tableName.toUpperCase(Locale.ROOT),
+                columnName.toUpperCase(Locale.ROOT));
+        assertEquals(1, count, "missing column " + tableName + "." + columnName);
     }
 }

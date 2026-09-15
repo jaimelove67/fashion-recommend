@@ -108,6 +108,21 @@ test('logs in through the double-fish form and restores the session', async ({ p
   await expect(await authenticated.json()).toMatchObject({ code: 0, data: { username } })
 })
 
+test('routes a restored admin session to the admin workspace', async ({ page }) => {
+  await page.goto('/')
+  await expectCurrentAuthCopy(page)
+  await page.locator('input[name="username"]').fill('demo-admin')
+  await page.locator('input[name="password"]').fill('demo-password-2026')
+  await page.getByRole('button', { name: '登录知己', exact: true }).click()
+
+  await expect(page).toHaveURL(/#admin$/)
+  await expect(page.getByRole('heading', { name: '管理工作台', exact: true })).toBeVisible()
+
+  await page.goto('/#home')
+  await expect(page).toHaveURL(/#admin$/)
+  await expect(page.getByRole('heading', { name: '管理工作台', exact: true })).toBeVisible()
+})
+
 async function csrfHeaders(api) {
   const response = await api.get('/api/v1/auth/csrf')
   expect(response.status()).toBe(200)

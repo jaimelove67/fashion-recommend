@@ -8,8 +8,9 @@
 | --- | --- | --- | --- |
 | 本地账号与会话 | Spring Security、BCrypt、服务端 Session、CSRF | 匿名个人请求返回 401；伪造用户头无效 | OIDC/统一身份、找回密码、登录限流和审计 |
 | 规则推荐 fallback | `llm` 失败时显式返回 `development-rule-v1` | 只使用当前用户已完善衣物，不接受模型编造 ID | 模型网关、熔断告警、质量和降级率监控 |
-| 趋势数据源 | 可配置授权 JSON 源或服务端配置的公开网页源，失败时返回 `demoMode=true` 的开发样本 | 严格校验并限制网页采集目标；不接受前端任意 URL，不把派生评分冒充平台热度 | 授权源治理、签名、快照存档、运营审核和 robots/条款审查 |
+| 趋势数据源 | 可配置授权 JSON 源或服务端配置的公开网页源；内容经过 AI 初审和人工终审后才进入公共趋势 | 严格校验并限制网页采集目标；不接受前端任意 URL，不把派生评分冒充平台热度；AI 失败或未人工通过时保持隔离 | 授权源治理、签名、快照存档、细粒度审核权限和 robots/条款审查 |
 | 视觉识别 | 服务端开关与本次上传用户同意同时成立才允许调用 | 默认不调用；信息不完整时人工确认 | 同意审计、配额、图片保留期限和删除策略 |
+| 管理员运营后台 | `ROLE_ADMIN` 保护的概览、账号治理、反馈审核、趋势 AI 初审/人工终审、推荐运行聚合和操作审计 | 普通用户/匿名请求分别返回 403/401；后台不返回密码、私有图片和推荐正文；AI 不能直接发布；管理员不能停用自己 | 细粒度权限、审批流、批量治理、实时基础设施监控和告警 |
 
 ## 本地账号与 Session
 
@@ -18,6 +19,32 @@
 所有写请求受 CSRF 保护。前端先从 `GET /api/v1/auth/csrf` 获取 token，再发送服务端声明的请求头；403 时只刷新一次 token。Session 过期或退出后，前端清空私有状态，进行中的旧请求也不能回写新会话。
 
 这仍是本地账号原型：没有邮箱验证、找回密码、多因素认证、登录限流或设备管理。公网部署至少应启用 HTTPS、设置 `SESSION_COOKIE_SECURE=true`、关闭公开注册或接入 OIDC，并增加认证事件审计。
+
+## 管理员运营第一批
+
+当前管理端只做平台级治理，不把管理员权限扩展成读取普通用户私有内容的后门。`GET /api/v1/admin/overview` 返回账号、衣物和推荐的聚合计数；`GET /api/v1/admin/users` 按用户名分页返回脱敏账号元数据；`PUT /api/v1/admin/users/{username}/status` 修改目标账号的 `enabled` 状态。所有 `/api/v1/admin/**` 请求由 Spring Security 的 `ROLE_ADMIN` 在服务端保护，前端是否显示“管理”入口不构成安全边界。
+
+账号停用会影响后续登录；当前登录管理员不能停用自己，以避免管理入口被自锁。第一批尚未包含密码重置、角色编辑、批量操作、趋势配置写入、审计日志查询或管理员对用户衣橱/推荐内容的查看。`docker/postgres/demo/seed.sql` 中的 `demo-admin` 仅用于本地演示，生产环境必须使用受控账号 provisioning，不得沿用示例密码。
+
+## 管理员运营后台第二批
+
+当前前端管理区使用独立工作台布局，包含运营总览、账号与权限、反馈审核、趋势内容审核和操作日志五个真实模块。概览从现有业务表聚合账号启用状态、衣物/推荐/收藏数量、反馈平均评分、LLM 结果与规则降级数量、待处理反馈、待人工识别衣物和图片清理队列；推荐“成功”只按已落库的真实 `engine=llm` 统计，零数据时不显示虚假的成功率。运营总览的推荐运行和账号构成图表采用本地 lieflat-charts Lupi Basics 的 F1 Rung Bars、F4 Tick Donut 模板语法，以原生 SVG 按真实记录/百分比绘制，不添加没有快照支撑的时间趋势。
+
+反馈审核在 V4 中给 `recommendation_feedback` 增加 `moderation_status`、`handled_by` 和 `handled_at`。管理员可以把反馈标记为待处理、已查看或已解决，但不改变用户原始评分和评论；用户重新提交反馈时状态会回到 `PENDING`。账号状态变化和反馈处理均写入 `admin_audit_logs`，日志只保存操作者、动作、对象、结果和安全说明。
+
+当前没有独立的公共服装目录表，因此后台不提供虚假的服装上架、下架或图片编辑入口；用户私有衣橱、推荐正文和图片仍按隐私边界隔离。推荐运行区展示已持久化的 LLM/规则降级聚合，不等同于完整的基础设施监控或告警系统。
+
+## 趋势内容轻量审核 Workflow（V6）
+
+趋势采集与管理员会话解耦：定时采集任务只负责把经过来源契约校验的条目写入 `trend_contents`，新条目默认是 `PENDING_AI`。独立的 Spring `@Scheduled` 任务按批读取待初审内容，调用现有百炼兼容接口；审核请求只包含平台、标题、摘要、标签、来源链接、发布时间、是否有图片和作者等必要元数据，不携带用户私有衣橱，也不把完整外部网页正文直接送入模型。
+
+状态流转是业务层的轻量状态机，不是 LangChain：
+
+`PENDING_AI → PENDING_HUMAN → APPROVED / REJECTED`
+
+模型输出严格限制为 `decision`、`riskLevel`、`reason` 三个 JSON 字段。无论 AI 建议 PASS、REVIEW 还是 REJECT，服务端都只把内容放入人工队列；请求失败、Key 缺失或 JSON 不合规时进入 `AI_FAILED`，保存稳定错误码，不保存异常原文。管理员可以重试；若需要直接处理 AI 失败内容，必须填写人工说明。人工通过会清除隐藏标记，人工驳回会隐藏内容；已通过内容仍可被管理员单独下架或恢复，但恢复不会改变审核结论。
+
+普通趋势接口的发布条件是 `moderation_status='APPROVED' AND hidden=FALSE`。因此“抓取成功”“AI 通过”与“对普通用户公开”是三个不同事件，任何一个中间状态都不能绕过人工终审。审核状态、模型名、provider call ID、prompt 版本、审核人、审核时间和说明保存在 V6 新增字段中，管理动作写入已有 `admin_audit_logs`。
 
 ## 规则推荐 fallback
 
@@ -49,9 +76,13 @@ JSON 适配器按 Spring 顺序优先于网页适配器；当 JSON 源没有返�
 
 ## 数据库迁移与基础设施
 
-结构由 Flyway 管理，运行期 `schema.sql` 初始化已关闭。旧数据库通过 baseline version 0 接管，再执行 V1 的兼容补列与索引语句；迁移测试验证原数据保留和二次运行幂等。后续结构变化必须新增版本迁移，不能修改已经执行的 V1。
+结构由 Flyway 管理，运行期 `schema.sql` 初始化已关闭。旧数据库通过 baseline version 0 接管，再执行 V1 的兼容补列与索引语句；迁移测试验证原数据保留和二次运行幂等。后续结构变化必须新增版本迁移，不能修改已经执行的迁移。
 
 推荐审计元数据由 V3 迁移加入 `recommendations` 的可空列（model_name、prompt_version、provider_call_id、prompt_tokens、completion_tokens、total_tokens、generation_latency_ms、fallback_reason），并带非负 CHECK 约束；迁移兼容 H2/PostgreSQL 与旧 V2 数据，旧行新列为空。
+
+管理员治理由 V4 迁移加入反馈审核状态列和 `admin_audit_logs`；审核状态有 `PENDING`、`REVIEWED`、`RESOLVED` 三种稳定值，审计日志不使用目标账号外键，避免未来账号清理破坏治理证据。V4 只增加结构，不重置演示用户业务数据。
+
+趋势快照由 V5 迁移加入；趋势审核由 V6 迁移加入 `moderation_status`、AI 结论/风险/理由、模型调用元数据和人工终审字段，并建立审核队列索引。V6 对既有趋势行使用 `PENDING_AI` 默认值，升级不会将旧内容自动发布；必须经过同一条审核链路后才会重新出现在普通趋势查询中。
 
 Redis 已从 Compose 和依赖中删除，因为当前业务没有消费者。天气和趋势仅使用有明确调用方的进程内 Caffeine 缓存；需要跨实例缓存时，应先定义一致性、失效和监控要求，再引入外部缓存。
 
@@ -63,6 +94,7 @@ Redis 已从 Compose 和依赖中删除，因为当前业务没有消费者。�
 - “规则引擎是明确标记的降级结果，不冒充大模型输出。”
 - “文本推荐默认优先使用大模型；没有 Key 或模型失败时才降级。自动化 E2E 通过 Compose 覆盖显式关闭模型，避免消耗付费额度。”
 - “趋势源通过严格契约接入授权数据；不可用时 `demoMode` 主动标记开发样本。”
+- “趋势内容使用轻量 Workflow：Spring 定时任务负责 AI 初审，数据库状态机负责隔离和可追踪流转，管理员负责人工终审；没有引入 LangChain，AI 不能直接发布。”
 - “视觉识别默认不调用，服务端开关和用户本次明确同意缺一不可。”
 - “离线天气演示默认关闭，只有在 `.env` 显式启用且两个真实 provider 都失败时才返回静态快照，`source=configured-demo`，前端明确标注‘配置演示天气/非实时’，绝不冒充实时天气；城市未找到（NOT_FOUND）仍返回 404，不会被静态快照掩盖。”
 
@@ -73,5 +105,7 @@ Redis 已从 Compose 和依赖中删除，因为当前业务没有消费者。�
 - 趋势：`ConfiguredJsonTrendSourceAdapter.java`、`ConfiguredWebTrendSourceAdapter.java`、`TrendService.java` 及对应适配器测试。
 - 视觉同意：`WardrobeController.java`、`WardrobeService.java`、`WardrobeView.vue`。
 - 推荐审计元数据：`V3__recommendation_audit.sql`、`RecommendationAudit.java`、`RecommendationFallbackReason.java`、`BailianRecommendationClient.java`、`RecommendationService.java`。
+- 管理员运营后台：`V4__admin_governance.sql`、`admin/AdminController.java`、`admin/AdminService.java`、`admin/AdminFeedbackRepository.java`、`admin/AdminAuditRepository.java`、`frontend/src/views/AdminView.vue`。
+- 趋势审核 Workflow：`V5__trend_snapshots.sql`、`V6__trend_moderation_workflow.sql`、`TrendModerationService.java`、`BailianTrendModerationClient.java`、`TrendAdminController.java`、`frontend/src/views/AdminView.vue`。
 - 迁移与反例测试：`V1__baseline_schema.sql`、`AuthenticationIntegrationTest.java`、`FlywayMigrationTest.java`、`RecommendationControllerTest.java`、`BailianRecommendationClientTest.java`。
 - 离线天气演示：`ConfiguredWeatherSnapshot.java`、`WeatherService.java`、`WeatherServiceTest.java`、`frontend/src/composables/useFashionApp.js`。

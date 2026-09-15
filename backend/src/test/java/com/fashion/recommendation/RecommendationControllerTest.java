@@ -79,6 +79,42 @@ class RecommendationControllerTest {
         given(llmRecommendationClient.recommend(any(LlmRecommendationContext.class))).willReturn(Optional.empty());
     }
 
+    @Autowired
+    private com.fashion.recommendation.trend.TrendRepository trendRepository;
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void usesStoredTrendReferenceAndRejectsHiddenOrUnknownReferences() throws Exception {
+        String userId = "trend-reference-user";
+        createItem(userId, "白衬衫", "上装", "白色");
+        createItem(userId, "直筒裤", "下装", "黑色");
+        var now = java.time.Instant.now();
+        trendRepository.save("xiaohongshu", new com.fashion.recommendation.trend.TrendItem(
+                "xiaohongshu:reference-test", "xiaohongshu", "极简通勤", List.of("极简", "通勤"), 0,
+                now.minusSeconds(60), now, "https://www.xiaohongshu.com/explore/test", false, null));
+        assertTrue(trendRepository.markAiReviewed(
+                "xiaohongshu:reference-test",
+                new com.fashion.recommendation.trend.TrendAiReviewResult(
+                        "PASS", "LOW", "测试内容已进入人工终审", "qwen-plus-test", "test-call", "trend-moderation-v1"),
+                now));
+        assertTrue(trendRepository.finalizeHuman(
+                "xiaohongshu:reference-test", "APPROVED", "test-admin", now, "测试夹具通过"));
+        String body = """
+                {"occasion":"通勤","city":"长沙","trendId":"xiaohongshu:reference-test"}
+                """;
+        mockMvc.perform(post("/api/v1/recommendations").with(user(userId)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
+        var captor = ArgumentCaptor.forClass(LlmRecommendationContext.class);
+        verify(llmRecommendationClient).recommend(captor.capture());
+        assertEquals("极简通勤", captor.getValue().trendReference().title());
+        assertEquals(2, captor.getValue().wardrobe().size());
+        trendRepository.hide("xiaohongshu:reference-test", true);
+        mockMvc.perform(post("/api/v1/recommendations").with(user(userId)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/v1/recommendations").with(user(userId)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(body.replace("reference-test", "unknown"))).andExpect(status().isNotFound());
+    }
+
     @Test
     void generatesSavesAndProtectsRecommendationByUser() throws Exception {
         String userId = "recommendation-user";

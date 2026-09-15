@@ -50,7 +50,7 @@ const statRail = computed(() => [
     label: '趋势条目',
     value: trendStats.value.count ?? 0,
     unit: '条',
-    note: trendStats.value.count ? `平均${scoreLabel.value} ${trendStats.value.averageHeat}` : '暂无趋势数据',
+    note: trendStats.value.count ? `${new Set(trends.value.map(item => item.platform)).size} 个来源 · 各来源独立排序` : '暂无趋势数据',
     icon: TrendingUp
   }
 ])
@@ -180,7 +180,7 @@ function goToTrend(item) {
           <span class="preview-copy">
             <span class="preview-meta">
               <span>{{ item.platform || '未标注来源' }}</span>
-              <span>{{ scoreLabel }} {{ item.heatScore ?? '—' }}</span>
+              <span>{{ item.evidence?.scoreLabel || scoreLabel }} {{ item.platform === 'editorial' ? '' : item.heatScore ?? '—' }}</span>
             </span>
             <strong>{{ item.title }}</strong>
             <span class="preview-tags">{{ (item.topicTags || []).join(' / ') || '未设置标签' }}</span>

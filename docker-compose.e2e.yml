@@ -4,3 +4,4 @@ services:
       # E2E must exercise the fallback path without spending provider quota.
       BAILIAN_ENABLED: "false"
       BAILIAN_VISION_ENABLED: "false"
+      TREND_AI_REVIEW_ENABLED: "false"

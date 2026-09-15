@@ -320,3 +320,88 @@
 - 已通过 `npm run build`；`impeccable detect --json` 对推荐页和助手组件返回空问题列表。
 - 已通过浏览器验收：1440px 抽屉宽 460px，打开后输入框获得焦点、页面锁滚动，Escape 可关闭；390px 底部抽屉与推荐页均无根布局横向溢出。
 - 已同步迁移 `frontend/e2e/wardrobe-recommendation.spec.js`，全量前端 E2E 6/6 通过；覆盖自然语言生成、收藏、评分、历史持久化及移动端回归。
+
+# 2026-09-14 管理员功能第一批启动
+
+- 已恢复并完整读取现有 `task_plan.md`、`findings.md`、`progress.md`；确认上一阶段推荐页助手已完成，管理员内容此前仅存在毕业设计文档设计扩展中。
+- 已审计后端/前端文件清单与认证/路由关键字：认证表已有 `enabled` 与 `app_authorities`，但尚无管理员 API、管理页面或 `ROLE_ADMIN` 业务入口。
+- 已建立阶段二十二，当前阶段先实现管理员概览、分页账号查询和启用/停用治理；明确管理员不读取普通用户私有衣橱和推荐明细。
+- 审计确认 `SecurityConfig` 尚无 `ROLE_ADMIN` 路由保护，`AuthUserResponse` 仅返回 username；普通注册固定授予 `ROLE_USER`，管理员身份应由受控夹具/种子授予。
+- 确认第一批账号列表不伪造不存在的注册时间，仅返回用户名、启用状态和角色；概览统计使用聚合计数，不扩展到私有衣橱/推荐明细。
+- 新增管理员后端测试首次执行时发现 H2 `LIKE ESCAPE` 字面量多转义一层，已定位为 SQL 字符串写法问题，准备改为单字符反斜杠后重跑。
+- 管理员针对性测试修正后 5/5 通过；全量后端回归执行到 81 项时出现 1 个既有认证集成失败：`/api/v1/auth/csrf` 返回 `X-CSRF-TOKEN`，测试预期 `X-XSRF-TOKEN`。当前先定位测试上下文/CSRF 配置覆盖原因。
+- 单独执行 `AuthenticationIntegrationTest` 已通过；源码检索未发现第二条安全过滤链或测试显式覆盖 CSRF 仓储。问题目前只在管理员测试先执行并复用上下文的全量路径出现，继续做最小顺序复现。
+- 直接执行带逗号的 `-Dtest=AdminControllerTest,AuthenticationIntegrationTest` 被 PowerShell 解析失败，尚未运行；下一次将完整参数加引号。
+- 带引号的组合命令已运行并复现：管理员测试 5/5 通过，认证测试 1 项失败；当前转向逐个管理员测试方法与认证测试的顺序隔离。
+- 方法级隔离已完成：查询/分页两个不含 CSRF 写请求的管理员测试可组合通过；状态切换和未知账号两个含 `.with(csrf())` 的测试会污染共享 `CsrfFilter`。已从 Spring Security Test 字节码确认 `csrf()` 反射替换过滤器仓储为 Session 测试仓储；拟仅给管理员测试类加 `@DirtiesContext(AFTER_CLASS)`，不改变生产 CSRF 契约。
+
+## 阶段二十二收尾进度
+
+- 已给 `AdminControllerTest` 增加 `@DirtiesContext(AFTER_CLASS)`，隔离 Spring Security Test 的 CSRF 后处理器对共享过滤器仓储的反射修改；组合测试和全量测试均恢复通过。
+- 已补充管理员真实登录 authority 契约测试；管理员测试现为 6 项，验证登录响应与 `/auth/me` 都返回 `ROLE_ADMIN`。
+- 最终验证：后端全量 82 项通过；前端 `npm run build` 通过；`docker compose config -q` 通过。
+- 已重建 backend/frontend 容器并确认健康；随后按用户请求直接更新当前 PostgreSQL，`demo-admin` 已创建并启用，`demo-user` 数据未被触碰。
+- 为避免不经确认执行 `seed-demo-data.ps1` 造成现有 `demo-user` 衣橱/推荐数据被重置，本轮尚未重建容器或进行管理员浏览器登录验收；后续需用隔离账号完成该项。
+- 用户随后请求更新数据库；已只写入 `demo-admin` + `ROLE_ADMIN`，未运行完整 seed，`demo-user` 数据保持不变。
+
+# 2026-09-14 管理员运营后台第二批启动
+
+- 用户要求按“独立管理后台、数据概览、用户/权限、内容/推荐运营、反馈审核、操作日志”方案继续开发，并同步数据库及相关技术栈。
+- 已建立阶段二十三：本轮先基于现有真实表和推荐审计字段确定 P0 闭环；没有公共服装库时不新增虚假的目录管理菜单，优先实现概览、账号、反馈和审计。
+- 当前处于阶段二十三第 1 项：已开始审计现有迁移、反馈模型、推荐审计元数据和前端管理页，后续每完成一个阶段同步更新本记录。
+- 阶段二十三第 1 项完成：确认 `recommendation_feedback` 可扩展审核状态、`recommendations` 已有模型/降级审计字段、`image_cleanup_tasks` 可提供运行队列指标；确认不创建无数据来源的公共服装目录。
+- 阶段二十三第 2 项开始：准备 Flyway V4、管理员反馈/审计接口及对应的角色保护和测试。
+
+## 阶段二十二浏览器对抗补充
+
+- 已按 `playwright` 技能完成真实容器登录验收：管理员入口、管理页聚合指标、账号列表、当前账号不可操作、用户名搜索均通过。
+- 普通用户从 `#admin` 登录后的地址已验证自动纠正为 `#home`，且导航中没有“管理”；因此补上 `completeLogin` 路由保护并重建前端容器。
+- 临时账号创建初次使用 PowerShell 双引号导致 BCrypt `$` 插值，已修正为正确 60 字符哈希；这只影响临时夹具，不影响仓库代码。
+- 清理前发现登录自动创建 1 条 style profile；一次清理查询误用了不存在的 `image_cleanup_outbox` 表名，未执行删除，继续使用现有 schema 精确校验后清理。
+- 已同步更新 `scripts/seed-demo-data.ps1` 成功提示，明确普通演示账号与管理员演示账号的登录入口；未改变 seed 的数据范围。
+
+# 2026-09-14 管理员运营后台第二批收尾
+
+- 已完成 Flyway V4 数据库迁移：`recommendation_feedback` 增加 `moderation_status`、`handled_by`、`handled_at`，新增 `admin_audit_logs` 及查询索引；H2/PostgreSQL 迁移验证通过。
+- 已完成管理员后端 P0 闭环：运营概览、账号分页与启停、反馈筛选与审核状态、管理操作审计；写操作从认证 Principal 获取操作者并记录，不接收请求体伪造身份。
+- 已完成独立 `AdminView` 工作台：运营总览、账号与权限、反馈审核、操作日志，含空状态、分页、脱敏边界说明、桌面布局和 390px 移动布局。
+- 已同步 README、开发边界、系统流程图说明和 demo seed；未重跑会覆盖现有 `demo-user` 业务数据的完整 seed。
+- 已重建 Compose app profile；运行库确认 Flyway v4、`demo-admin/ROLE_ADMIN`、`demo-user/ROLE_USER` 和原有业务数据均在位。
+- 已通过后端 84 项测试、前端构建、Compose 配置检查、Impeccable 静态检查；真实浏览器验证管理员工作台、普通用户越权路由和移动菜单。
+- 浏览器 QA 发现并修复登录账号 pattern 的新版 Chromium 兼容问题；修复后前端重新构建，未再出现该正则错误。
+
+## 2026-09-15 阶段二十四
+- 用户授权自主实施，开始代码和数据源调查。读取规划、趋势、推荐、部署上下文；impeccable context 已运行，以现有 Vue 页面作为视觉依据，保持现有布局。
+
+- 新增 V5 趋势内容/互动快照/来源状态；多源定时刷新、保留真实结果、日周过滤和同平台评分。推荐关联通过服务端验证 trendId 并传入 LLM 参考上下文。前端日周/来源筛选、风格标签、来源说明与衣橱搭配入口已构建通过。
+- 编辑源 RSS 实测可访问，当天 30 条原始 RSS 条目，后端仅保留穿搭相关分类。微博匿名搜索 HTTP 432，热搜 HTTP 403；小红书本机无保存会话。
+- 工具调整：apply_patch 不接受同批删除/新增同一文件，已拆开；Maven PowerShell -D 参数须整体加引号。
+
+## 2026-09-15 管理员容器旧页面回归修复
+
+- 已确认运行中的 Compose 服务为当前项目的 frontend/backend 容器；前端镜像内包含独立 `AdminView` 和新路由代码，后端健康启动。
+- 首次回归发现浏览器继续使用旧 `index-CFraNbe7.js`；Nginx 原先未限制 SPA `index.html` 缓存。已给 `/` 和 `/index.html` 增加 `Cache-Control: no-store`、`Pragma: no-cache`、`Expires: 0`。
+- 已补齐 `syncViewFromLocation()` 的管理员规则：认证成功的管理员请求 `#home` 时改为 `#admin`，非管理员访问 `#admin` 仍回到 `#home`。
+- 干净 `mvn -q -f backend/pom.xml clean test` 通过；Docker Compose 镜像重建成功，backend 健康、frontend 使用新资产；管理员路由 E2E 通过 1/1。
+- 当前 Docker 浏览器实测：重新登录 `demo-admin` 后访问 `http://localhost:8090/#home`，自动变为 `#admin`，显示独立“管理工作台”、运营总览、账号与权限、反馈审核、操作日志。
+
+## 2026-09-15 趋势 AI 初审与人工终审工作流启动
+
+- 用户确认采用轻量 Workflow：自动抓取不依赖管理员，AI 只做结构化初审，管理员做最终发布决定，普通用户只读取人工通过内容。
+- 决定使用 Spring Boot 定时任务、数据库状态机和现有百炼客户端，不引入 LangChain/LangGraph 或重量级工作流引擎。
+- 当前缺口已确认：`trend_contents` 只有 `hidden`，没有 AI 初审状态、人工待审队列和审核历史；`AdminView` 也没有趋势来源/内容审核分区。
+
+## 2026-09-15 趋势 AI 初审与人工终审工作流完成
+
+- 新增 Flyway V6：趋势内容增加 `PENDING_AI`、`AI_FAILED`、`PENDING_HUMAN`、`APPROVED`、`REJECTED` 状态，以及 AI 结论、模型、原因、人工操作者和审核说明字段。
+- 新增 Spring Boot 定时初审服务：自动抓取后异步读取 `PENDING_AI`，调用现有百炼/Qwen 兼容接口；AI 只写建议，成功进入人工队列，失败进入隔离状态并支持人工接管或重试。
+- 管理员接口和工作台已完成：趋势审核筛选、批量运行 AI、重试、人工通过/驳回、通过内容下架/恢复和审计记录均受 `ROLE_ADMIN` 保护。
+- 普通趋势查询已收敛到 `APPROVED AND hidden = FALSE`，抓取刷新不会清掉既有人工决定；审核请求只发送标题、摘要、标签、来源等元数据，不发送用户私有衣橱。
+- 验证完成：Maven 97 项测试通过、前端构建通过、Docker Compose 配置通过、浏览器 E2E 7/7 通过；Docker 运行库已迁移到 Flyway v6，健康状态为 UP，当前 3 条真实趋势均停留在 `PENDING_HUMAN`，未人工发布前不会出现在普通用户趋势页。
+
+## 2026-09-15 运营总览 Lieflat Charts 可视化完成
+
+- 依据本地 `lieflat-charts` skill 审计数据形状：账号状态构成为百分比，采用 Basics F4 Tick Donut；推荐运行是少类目可数记录，采用 Basics F1 Rung Bars。Lupi L14 Hundred Field、L15 Ballot Tally、F5 Tick Rows 等候选不适合作为当前两项结论的主图，分别因为构成图密度过高、多选语义不匹配或横向队列标签不是本批次核心结论。
+- 运营总览已接入两个本地原生 SVG 图表：推荐结果按实际 LLM、规则降级、未标记分档；账号按可用/停用百分比环形刻度展示。现有“需要留意的信号”列表继续提供反馈、账号、衣物识别和清理队列的可操作入口。
+- 图表支持异步数据加载、空数据占位、键盘访问、滚入/加载入场、点击重播和 `prefers-reduced-motion` 降级；每个图包含标题、说明、来源和真实单位标注。
+- 前端构建和 Docker 镜像已重新完成；管理员浏览器实测显示 2 张图表、F1/F4 来源标识和动态数据标签，容器健康状态保持正常。
