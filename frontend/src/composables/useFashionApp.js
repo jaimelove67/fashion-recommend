@@ -75,7 +75,7 @@ function createRecommendationForm() {
 }
 
 function createProfileForm() {
-  return { displayName: '', stylePreferences: '', colorPreferences: '', occasions: '' }
+  return { displayName: '', gender: '', stylePreferences: '', colorPreferences: '', occasions: '' }
 }
 
 async function readApiBody(response) {
@@ -93,6 +93,7 @@ export function useFashionApp() {
   let csrf = null
   let sessionVersion = 0
   let trendRequestVersion = 0
+  const visualCache = new Map()
   const state = reactive({
     authPhase: 'checking',
     authUser: null,
@@ -174,6 +175,7 @@ export function useFashionApp() {
   function resetPrivateState() {
     state.selectedTrendReference = null
     sessionVersion += 1
+    visualCache.clear()
     state.wardrobe = []
     state.history = []
     state.historyTotal = 0
@@ -512,6 +514,7 @@ export function useFashionApp() {
   function hydrateProfileForm(profile) {
     state.profileForm = {
       displayName: profile?.displayName || '',
+      gender: profile?.gender || '',
       stylePreferences: (profile?.stylePreferences || []).join('、'),
       colorPreferences: (profile?.colorPreferences || []).join('、'),
       occasions: (profile?.occasions || []).join('、')
@@ -819,6 +822,7 @@ export function useFashionApp() {
         method: 'POST',
         body: JSON.stringify({
           displayName: state.profileForm.displayName,
+          gender: state.profileForm.gender || null,
           stylePreferences: listFromCsv(state.profileForm.stylePreferences),
           colorPreferences: listFromCsv(state.profileForm.colorPreferences),
           occasions: listFromCsv(state.profileForm.occasions)
@@ -1022,6 +1026,30 @@ export function useFashionApp() {
       return null
     } finally {
       if (isCurrentSession(version)) state.generating = false
+    }
+  }
+
+  async function generateRecommendationVisual(recommendation, options = {}) {
+    if (state.authPhase !== 'authenticated' || !recommendation?.id) return null
+    const itemIds = (recommendation.items || []).map((item) => item?.id).filter(Boolean).join(',')
+    const gender = String(state.profile?.gender || '').trim().toUpperCase()
+    const cacheKey = `${recommendation.id}:${gender}:${itemIds}`
+    if (!options.force && visualCache.has(cacheKey)) return visualCache.get(cacheKey)
+    try {
+      const result = await request(`/api/v1/me/recommendations/${recommendation.id}/visual`, { method: 'POST' })
+      visualCache.set(cacheKey, result)
+      return result
+    } catch (cause) {
+      const result = {
+        status: 'FAILED',
+        imageUrl: null,
+        model: null,
+        modelGender: gender || null,
+        itemCount: 0,
+        message: cause instanceof Error ? cause.message : '阿里云人物生图暂时失败，请稍后重试'
+      }
+      visualCache.set(cacheKey, result)
+      return result
     }
   }
 
@@ -1348,6 +1376,7 @@ export function useFashionApp() {
     addGarment,
     deleteGarment,
     generateRecommendation,
+    generateRecommendationVisual,
     rateRecommendation,
     saveRecommendation,
     selectView

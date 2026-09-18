@@ -35,8 +35,8 @@ class FlywayMigrationTest {
 
         MigrateResult firstMigration = flyway.migrate();
 
-        assertEquals(6, firstMigration.migrationsExecuted);
-        assertEquals("6", flyway.info().current().getVersion().getVersion());
+        assertEquals(7, firstMigration.migrationsExecuted);
+        assertEquals("7", flyway.info().current().getVersion().getVersion());
         assertEquals("旧衣物", jdbcTemplate.queryForObject(
                 "SELECT name FROM wardrobe_items WHERE id = 41", String.class));
         assertEquals("MANUAL", jdbcTemplate.queryForObject(
@@ -48,6 +48,7 @@ class FlywayMigrationTest {
         assertColumnExists(jdbcTemplate, "trend_contents", "moderation_status");
         assertColumnExists(jdbcTemplate, "trend_contents", "ai_decision");
         assertIndexExists(jdbcTemplate, "idx_trend_moderation_queue");
+        assertColumnExists(jdbcTemplate, "style_profiles", "gender");
 
         int appliedBeforeRestart = flyway.info().applied().length;
         MigrateResult secondMigration = flyway.migrate();
@@ -73,7 +74,7 @@ class FlywayMigrationTest {
 
         MigrateResult migration = flyway.migrate();
 
-        assertEquals("6", flyway.info().current().getVersion().getVersion());
+        assertEquals("7", flyway.info().current().getVersion().getVersion());
         assertEquals("旧场合推荐", jdbcTemplate.queryForObject(
                 "SELECT summary FROM recommendations WHERE id = 91", String.class));
         assertEquals("development-rule-v1", jdbcTemplate.queryForObject(

@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fashion.recommendation.recommendation.LlmRecommendationClient;
 import com.fashion.recommendation.recommendation.LlmRecommendationContext;
 import com.fashion.recommendation.recommendation.LlmRecommendationResult;
+import com.fashion.recommendation.recommendation.BailianImageGenerationClient;
+import com.fashion.recommendation.recommendation.OutfitImageGenerationResult;
 import com.fashion.recommendation.recognition.GarmentRecognitionResult;
 import com.fashion.recommendation.recognition.GarmentRecognitionService;
 import com.fashion.recommendation.storage.ImageStorage;
@@ -64,6 +66,9 @@ class RecommendationControllerTest {
 
     @MockBean
     private LlmRecommendationClient llmRecommendationClient;
+
+    @MockBean
+    private BailianImageGenerationClient bailianImageGenerationClient;
 
     @MockBean
     private ImageStorage imageStorage;
@@ -179,6 +184,66 @@ class RecommendationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items.length()").value(3))
                 .andExpect(jsonPath("$.data.items[0].name").value("米白衬衫"));
+    }
+
+    @Test
+    void visualGenerationUsesOnlyCurrentUsersConfirmedRecommendationItems() throws Exception {
+        String userId = "visual-recommendation-user";
+        long topId = createItem(userId, "雾蓝衬衫", "上装", "雾蓝");
+        long bottomId = createItem(userId, "深蓝长裤", "下装", "深蓝");
+        mockMvc.perform(post("/api/v1/me/style-profile/refresh")
+                        .with(user(userId)).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"小夏\",\"gender\":\"FEMALE\"}"))
+                .andExpect(status().isOk());
+
+        var generated = mockMvc.perform(post("/api/v1/recommendations")
+                        .with(user(userId)).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"occasion\":\"通勤\",\"city\":\"杭州\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        long recommendationId = readData(generated).path("id").asLong();
+        given(bailianImageGenerationClient.generate(any(), anyString(), anyString(), any(), any()))
+                .willReturn(new OutfitImageGenerationResult(
+                        "SUCCEEDED", "https://result.test/daily-look.png", "wan2.6-image", "visual-1", null));
+
+        mockMvc.perform(post("/api/v1/me/recommendations/" + recommendationId + "/visual")
+                        .with(user(userId)).with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.data.imageUrl").value("https://result.test/daily-look.png"))
+                .andExpect(jsonPath("$.data.modelGender").value("FEMALE"))
+                .andExpect(jsonPath("$.data.itemCount").value(2));
+
+        ArgumentCaptor<List> itemsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(bailianImageGenerationClient).generate(
+                eq("FEMALE"), eq("通勤"), eq("杭州"), eq(26.0), itemsCaptor.capture());
+        List<?> items = itemsCaptor.getValue();
+        assertEquals(2, items.size());
+        assertEquals(List.of(topId, bottomId), items.stream()
+                .map(item -> ((com.fashion.recommendation.wardrobe.WardrobeItem) item).id()).toList());
+    }
+
+    @Test
+    void visualGenerationRefusesToInferGender() throws Exception {
+        String userId = "visual-gender-required-user";
+        createItem(userId, "雾蓝衬衫", "上装", "雾蓝");
+        createItem(userId, "深蓝长裤", "下装", "深蓝");
+        var generated = mockMvc.perform(post("/api/v1/recommendations")
+                        .with(user(userId)).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"occasion\":\"通勤\",\"city\":\"杭州\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        long recommendationId = readData(generated).path("id").asLong();
+
+        mockMvc.perform(post("/api/v1/me/recommendations/" + recommendationId + "/visual")
+                        .with(user(userId)).with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("UNAVAILABLE"))
+                .andExpect(jsonPath("$.data.message").value("请先在个人档案中选择每日模特性别"));
+        verifyNoInteractions(bailianImageGenerationClient);
     }
 
     @Test
@@ -368,10 +433,11 @@ class RecommendationControllerTest {
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"displayName":"小林","stylePreferences":["复古","通勤"],"colorPreferences":["酒红","深蓝"],"occasions":["约会","通勤"]}
+                                {"displayName":"小林","gender":"FEMALE","stylePreferences":["复古","通勤"],"colorPreferences":["酒红","深蓝"],"occasions":["约会","通勤"]}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.displayName").value("小林"))
+                .andExpect(jsonPath("$.data.gender").value("FEMALE"))
                 .andExpect(jsonPath("$.data.colorPreferences[0]").value("酒红"));
 
         mockMvc.perform(get("/api/v1/me/style-profile").with(user(userId)))
@@ -403,6 +469,14 @@ class RecommendationControllerTest {
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(oversizedProfile.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+
+        mockMvc.perform(post("/api/v1/me/style-profile/refresh")
+                        .with(user("validation-user"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"小林\",\"gender\":\"UNKNOWN\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
 

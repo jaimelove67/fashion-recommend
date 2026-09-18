@@ -46,6 +46,20 @@ app:
     endpoint: ${BAILIAN_ENDPOINT:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
     connect-timeout: ${BAILIAN_CONNECT_TIMEOUT:3s}
     read-timeout: ${BAILIAN_READ_TIMEOUT:8s}
+    image:
+      # Wan 2.6 image editing accepts the model prototype and wardrobe references as Base64.
+      enabled: ${BAILIAN_IMAGE_ENABLED:true}
+      model: ${BAILIAN_IMAGE_MODEL:wan2.6-image}
+      endpoint: ${BAILIAN_IMAGE_ENDPOINT:https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation}
+      task-endpoint: ${BAILIAN_IMAGE_TASK_ENDPOINT:https://dashscope.aliyuncs.com/api/v1/tasks}
+      prototype-male: ${BAILIAN_IMAGE_PROTOTYPE_MALE:classpath:reference_photo/model-male.png}
+      prototype-female: ${BAILIAN_IMAGE_PROTOTYPE_FEMALE:classpath:reference_photo/model-female.png}
+      # Relative seed/demo image URLs can be made usable as references by setting this base URL.
+      reference-base-url: ${BAILIAN_IMAGE_REFERENCE_BASE_URL:}
+      connect-timeout: ${BAILIAN_IMAGE_CONNECT_TIMEOUT:5s}
+      read-timeout: ${BAILIAN_IMAGE_READ_TIMEOUT:15s}
+      task-timeout: ${BAILIAN_IMAGE_TASK_TIMEOUT:90s}
+      poll-interval: ${BAILIAN_IMAGE_POLL_INTERVAL:2s}
   trends:
     editorial-enabled: ${TREND_EDITORIAL_ENABLED:true}
     import-directory: ${TREND_IMPORT_DIRECTORY:}

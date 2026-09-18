@@ -15,9 +15,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1")
 public class RecommendationController {
     private final RecommendationService recommendationService;
+    private final RecommendationVisualService recommendationVisualService;
 
-    public RecommendationController(RecommendationService recommendationService) {
+    public RecommendationController(
+            RecommendationService recommendationService,
+            RecommendationVisualService recommendationVisualService) {
         this.recommendationService = recommendationService;
+        this.recommendationVisualService = recommendationVisualService;
     }
 
     @PostMapping("/recommendations")
@@ -40,6 +44,13 @@ public class RecommendationController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ApiResponse.ok(recommendationService.list(principal.getName(), page, size));
+    }
+
+    @PostMapping("/me/recommendations/{recommendationId}/visual")
+    public ApiResponse<RecommendationVisualResponse> visual(
+            Principal principal,
+            @PathVariable Long recommendationId) {
+        return ApiResponse.ok(recommendationVisualService.generate(principal.getName(), recommendationId));
     }
 
     @PostMapping("/me/recommendations/{recommendationId}/save")

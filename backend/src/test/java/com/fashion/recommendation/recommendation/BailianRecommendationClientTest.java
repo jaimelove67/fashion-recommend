@@ -204,7 +204,7 @@ class BailianRecommendationClientTest {
         WeatherSnapshot weather = new WeatherSnapshot(
                 "长沙", 26.0, 27.5, 0.0, 1, 10.0, observedAt, "test-weather");
         StyleProfile profile = new StyleProfile(
-                "小夏", List.of("复古"), List.of("深蓝"), List.of("通勤"),
+                "小夏", "FEMALE", List.of("复古"), List.of("深蓝"), List.of("通勤"),
                 List.of("复古"), List.of("法式休闲"), List.of("深蓝"), List.of("直筒下装"),
                 "已生成风格档案。", "qwen-plus-test", observedAt, false);
         return new LlmRecommendationContext("通勤", "极简", wardrobe, weather, profile, Map.of(11L, 4.5));

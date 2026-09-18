@@ -49,13 +49,8 @@ const knownCities = [
   '西宁', '香港', '澳门'
 ]
 
-const fallbackImages = [
-  '/assets/look-tailoring.jpg',
-  '/assets/look-color.jpg',
-  '/assets/look-urban.jpg'
-]
-
 const state = computed(() => props.app.state || {})
+const wardrobe = computed(() => state.value.wardrobe || [])
 const wardrobeStats = computed(() => props.app.wardrobeStats || {})
 const currentWeather = computed(() => props.actualWeather || state.value.weather || null)
 const currentCity = computed(() => currentWeather.value?.city || state.value.recommendationForm?.city || '城市未设置')
@@ -73,6 +68,18 @@ const contextItems = computed(() => [
   { label: '风格', value: props.profileTags[0] || '还在了解你' }
 ])
 
+const availableWardrobe = computed(() => wardrobe.value.filter((item) => Boolean(item?.id) && item.recognitionStatus !== 'NEEDS_MANUAL_REVIEW'))
+const wardrobeById = computed(() => new Map(availableWardrobe.value.map((item) => [String(item.id), item])))
+
+function recommendationItems(recommendation) {
+  const seen = new Set()
+  return (recommendation?.items || []).map((item) => wardrobeById.value.get(String(item?.id))).filter((item) => {
+    if (!item || seen.has(String(item.id))) return false
+    seen.add(String(item.id))
+    return true
+  }).slice(0, 4)
+}
+
 function itemKey(item) {
   return item?.id || item?.name || 'unknown'
 }
@@ -84,7 +91,7 @@ function imageKey(prefix, item, index = 0) {
 function imageSource(item, prefix, index = 0) {
   const key = imageKey(prefix, item, index)
   if (item?.imageUrl && !brokenImages.value.has(key)) return item.imageUrl
-  return fallbackImages[index % fallbackImages.length]
+  return ''
 }
 
 function imageFailed(prefix, item, index = 0) {
@@ -283,9 +290,10 @@ defineExpose({ open: openAssistant })
                   <small>{{ message.recommendation.occasion }} · {{ message.recommendation.city }}</small>
                 </div>
                 <h3>{{ message.recommendation.summary }}</h3>
-                <ul v-if="message.recommendation.items?.length" class="assistant-result-items" aria-label="推荐搭配中的衣物">
-                  <li v-for="(item, itemIndex) in message.recommendation.items.slice(0, 4)" :key="`${message.id}-${item.id || itemIndex}`">
-                    <img :src="imageSource(item, `assistant-${message.id}`, itemIndex)" :alt="item.name || item.category || '搭配衣物'" @error="imageFailed(`assistant-${message.id}`, item, itemIndex)" />
+                <ul v-if="recommendationItems(message.recommendation).length" class="assistant-result-items" aria-label="推荐搭配中的衣物">
+                  <li v-for="(item, itemIndex) in recommendationItems(message.recommendation)" :key="`${message.id}-${item.id || itemIndex}`">
+                    <img v-if="imageSource(item, `assistant-${message.id}`, itemIndex)" :src="imageSource(item, `assistant-${message.id}`, itemIndex)" :alt="item.name || item.category || '搭配衣物'" @error="imageFailed(`assistant-${message.id}`, item, itemIndex)" />
+                    <span v-else class="assistant-image-missing"><Shirt :size="14" aria-hidden="true" /><small>暂无图片</small></span>
                     <div><span>{{ item.category || '衣物' }} · {{ item.color || '待识别' }}</span><strong>{{ item.name || '衣橱衣物' }}</strong></div>
                   </li>
                 </ul>
@@ -730,6 +738,27 @@ defineExpose({ open: openAssistant })
   border-radius: 4px;
   object-fit: cover;
   background: var(--rec-bg);
+}
+
+.assistant-image-missing {
+  display: grid;
+  width: 40px;
+  height: 46px;
+  place-items: center;
+  align-content: center;
+  gap: 3px;
+  border-radius: 4px;
+  color: var(--rec-muted);
+  background: var(--rec-bg);
+  text-align: center;
+}
+
+.assistant-image-missing svg {
+  color: var(--rec-accent);
+}
+
+.assistant-image-missing small {
+  font-size: 8px;
 }
 
 .assistant-result-items li > div {

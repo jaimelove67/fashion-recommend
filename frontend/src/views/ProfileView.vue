@@ -58,6 +58,12 @@ const analysisValues = reactive({
 })
 
 const profile = computed(() => props.app.state.profile || {})
+const profileForm = computed(() => props.app.state.profileForm || {})
+const profileGender = computed(() => {
+  const value = String(profile.value.gender || '').trim().toUpperCase()
+  return value === 'MALE' || value === 'FEMALE' ? value : ''
+})
+const profileGenderLabel = computed(() => ({ MALE: '男', FEMALE: '女' }[profileGender.value] || '待补充'))
 const displayName = computed(() => profile.value.displayName || props.app.state.authUser?.username || '你')
 const styleTags = computed(() => unique([
   ...(profile.value.styleTags || []),
@@ -120,7 +126,7 @@ const analysisRows = computed(() => [
   }
 ])
 const flowSteps = computed(() => [
-  { key: 'basics', label: '基础资料', note: basicsReady.value ? `身高 ${draft.height || '--'} cm · 体重 ${draft.weight || '--'} kg` : '等待填写身高与体重', status: basicsReady.value ? 'done' : 'current' },
+  { key: 'basics', label: '基础资料', note: basicsReady.value ? `身高 ${draft.height || '--'} cm · 体重 ${draft.weight || '--'} kg · 模特${profileGenderLabel.value}` : '等待填写身高、体重与模特性别', status: basicsReady.value && profileGender.value ? 'done' : 'current' },
   { key: 'photo', label: '上传照片', note: photoReady.value ? '个人照片已上传' : '等待上传个人照片', status: photoReady.value ? 'done' : 'current' },
   { key: 'analysis', label: '综合分析', note: analysisPhase.value === 'analyzing' ? '正在结合照片和基础信息' : analysisReady.value ? '照片和基础信息已整理' : '等待照片与基础资料', status: analysisPhase.value === 'analyzing' || !analysisReady.value ? 'current' : 'done' }
 ])
@@ -246,13 +252,23 @@ function closeSetup() {
   setupError.value = ''
 }
 
-function continueToPhoto() {
+async function continueToPhoto() {
   if (!validateBasics()) return
+  if (!profileForm.value.gender) {
+    setupError.value = '请选择每日模特性别，系统不会根据照片或衣物推断。'
+    return
+  }
   if (!basicsEdited.height || !basicsEdited.weight) {
     setupError.value = '请填写身高和体重后再继续。'
     return
   }
   basicsReady.value = true
+  const savedProfile = await props.app.saveProfile?.()
+  if (!savedProfile) {
+    setupError.value = props.app.state.error || '模特性别保存失败，请稍后再试。'
+    return
+  }
+  setupError.value = ''
   setupStep.value = 2
 }
 
@@ -368,7 +384,7 @@ onDeactivated(() => {
               {{ analysisStatusLabel }}
             </span>
           </div>
-          <p>填写身高、体重并上传照片后，这里会整理一份形象参考和穿衣建议。</p>
+           <p>填写身高、体重和模特性别并上传照片后，这里会整理一份形象参考和穿衣建议。</p>
         </div>
         <button class="profile-primary profile-top-action" type="button" @click="goRecommendations">
           查看搭配推荐 <ArrowRight :size="17" />
@@ -426,11 +442,16 @@ onDeactivated(() => {
             <img :src="draft.photoUrl || DEFAULT_PORTRAIT" :alt="`${displayName}的个人照片`" />
             <span class="portrait-status"><component :is="photoReady ? Check : Camera" :size="13" />{{ photoReady ? '照片已上传' : '示例照片 · 请更换' }}</span>
           </div>
-          <div class="fact-card fact-photo">
-            <Camera :size="17" />
-            <span>照片信息</span>
-            <strong>可修改</strong>
-          </div>
+           <div class="fact-card fact-photo">
+             <Camera :size="17" />
+             <span>照片信息</span>
+             <strong>可修改</strong>
+           </div>
+           <div class="fact-card fact-gender">
+             <span>每日模特</span>
+             <strong>{{ profileGenderLabel }}</strong>
+             <em>{{ profileGender ? '来自个人档案' : '请先填写' }}</em>
+           </div>
           <div class="portrait-caption">
             <span>{{ draft.photoName || '当前照片' }}</span>
             <button type="button" @click="openSetup"><Camera :size="14" />更换照片</button>
@@ -581,11 +602,14 @@ onDeactivated(() => {
         </ol>
 
         <form v-if="setupStep === 1" class="dialog-form" @submit.prevent="continueToPhoto">
-           <div class="dialog-copy"><strong>先填写基础资料</strong><span>身高和体重会和照片一起用于生成穿衣建议。</span></div>
-          <div class="measurement-grid">
-            <label><span>身高 <em>必填</em></span><div><input v-model="draft.height" type="number" min="80" max="250" step="0.1" inputmode="decimal" required aria-label="身高" @input="markBasicEdited('height')" /><small>cm</small></div></label>
-            <label><span>体重 <em>必填</em></span><div><input v-model="draft.weight" type="number" min="20" max="300" step="0.1" inputmode="decimal" required aria-label="体重" @input="markBasicEdited('weight')" /><small>kg</small></div></label>
-          </div>
+            <div class="dialog-copy"><strong>先填写基础资料</strong><span>模特性别决定每日视觉原型，身高和体重用于版型参考。</span></div>
+           <div class="measurement-grid">
+             <label><span>身高 <em>必填</em></span><div><input v-model="draft.height" type="number" min="80" max="250" step="0.1" inputmode="decimal" required aria-label="身高" @input="markBasicEdited('height')" /><small>cm</small></div></label>
+             <label><span>体重 <em>必填</em></span><div><input v-model="draft.weight" type="number" min="20" max="300" step="0.1" inputmode="decimal" required aria-label="体重" @input="markBasicEdited('weight')" /><small>kg</small></div></label>
+           </div>
+           <div class="gender-field">
+             <label><span>每日模特性别 <em>必填</em></span><select v-model="profileForm.gender" required aria-label="每日模特性别"><option value="" disabled>请选择模特性别</option><option value="FEMALE">女</option><option value="MALE">男</option></select></label>
+           </div>
            <p class="dialog-hint"><Info :size="15" />这些数据只用于穿衣比例、版型和尺码参考，不用于健康评价。</p>
           <p v-if="setupError" class="dialog-error" role="alert"><Info :size="15" />{{ setupError }}</p>
           <div class="dialog-actions"><button class="profile-primary" type="submit">下一步：上传照片 <ArrowRight :size="15" /></button></div>
@@ -732,6 +756,8 @@ onDeactivated(() => {
 .fact-photo { top: 114px; right: 0; align-items: flex-start; }
 .fact-photo svg { color: var(--accent); }
 .fact-photo strong { color: var(--accent-strong); font-size: 11px; }
+.fact-gender { right: 0; bottom: 62px; }
+.fact-gender strong { color: var(--accent-strong); }
 
 .analysis-card,
 .profile-module,
@@ -854,6 +880,12 @@ onDeactivated(() => {
 .measurement-grid input { width: 100%; min-width: 0; border: 0; outline: 0; padding: 12px; background: transparent; font: inherit; font-size: 18px; font-weight: 700; }
 .measurement-grid input:focus { box-shadow: inset 0 0 0 2px var(--accent); }
 .measurement-grid small { padding-right: 12px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.gender-field { display: grid; gap: 7px; }
+.gender-field label { display: grid; gap: 7px; }
+.gender-field label > span { color: var(--muted); font-size: 10px; font-weight: 700; }
+.gender-field em { color: var(--coral); font-style: normal; }
+.gender-field select { width: 100%; border: 1px solid var(--line); border-radius: 8px; outline: 0; padding: 12px; color: var(--ink); background: #fff; font: inherit; }
+.gender-field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .dialog-hint { display: flex; align-items: flex-start; gap: 7px; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .dialog-hint svg { flex: 0 0 auto; color: var(--accent); }
 .dialog-error { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--danger); font-size: 11px; }
@@ -910,13 +942,17 @@ onDeactivated(() => {
   .fact-card { order: 2; margin-top: 9px; }
   .fact-height,
   .fact-weight,
-  .fact-photo { display: grid; grid-template-columns: 1fr auto; align-items: center; }
+  .fact-photo,
+  .fact-gender { display: grid; grid-template-columns: 1fr auto; align-items: center; }
   .fact-height span,
-  .fact-weight span { grid-column: 1; }
+  .fact-weight span,
+  .fact-gender span { grid-column: 1; }
   .fact-height strong,
-  .fact-weight strong { grid-column: 2; grid-row: span 2; }
+  .fact-weight strong,
+  .fact-gender strong { grid-column: 2; grid-row: span 2; }
   .fact-height em,
-  .fact-weight em { grid-column: 1; }
+  .fact-weight em,
+  .fact-gender em { grid-column: 1; }
   .fact-photo { grid-template-columns: auto 1fr; }
   .fact-photo svg { grid-row: span 2; }
   .analysis-card { grid-column: auto; padding: 20px 17px 16px; }

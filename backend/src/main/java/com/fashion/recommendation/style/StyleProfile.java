@@ -5,6 +5,7 @@ import java.util.List;
 
 public record StyleProfile(
         String displayName,
+        String gender,
         List<String> stylePreferences,
         List<String> colorPreferences,
         List<String> occasions,
