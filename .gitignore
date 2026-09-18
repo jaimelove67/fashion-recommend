@@ -12,6 +12,17 @@ Thumbs.db
 # Local tools
 .codex_tmp/
 .playwright-cli/
+.agents/
+.codex/
+.workbuddy/
+
+# Local scratch working directories for document/image generation
+_codex_docx_work/
+docx_work/
+
+# Office autosave, backup and lock files
+.$*
+~$*
 
 # Frontend dependencies and build output
 frontend/node_modules/
