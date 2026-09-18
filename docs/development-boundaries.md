@@ -54,6 +54,14 @@
 
 规则引擎只使用当前用户已完善的衣物，且至少需要两个不同类别。条件不成立时返回 422，不生成虚假方案。生产环境可保留 fallback，但应监控可用率、耗时、校验失败原因和降级率，并向用户区分智能生成与基础搭配。
 
+## 每日推荐视觉与衣橱边界（V7 + Wan 图像生成）
+
+每日推荐的解释区只保留四个可追溯维度：天气适配、场合适配、风格方向、衣橱依据。前端不会直接信任推荐历史快照里的衣物对象，而是按衣物 id 与当前用户衣橱重新关联；不存在、跨用户、重复或 `NEEDS_MANUAL_REVIEW` 的衣物不会展示，图片失效时只显示“暂无图片”状态。
+
+个人档案通过 V7 的可空 `style_profiles.gender` 保存 `MALE` 或 `FEMALE`。每日模特原型只在档案已有对应性别时作为生图输入，未填写时显示待补充，不从照片、衣物或参考截图推断。`RecommendationVisualService` 在生成图像前再次按当前用户的衣橱 id 关联推荐快照，并排除已删除、跨用户和 `NEEDS_MANUAL_REVIEW` 单品；`BailianImageGenerationClient` 将指定原型图和最多三个当前衣橱图片参考以 Base64 送入 `wan2.6-image`，同时把全部已选单品的名称、类别、颜色和风格写入受限提示词。未配置 Key、性别或原型资源，及阿里云任务失败/超时时，接口返回明确的 `UNAVAILABLE`/`FAILED` 状态，前端保留已确认单品并显示未生成状态，不把原型或静态图当作成功结果。
+
+图像接口使用异步任务创建与轮询，返回的阿里云结果链接只作为当日会话主视觉使用；生产环境若需要长期保存，应在收到成功链接后立即转存到受控对象存储。演示用的两张过渡静态生图已移出前端资源目录，运行时不会再根据固定单品组合匹配它们。
+
 ## 授权趋势源、网页采集与 demoMode
 
 配置 `TREND_JSON_URL` 后，`ConfiguredJsonTrendSourceAdapter` 请求管理员提供的授权 JSON 源。根对象、字段集合、条目数量、重复 ID、标签、热度、ISO-8601 时间和 HTTP(S) URL 都经过整批校验；成功结果在进程内按 `TREND_CACHE_TTL` 缓存。
@@ -76,7 +84,7 @@ JSON 适配器按 Spring 顺序优先于网页适配器；当 JSON 源没有返�
 
 ## 数据库迁移与基础设施
 
-结构由 Flyway 管理，运行期 `schema.sql` 初始化已关闭。旧数据库通过 baseline version 0 接管，再执行 V1 的兼容补列与索引语句；迁移测试验证原数据保留和二次运行幂等。后续结构变化必须新增版本迁移，不能修改已经执行的迁移。
+结构由 Flyway 管理，运行期 `schema.sql` 初始化已关闭。旧数据库通过 baseline version 0 接管，再执行 V1 的兼容补列与索引语句；V7 以新的可空列迁移个人档案性别，迁移测试验证原数据保留和二次运行幂等。后续结构变化必须新增版本迁移，不能修改已经执行的迁移。
 
 推荐审计元数据由 V3 迁移加入 `recommendations` 的可空列（model_name、prompt_version、provider_call_id、prompt_tokens、completion_tokens、total_tokens、generation_latency_ms、fallback_reason），并带非负 CHECK 约束；迁移兼容 H2/PostgreSQL 与旧 V2 数据，旧行新列为空。
 
@@ -105,6 +113,7 @@ Redis 已从 Compose 和依赖中删除，因为当前业务没有消费者。�
 - 趋势：`ConfiguredJsonTrendSourceAdapter.java`、`ConfiguredWebTrendSourceAdapter.java`、`TrendService.java` 及对应适配器测试。
 - 视觉同意：`WardrobeController.java`、`WardrobeService.java`、`WardrobeView.vue`。
 - 推荐审计元数据：`V3__recommendation_audit.sql`、`RecommendationAudit.java`、`RecommendationFallbackReason.java`、`BailianRecommendationClient.java`、`RecommendationService.java`。
+- 每日模特生图：`BailianImageGenerationClient.java`、`RecommendationVisualService.java`、`RecommendationVisualResponse.java`、`backend/src/main/resources/reference_photo/`、`frontend/src/views/RecommendationView.vue`。
 - 管理员运营后台：`V4__admin_governance.sql`、`admin/AdminController.java`、`admin/AdminService.java`、`admin/AdminFeedbackRepository.java`、`admin/AdminAuditRepository.java`、`frontend/src/views/AdminView.vue`。
 - 趋势审核 Workflow：`V5__trend_snapshots.sql`、`V6__trend_moderation_workflow.sql`、`TrendModerationService.java`、`BailianTrendModerationClient.java`、`TrendAdminController.java`、`frontend/src/views/AdminView.vue`。
 - 迁移与反例测试：`V1__baseline_schema.sql`、`AuthenticationIntegrationTest.java`、`FlywayMigrationTest.java`、`RecommendationControllerTest.java`、`BailianRecommendationClientTest.java`。

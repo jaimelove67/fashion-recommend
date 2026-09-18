@@ -132,6 +132,7 @@ mvn spring-boot:run
 ## 当前能力边界
 
 - 推荐大模型是首选引擎：`BAILIAN_ENABLED` 默认为 `true`，且配置 `DASHSCOPE_API_KEY` 后优先调用 qwen-plus。未配置 Key、请求超时、响应不合规、结果越界或模型返回了非衣橱单品时，系统才降级到规则引擎；降级记录会保留稳定的 `fallback_reason`（`missing-api-key`、`request-failed`、`response-invalid`、`result-invalid`、`duplicate-item-ids`、`foreign-item-ids`、`same-category`）。如需离线测试或避免模型费用，必须显式设置 `BAILIAN_ENABLED=false`，此时原因是 `llm-disabled`。
+- 每日推荐主区域按参考效果展示为“中央全身模特 + 四角衣橱单品卡”，下方固定解释天气适配、场合适配、风格方向、衣橱依据。页面会按当前衣橱 id 重新校验推荐快照，并排除 `NEEDS_MANUAL_REVIEW` 衣物；失效图片不使用通用时装图回退。模特性别只取个人档案中的 `gender`，每日模特图通过 `/api/v1/me/recommendations/{id}/visual` 调用阿里云万相图像编辑接口生成，未配置或失败时保留画板和已确认单品并明确显示未生成状态，不把原型或静态图冒充当日生图。
 - 每次生成都会持久化审计元数据：合法 LLM 结果保存真实 provider 元数据（provider call ID、模型名、prompt 版本与三类 token），规则降级只保存稳定的枚举式 fallback 原因，不保存异常原文。API 通过嵌套 `generationAudit` 返回这些字段，`engine` 仍保留在顶层。旧历史与降级路径保持为空，不伪造模型元数据。
 - BAILIAN_VISION_ENABLED 默认为 false。即使服务端已启用，仍需用户在每次上传时明确勾选 AI 识别；未同意、未启用或识别失败时，系统不会调用或不会采纳视觉模型结果，并要求人工确认不完整信息。
 - “风潮”在 `TREND_JSON_URL` 返回符合严格契约的授权数据，或 `TREND_WEB_URLS` 成功读取到公开网页内容时标记 `demoMode=false`；两类源均不可用时回退到明确标注的 10 条开发样本，风潮页按热度降序展示 Top 10 弧形画廊。网页适配器抽取 HTML/OpenGraph/JSON-LD 的标题、摘要、标签、发布时间、图片和来源链接，并生成“来源页信号评分”；该评分只表示新鲜度与内容完整度，不代表平台实时热度。
@@ -144,7 +145,7 @@ mvn spring-boot:run
 
 ## 数据库迁移
 
-数据库结构由 Flyway 管理，运行时 SQL 初始化已关闭。V1 是兼容旧结构的基线迁移，V2 增加图片清理任务表，V3 为推荐增加审计元数据列，V4 增加管理员治理，V5 增加趋势快照，V6 增加趋势 AI 初审与人工终审状态及审计字段：新数据库依次执行 V1 至 V6；已有表但没有 Flyway 历史的旧数据库会先以版本 0 建立基线，再依次执行。V6 不清除趋势内容，既有内容默认进入 `PENDING_AI` 隔离区，需完成 AI 初审和人工终审后才重新进入公共趋势。迁移测试覆盖既有衣物/推荐数据保留、V2/V3/V4/V5/V6 升级和重复启动不重复执行。
+数据库结构由 Flyway 管理，运行时 SQL 初始化已关闭。V1 是兼容旧结构的基线迁移，V2 增加图片清理任务表，V3 为推荐增加审计元数据列，V4 增加管理员治理，V5 增加趋势快照，V6 增加趋势 AI 初审与人工终审状态及审计字段，V7 增加个人档案 `gender` 字段：新数据库依次执行 V1 至 V7；已有表但没有 Flyway 历史的旧数据库会先以版本 0 建立基线，再依次执行。V6 不清除趋势内容，既有内容默认进入 `PENDING_AI` 隔离区，需完成 AI 初审和人工终审后才重新进入公共趋势。迁移测试覆盖既有衣物/推荐数据保留、V2/V3/V4/V5/V6/V7 升级和重复启动不重复执行。
 
 `baseline-on-migrate=true` 只用于接管本项目旧数据库，`clean-disabled=true` 禁止 Flyway 清库。已执行的迁移文件不应修改；后续结构变化应继续新增版本迁移。迁移不能替代备份，升级包含重要数据的环境前仍应先备份 PostgreSQL。
 
@@ -191,6 +192,13 @@ mvn spring-boot:run
 | BAILIAN_VISION_MODEL | qwen-vl-plus | 视觉识别模型 |
 | BAILIAN_ENDPOINT | 百炼兼容接口 | 模型请求地址 |
 | BAILIAN_CONNECT_TIMEOUT / BAILIAN_READ_TIMEOUT | 3s / 8s | 模型连接和读取超时 |
+| BAILIAN_IMAGE_ENABLED | true | 是否启用每日模特生图 |
+| BAILIAN_IMAGE_MODEL | wan2.6-image | 阿里云万相图像编辑模型 |
+| BAILIAN_IMAGE_ENDPOINT | 万相多模态生成接口 | 图像生成任务地址 |
+| BAILIAN_IMAGE_TASK_ENDPOINT | `/api/v1/tasks` | 异步任务轮询地址 |
+| BAILIAN_IMAGE_PROTOTYPE_MALE / FEMALE | classpath 原型资源 | 男/女模特原型图 |
+| BAILIAN_IMAGE_REFERENCE_BASE_URL | 空 | 仅用于把相对演示衣物图片转换为公网参考地址；上传衣物优先走私有图片 Base64 |
+| BAILIAN_IMAGE_TASK_TIMEOUT / POLL_INTERVAL | 90s / 2s | 生图任务最长等待时间和轮询间隔 |
 | TREND_AI_REVIEW_ENABLED | true | 是否启用趋势 AI 初审；关闭时内容保持隔离 |
 | TREND_AI_REVIEW_MODEL | qwen-plus | 趋势 AI 初审使用的百炼模型 |
 | TREND_AI_REVIEW_INITIAL_DELAY / TREND_AI_REVIEW_INTERVAL | 30s / 300s | AI 初审调度器的首次延迟和间隔 |
@@ -275,7 +283,7 @@ python -m unittest discover -s scripts/evaluation -p "test_*.py"
 
 ### 没有百炼 API Key 是否无法使用
 
-没有 Key 时仍然可以使用规则降级推荐；配置 `DASHSCOPE_API_KEY` 后，默认优先使用 qwen-plus。若要离线运行或避免模型费用，请显式设置 `BAILIAN_ENABLED=false`。视觉识别另外受 BAILIAN_VISION_ENABLED 控制。
+没有 Key 时仍然可以使用规则降级推荐；配置 `DASHSCOPE_API_KEY` 后，默认优先使用 qwen-plus。若要离线运行或避免模型费用，请显式设置 `BAILIAN_ENABLED=false` 和 `BAILIAN_IMAGE_ENABLED=false`。视觉识别另外受 BAILIAN_VISION_ENABLED 控制。
 
 ### 端口被占用
 
