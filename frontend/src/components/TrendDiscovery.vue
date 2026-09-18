@@ -43,20 +43,20 @@ async function filter(key, value) {
     <div v-else-if="!state.trends.length" class="discovery-empty" role="status"><h3>这个范围还没有可用的穿搭内容</h3><p>试试近 7 天或其他来源。平台连接状态可在下方查看。</p></div>
     <div v-if="!controlsOnly && !state.trendsLoading && !state.trendError" class="discovery-looks">
       <article v-for="item in items" :key="item.id" class="discovery-look">
-        <a class="look-picture" :href="item.sourceUrl" target="_blank" rel="noopener noreferrer" :aria-label="`查看原文：${item.title}`">
+        <a class="look-picture" :href="item.sourceUrl" target="_blank" rel="noopener noreferrer" :aria-label="`在来源平台查看：${item.title}`">
           <img v-if="item.imageUrl && !broken.has(item.imageUrl)" :src="item.imageUrl" :alt="item.title" loading="lazy" referrerpolicy="no-referrer" @error="broken = new Set([...broken, item.imageUrl])" />
-          <span v-else class="image-unavailable"><ImageOff :size="26" />图片暂不可用，查看原文</span><span class="source-mark">{{ names[item.platform] || item.platform }}</span>
+          <span v-else class="image-unavailable"><ImageOff :size="26" />{{ item.imageUrl ? '图片加载失败，前往来源' : '该来源只提供榜单词，无配图' }}</span><span class="source-mark">{{ names[item.platform] || item.platform }}</span>
         </a>
         <div class="look-details">
           <p class="look-meta">{{ item.evidence?.author || names[item.platform] || item.platform }} · {{ date(item.publishedAt) }}</p><h3>{{ item.title }}</h3><p class="look-tags">{{ (item.topicTags || []).join(' / ') }}</p>
           <p v-if="matches(item).length" class="match-reason">与你偏好的 {{ matches(item).join('、') }} 相关</p>
           <p v-if="item.stale" class="look-meta">上次收录于 {{ date(item.fetchedAt) }}，等待更新</p>
           <p class="look-meta">{{ item.evidence?.scoreLabel || '来源内评分' }}<template v-if="item.platform !== 'editorial'"> {{ item.heatScore }}</template></p>
-          <div class="look-actions"><button type="button" @click="app.useTrend(item)"><Shirt :size="16" />用我的衣橱搭一套</button><a :href="item.sourceUrl" target="_blank" rel="noopener noreferrer" aria-label="查看原文"><ArrowUpRight :size="20" /></a></div>
+          <div class="look-actions"><button type="button" @click="app.useTrend(item)"><Shirt :size="16" />用我的衣橱搭一套</button><a :href="item.sourceUrl" target="_blank" rel="noopener noreferrer" aria-label="在来源平台查看"><ArrowUpRight :size="20" /></a></div>
         </div>
       </article>
     </div>
-    <button v-if="!controlsOnly && state.trends.length" class="text-action more-trends" type="button" @click="app.selectView('trend')">查看全部 {{ state.trends.length }} 篇内容 <ArrowUpRight :size="16" /></button>
+    <button v-if="!controlsOnly && state.trends.length" class="text-action more-trends" type="button" @click="app.selectView('trend')">查看全部 {{ state.trends.length }} 条内容 <ArrowUpRight :size="16" /></button>
     <details class="source-details"><summary>来源与统计说明</summary><p>{{ state.trendMeta.notice }}</p>
       <ul><li v-for="source in state.trendMeta.sources || []" :key="source.id"><strong>{{ names[source.id] || source.id }}</strong><span>{{ states[source.state] || '状态未知' }} · {{ source.message }}</span><span v-if="source.itemCount">收录 {{ source.itemCount }} 篇</span><time v-if="source.lastSuccessAt">最后成功 {{ date(source.lastSuccessAt) }}</time></li></ul>
       <button v-if="app.isAdmin" class="text-action" type="button" :disabled="state.trendsLoading" @click="app.refreshTrendSources()">更新已连接来源</button>

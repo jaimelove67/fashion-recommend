@@ -92,6 +92,7 @@ services:
       TREND_JSON_URL: ${TREND_JSON_URL:-}
       TREND_EDITORIAL_ENABLED: ${TREND_EDITORIAL_ENABLED:-true}
       TREND_EDITORIAL_FEEDS: ${TREND_EDITORIAL_FEEDS:-https://www.vogue.com/feed/rss,https://hypebeast.cn/feed,https://www.toodaylab.com/feed}
+      TREND_HOT_BOARDS_ENABLED: ${TREND_HOT_BOARDS_ENABLED:-true}
       TREND_IMPORT_DIRECTORY: /app/trend-data
       TREND_DOUYIN_URL: ${TREND_DOUYIN_URL:-}
       TREND_XIAOHONGSHU_URL: ${TREND_XIAOHONGSHU_URL:-}

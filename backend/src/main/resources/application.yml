@@ -61,6 +61,10 @@ app:
       task-timeout: ${BAILIAN_IMAGE_TASK_TIMEOUT:90s}
       poll-interval: ${BAILIAN_IMAGE_POLL_INTERVAL:2s}
   trends:
+    # Built-in fallback for douyin/weibo: their public hot boards are read anonymously when neither
+    # an import file nor an endpoint is configured. Boards give trending words with the platform
+    # heat value, not article content; keyword search and notes need a login and are never collected.
+    hot-boards-enabled: ${TREND_HOT_BOARDS_ENABLED:true}
     editorial-enabled: ${TREND_EDITORIAL_ENABLED:true}
     # Comma or newline separated HTTPS publisher feeds. Each feed is fetched independently and a
     # failing feed never removes another feed's items. Blank keeps the built-in publisher feed.

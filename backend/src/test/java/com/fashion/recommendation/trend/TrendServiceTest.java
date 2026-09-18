@@ -22,6 +22,17 @@ class TrendServiceTest {
         verify(repository).status(eq("douyin"), any(), eq(false), eq(0), anyString());
     }
 
+    @Test void anEmptyResultFromAHealthyBoardSourceStillCountsAsConnected() {
+        TrendRepository repository = mock(TrendRepository.class);
+        TrendSourceAdapter source = mock(TrendSourceAdapter.class);
+        when(source.platform()).thenReturn("weibo");
+        when(source.fetchPublicSnapshots()).thenReturn(List.of());
+        when(source.emptyResultIsHealthy()).thenReturn(true);
+        new TrendService(List.of(source), repository).refresh();
+        verify(repository).status(eq("weibo"), any(), eq(true), eq(0), contains("没有穿搭相关内容"));
+        verify(repository, never()).save(anyString(), any());
+    }
+
     @Test void filtersWindowsAndDoesNotConfuseOldViralPostsWithNewTrends() {
         TrendRepository repository = mock(TrendRepository.class);
         var fresh = item("new", "douyin", 2);

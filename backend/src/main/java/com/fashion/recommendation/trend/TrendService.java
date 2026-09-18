@@ -29,8 +29,10 @@ public class TrendService {
             try {
                 List<TrendItem> items = source.fetchPublicSnapshots();
                 for (TrendItem item : items) repository.save(source.platform(), normalize(item, source.scoreLabel()));
-                repository.status(source.platform(), now, !items.isEmpty(), items.size(),
-                        items.isEmpty() ? "未配置或本次未返回穿搭内容" : "采集完成");
+                repository.status(source.platform(), now, !items.isEmpty() || source.emptyResultIsHealthy(), items.size(),
+                        items.isEmpty()
+                                ? (source.emptyResultIsHealthy() ? "来源可用，本次没有穿搭相关内容" : "来源未接通或本次未返回穿搭内容")
+                                : "采集完成");
             } catch (RuntimeException e) {
                 repository.status(source.platform(), now, false, 0, "采集失败，请检查来源连接或会话；保留上次结果");
             }
