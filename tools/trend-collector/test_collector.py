@@ -1,9 +1,11 @@
+from contextlib import redirect_stdout
 from datetime import datetime, timezone
+import io
 import json
 from pathlib import Path
 import tempfile
 import unittest
-from collector import normalize, count, write_feed
+from collector import MAX_FEED_BYTES, normalize, count, report, write_feed
 
 
 class CollectorTests(unittest.TestCase):
@@ -43,6 +45,41 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(douyin["imageUrl"], "https://img.example/cover.jpg")
         weibo = normalize({**row, "note_url": "https://m.weibo.cn/detail/123", "image_list": ""}, "weibo")
         self.assertIsNone(weibo["imageUrl"])
+
+    def statuses(self, output):
+        with redirect_stdout(io.StringIO()):
+            return {row["platform"]: row for row in report(output)}
+
+    def test_status_distinguishes_missing_ready_oversized_and_unreadable_feeds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            self.assertEqual(
+                {row["state"] for row in self.statuses(output).values()}, {"missing"},
+                "an unimported source must be reported as missing, not as an empty feed")
+            self.assertIsNone(self.statuses(output)["douyin"]["writtenAt"])
+
+            write_feed([self.row()], "xiaohongshu", output)
+            ready = self.statuses(output)["xiaohongshu"]
+            self.assertEqual(ready["state"], "ready")
+            self.assertEqual(ready["items"], 1)
+            self.assertIsNotNone(ready["newestPublishedAt"])
+            self.assertTrue(ready["withinBackendLimit"])
+
+            (output / "weibo.json").write_text(
+                json.dumps({"items": [{"pad": "x" * MAX_FEED_BYTES}]}), encoding="utf-8")
+            oversized = self.statuses(output)["weibo"]
+            self.assertEqual(oversized["state"], "oversized")
+            self.assertFalse(oversized["withinBackendLimit"])
+
+            (output / "douyin.json").write_text("not json", encoding="utf-8")
+            self.assertEqual(self.statuses(output)["douyin"]["state"], "unreadable")
+
+    def test_status_rejects_a_feed_without_usable_items(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            write_feed([self.row()], "xiaohongshu", output)
+            (output / "xiaohongshu.json").write_text(json.dumps({"items": []}), encoding="utf-8")
+            self.assertEqual(self.statuses(output)["xiaohongshu"]["state"], "empty")
 
 
 if __name__ == "__main__":

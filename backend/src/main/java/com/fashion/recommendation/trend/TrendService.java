@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -80,17 +81,29 @@ public class TrendService {
                 .filter(i -> platform == null || platform.isBlank() || platform.equals(i.platform()))
                 .filter(i -> topic == null || topic.isBlank() || i.title().contains(topic) || i.topicTags().stream().anyMatch(t -> t.contains(topic)))
                 .limit(50).toList();
-        var statuses = new ArrayList<>(repository.statuses());
-        for (String social : List.of("douyin", "xiaohongshu", "weibo")) {
-            if (statuses.stream().noneMatch(s -> s.id().equals(social))) statuses.add(new TrendSourceStatus(
-                    social, null, null, "unconfigured", "等待连接可用的数据源", 0));
+        // Only sources the application actually has are reported: a stored id that no longer maps to
+        // an adapter (a renamed or removed feed) must not linger in the user-visible source list.
+        Map<String, TrendSourceStatus> stored = new HashMap<>();
+        for (TrendSourceStatus status : repository.statuses()) stored.put(status.id(), status);
+        List<TrendSourceStatus> statuses = new ArrayList<>();
+        for (TrendSourceAdapter source : sources) {
+            TrendSourceStatus known = stored.get(source.platform());
+            statuses.add(known == null ? placeholder(source.platform()) : known);
         }
+        statuses.sort(Comparator.comparing(TrendSourceStatus::id));
         Instant fetched = filtered.stream().map(TrendItem::fetchedAt).max(Instant::compareTo).orElse(null);
         return new TrendFeed("multi-source", fetched, false, filtered, "来源内评分", period, styles(filtered), statuses,
                 "统计采集范围内最近" + (period.equals("day") ? "24 小时" : "7 天")
                         + "发布或有已验证互动增长的内容；跨平台交替展示。编辑文章按发布时间排列，不代表平台热榜。风格按内容标签归纳。");
     }
     private static long value(Long value) { return value == null ? 0 : value; }
+    private static final List<String> SOCIAL_SOURCES = List.of("douyin", "xiaohongshu", "weibo");
+    /** A source that has not been refreshed yet must still be visible, so users see what is not connected. */
+    private static TrendSourceStatus placeholder(String id) {
+        return SOCIAL_SOURCES.contains(id)
+                ? new TrendSourceStatus(id, null, null, "unconfigured", "等待连接可用的数据源", 0)
+                : new TrendSourceStatus(id, null, null, "pending", "等待首次采集", 0);
+    }
     private static List<TrendStyle> styles(List<TrendItem> items) {
         Map<String, List<TrendItem>> grouped = new LinkedHashMap<>();
         for (TrendItem item : items) for (String tag : item.topicTags().stream().distinct().toList())

@@ -124,7 +124,7 @@ mvn spring-boot:run
 4. “使用 AI 自动识别”默认不勾选；此时需填写名称、类别和颜色。只有本次上传明确勾选后，后端才允许进入识别流程，实际外部调用还要求视觉开关和密钥均已配置。
 5. 进入“推荐”，填写城市、场合和可选的风格要求，生成搭配。
 6. 查看天气、推荐单品和推荐理由，保存方案并提交满意度反馈。
-7. 进入“历史”查看已生成记录；“风潮”优先展示已配置的授权 JSON 趋势源，其次可读取服务端配置的公开网页源，不可用时显示明确标注的开发样本。
+7. 进入“历史”查看已生成记录；“风潮”展示已接入来源的真实内容（编辑订阅源、授权 JSON 源、公开网页源，以及采集导入的三平台内容），没有任何可用内容时显示空状态与来源状态说明，不伪造趋势。
 8. 管理员进入独立的“管理工作台”，在“趋势内容审核”中运行 AI 初审，再对内容作人工终审；普通用户只看到人工通过且未下架的趋势。
 
 推荐至少需要两件可组合的、已完善的不同类别衣物。衣物为空、只剩待人工确认记录或类别无法组合时，接口会返回明确错误，不会伪造推荐结果。
@@ -135,7 +135,7 @@ mvn spring-boot:run
 - 每日推荐主区域按参考效果展示为“中央全身模特 + 四角衣橱单品卡”，下方固定解释天气适配、场合适配、风格方向、衣橱依据。页面会按当前衣橱 id 重新校验推荐快照，并排除 `NEEDS_MANUAL_REVIEW` 衣物；失效图片不使用通用时装图回退。模特性别只取个人档案中的 `gender`，每日模特图通过 `/api/v1/me/recommendations/{id}/visual` 调用阿里云万相图像编辑接口生成，未配置或失败时保留画板和已确认单品并明确显示未生成状态，不把原型或静态图冒充当日生图。
 - 每次生成都会持久化审计元数据：合法 LLM 结果保存真实 provider 元数据（provider call ID、模型名、prompt 版本与三类 token），规则降级只保存稳定的枚举式 fallback 原因，不保存异常原文。API 通过嵌套 `generationAudit` 返回这些字段，`engine` 仍保留在顶层。旧历史与降级路径保持为空，不伪造模型元数据。
 - BAILIAN_VISION_ENABLED 默认为 false。即使服务端已启用，仍需用户在每次上传时明确勾选 AI 识别；未同意、未启用或识别失败时，系统不会调用或不会采纳视觉模型结果，并要求人工确认不完整信息。
-- “风潮”在 `TREND_JSON_URL` 返回符合严格契约的授权数据，或 `TREND_WEB_URLS` 成功读取到公开网页内容时标记 `demoMode=false`；两类源均不可用时回退到明确标注的 10 条开发样本，风潮页按热度降序展示 Top 10 弧形画廊。网页适配器抽取 HTML/OpenGraph/JSON-LD 的标题、摘要、标签、发布时间、图片和来源链接，并生成“来源页信号评分”；该评分只表示新鲜度与内容完整度，不代表平台实时热度。
+- “风潮”只展示已接入来源的真实内容：`TREND_EDITORIAL_FEEDS` 的出版方订阅源、`TREND_JSON_URL` 的授权数据、`TREND_WEB_URLS` 的公开网页，以及 `TREND_IMPORT_DIRECTORY` 中由采集器导入的 `<platform>.json`。这些来源都没有返回可用内容时，接口返回空列表（`demoMode` 恒为 `false`，开发样本回退已移除），页面显示空状态并在“来源与统计说明”中列出各来源状态。网页适配器抽取 HTML/OpenGraph/JSON-LD 的标题、摘要、标签、发布时间、图片和来源链接，并生成“来源页信号评分”；该评分只表示新鲜度与内容完整度，不代表平台实时热度。抖音、小红书、微博没有可公开调用的热榜接口，其内容只能通过导入通道进入，未接入时来源状态明确显示“未接通”。
 - 趋势内容采用轻量审核工作流：抓取后进入 `PENDING_AI`，AI 只输出结构化的相关性、风险和理由，成功后进入 `PENDING_HUMAN`；AI 失败进入 `AI_FAILED`，管理员可以重试或填写说明后人工接管。只有人工 `APPROVED` 且 `hidden=false` 才能被普通趋势接口读取，AI 的 PASS/REJECT 都不能直接发布或驳回。
 - 登录后的全局天气条会优先请求浏览器当前位置；用户拒绝定位时可输入城市。天气由后端调用 Open-Meteo/wttr.in 并标注数据来源，当前位置坐标只保存在浏览器本地，不写入业务数据库。
 - 个人数据接口要求 Spring Security Session 认证，服务端从认证上下文取得用户身份；客户端自定义用户请求头不会改变身份。
@@ -150,6 +150,8 @@ mvn spring-boot:run
 `baseline-on-migrate=true` 只用于接管本项目旧数据库，`clean-disabled=true` 禁止 Flyway 清库。已执行的迁移文件不应修改；后续结构变化应继续新增版本迁移。迁移不能替代备份，升级包含重要数据的环境前仍应先备份 PostgreSQL。
 
 这些边界的设计理由、安全失败方式和生产化替换方案见 [开发期边界与生产化路径](docs/development-boundaries.md)。
+
+趋势内容的来源边界、编辑订阅源配置、抖音/小红书/微博的内容导入步骤与审核流程见 [趋势内容来源与接入说明](docs/trend-collection.md)。
 
 ## 大模型证明材料
 
@@ -204,7 +206,7 @@ mvn spring-boot:run
 | TREND_AI_REVIEW_INITIAL_DELAY / TREND_AI_REVIEW_INTERVAL | 30s / 300s | AI 初审调度器的首次延迟和间隔 |
 | TREND_AI_REVIEW_BATCH_SIZE | 10 | 每次自动初审最多处理的内容数 |
 
-授权趋势源变量：`TREND_JSON_URL`、`TREND_PLATFORM`、`TREND_WEB_URLS`、`TREND_WEB_PLATFORM`、`TREND_WEB_MAX_PAGE_CHARS`、`TREND_WEB_MAX_ARTICLES_PER_PAGE`、`TREND_CONNECT_TIMEOUT`、`TREND_READ_TIMEOUT`、`TREND_CACHE_TTL`。`TREND_JSON_URL` 与 `TREND_WEB_URLS` 都为空时使用开发样本。JSON 源必须返回只含 `items` 的对象；每条记录必须包含 `id`、`platform`、`title`、`topicTags`、`heatScore`、`publishedAt`、`sourceUrl`、`imageUrl`，可选 `summary`。条目数为 1-50，热度为 0-100 整数，时间为 ISO-8601，链接为 HTTP(S)，`imageUrl` 和 `summary` 可为 `null`。任一 JSON 条目约束失败时整批拒绝，不会把部分脏数据标记为实时趋势。
+授权趋势源变量：`TREND_EDITORIAL_ENABLED`、`TREND_EDITORIAL_FEEDS`、`TREND_IMPORT_DIRECTORY`、`TREND_JSON_URL`、`TREND_PLATFORM`、`TREND_WEB_URLS`、`TREND_WEB_PLATFORM`、`TREND_WEB_MAX_PAGE_CHARS`、`TREND_WEB_MAX_ARTICLES_PER_PAGE`、`TREND_CONNECT_TIMEOUT`、`TREND_READ_TIMEOUT`、`TREND_CACHE_TTL`。编辑订阅源是逗号或换行分隔的 HTTPS 出版方 RSS，逐源独立抓取，某一源不可用不影响其他源。任何来源都没有返回可用内容时，趋势接口返回空列表，并在 `sources` 中给出每个来源的状态，不回退到开发样本。JSON 源必须返回只含 `items` 的对象；每条记录必须包含 `id`、`platform`、`title`、`topicTags`、`heatScore`、`publishedAt`、`sourceUrl`、`imageUrl`，可选 `summary`。条目数为 1-50，热度为 0-100 整数，时间为 ISO-8601，链接为 HTTP(S)，`imageUrl` 和 `summary` 可为 `null`。任一 JSON 条目约束失败时整批拒绝，不会把部分脏数据标记为实时趋势。
 
 网页源是逗号或换行分隔的、由服务端管理员配置的公开 HTTP(S) URL，不接受前端传入任意地址。`ConfiguredWebTrendSourceAdapter` 会限制 URL 数量、单页大小和文章数量，拒绝 localhost、内网/回环地址、带用户信息的 URL，并按缓存 TTL 复用结果。它优先读取 OpenGraph/JSON-LD，缺失时回退到页面标题、`article` 标题、可见摘要、标签、`time` 和图片；网页没有统一可信热度，因此界面会显示“来源页信号评分”。配置前仍需确认来源授权、服务条款和 robots 规则，不能绕过登录、验证码或访问控制。
 

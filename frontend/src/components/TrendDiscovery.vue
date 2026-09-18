@@ -6,7 +6,8 @@ const emit = defineEmits(['filter-style'])
 const state = computed(() => props.app.state)
 const tag = ref('')
 const broken = ref(new Set())
-const names = { douyin: '抖音', xiaohongshu: '小红书', weibo: '微博', editorial: '时尚编辑', 'vogue-rss': 'Vogue RSS', 'configured-feed': '配置来源', 'web-scrape': '公开网页' }
+const names = { douyin: '抖音', xiaohongshu: '小红书', weibo: '微博', editorial: '时尚编辑', 'configured-feed': '配置来源', 'web-scrape': '公开网页' }
+const states = { ready: '已连接', unavailable: '采集失败', unconfigured: '未接通', pending: '等待采集' }
 const matches = item => (item.topicTags || []).filter(t => (state.value.profile?.stylePreferences || []).some(p => p.includes(t) || t.includes(p)))
 const items = computed(() => [...state.value.trends.filter(i => !tag.value || i.topicTags?.includes(tag.value))].sort((a, b) => matches(b).length - matches(a).length).slice(0, 3))
 const date = v => v ? new Date(v).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '尚未更新'
@@ -57,7 +58,7 @@ async function filter(key, value) {
     </div>
     <button v-if="!controlsOnly && state.trends.length" class="text-action more-trends" type="button" @click="app.selectView('trend')">查看全部 {{ state.trends.length }} 篇内容 <ArrowUpRight :size="16" /></button>
     <details class="source-details"><summary>来源与统计说明</summary><p>{{ state.trendMeta.notice }}</p>
-      <ul><li v-for="source in state.trendMeta.sources || []" :key="source.id"><strong>{{ names[source.id] || source.id }}</strong><span>{{ source.state === 'ready' ? '已连接' : '暂未提供内容' }} · {{ source.message }}</span><time v-if="source.lastSuccessAt">最后成功 {{ date(source.lastSuccessAt) }}</time></li></ul>
+      <ul><li v-for="source in state.trendMeta.sources || []" :key="source.id"><strong>{{ names[source.id] || source.id }}</strong><span>{{ states[source.state] || '状态未知' }} · {{ source.message }}</span><span v-if="source.itemCount">收录 {{ source.itemCount }} 篇</span><time v-if="source.lastSuccessAt">最后成功 {{ date(source.lastSuccessAt) }}</time></li></ul>
       <button v-if="app.isAdmin" class="text-action" type="button" :disabled="state.trendsLoading" @click="app.refreshTrendSources()">更新已连接来源</button>
     </details>
   </section>

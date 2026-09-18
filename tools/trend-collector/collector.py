@@ -2,6 +2,12 @@
 
 Only public content fields are emitted. Login cookies and raw provider responses
 are never served or logged. A failed collection leaves the last feed untouched.
+
+Modes:
+  import  normalize a MediaCrawler-style content JSON export into data/<platform>.json
+  status  inventory data/ against the backend contract without contacting the backend
+  xhs     collect from a signed-in xhs-cli session (requires a local login)
+  serve   expose data/<platform>.json over HTTP for TREND_DOUYIN_URL and friends
 """
 from __future__ import annotations
 
@@ -20,6 +26,8 @@ import time
 from urllib.parse import urlparse
 
 PLATFORMS = {"xhs": "xiaohongshu", "dy": "douyin", "wb": "weibo"}
+# The backend rejects an import file larger than this, so status reports readiness the same way.
+MAX_FEED_BYTES = 2_000_000
 RULES = {
     "通勤": ("通勤", "西装", "office", "blazer"), "极简": ("极简", "简约", "minimal"),
     "丹宁": ("牛仔", "丹宁", "denim", "jeans"), "轻户外": ("户外", "机能", "gorpcore"),
@@ -163,6 +171,46 @@ def xhs_search(keyword, limit):
     return rows
 
 
+def report(output):
+    """Inventory the feed directory the backend reads. Never contacts the backend."""
+    sources = []
+    for platform in sorted(set(PLATFORMS.values())):
+        path = output / f"{platform}.json"
+        entry = {"platform": platform, "file": str(path)}
+        if not path.is_file():
+            sources.append({**entry, "state": "missing", "items": 0, "newestPublishedAt": None,
+                            "writtenAt": None, "withinBackendLimit": None,
+                            "note": "尚未导入；趋势页会把该来源显示为未接通"})
+            continue
+        stats = path.stat()
+        written = datetime.fromtimestamp(stats.st_mtime, timezone.utc).isoformat()
+        within = stats.st_size <= MAX_FEED_BYTES
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            items = data.get("items") if isinstance(data, dict) else data
+            if not isinstance(items, list):
+                raise ValueError("items must be a list")
+        except (ValueError, OSError):
+            sources.append({**entry, "state": "unreadable", "items": 0, "newestPublishedAt": None,
+                            "writtenAt": written, "withinBackendLimit": within,
+                            "note": "不是后端契约所需的 {\"items\": [...]} JSON；请重新导入"})
+            continue
+        if not within:
+            state, note = "oversized", f"超过后端 {MAX_FEED_BYTES} 字节上限，后端会拒绝该文件"
+        elif not items:
+            state, note = "empty", "文件存在但没有可用条目"
+        else:
+            state, note = "ready", "可被后端读取；下一步刷新趋势来源并完成 AI 初审与人工终审"
+        published = sorted(str(i.get("publishedAt")) for i in items
+                           if isinstance(i, dict) and i.get("publishedAt"))
+        sources.append({**entry, "state": state, "items": len(items),
+                        "newestPublishedAt": published[-1] if published else None,
+                        "writtenAt": written, "withinBackendLimit": within, "note": note})
+    print(json.dumps({"directory": str(output), "backendLimitBytes": MAX_FEED_BYTES, "sources": sources},
+                     ensure_ascii=False, indent=2))
+    return sources
+
+
 def serve(directory, port):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -183,10 +231,10 @@ def serve(directory, port):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=["import", "xhs", "serve"])
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("mode", choices=["import", "status", "xhs", "serve"])
     parser.add_argument("--platform", choices=list(PLATFORMS.values()), default="xiaohongshu")
-    parser.add_argument("--input", type=Path, help="MediaCrawler content JSON export")
+    parser.add_argument("--input", type=Path, nargs="+", help="MediaCrawler content JSON export (one or more files)")
     parser.add_argument("--output", type=Path, default=Path(__file__).parent / "data")
     parser.add_argument("--keyword", default="通勤穿搭")
     parser.add_argument("--limit", type=int, default=10)
@@ -195,11 +243,15 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.limit <= 20: parser.error("limit must be 1..20")
     if args.interval and args.interval < 21600: parser.error("interval must be at least 21600 seconds")
+    if args.mode == "status": report(args.output); return
     if args.mode == "serve": serve(args.output, args.port); return
     if args.mode == "import":
         if not args.input: parser.error("--input is required")
-        data = json.loads(args.input.read_text(encoding="utf-8-sig"))
-        write_feed(data if isinstance(data, list) else data["items"], args.platform, args.output)
+        for path in args.input:
+            if not path.is_file(): parser.error(f"input file not found: {path}")
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            write_feed(data if isinstance(data, list) else data["items"], args.platform, args.output)
+        report(args.output)
         return
     while True:
         try: write_feed(xhs_search(args.keyword, args.limit), "xiaohongshu", args.output, datetime.now(timezone.utc))
