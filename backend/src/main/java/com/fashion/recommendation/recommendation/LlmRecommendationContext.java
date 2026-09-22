@@ -12,7 +12,13 @@ public record LlmRecommendationContext(
         List<WardrobeItem> wardrobe,
         WeatherSnapshot weather,
         StyleProfile styleProfile,
-        Map<Long, Double> itemRatings) {
+        Map<Long, Double> itemRatings,
+        TrendReference trendReference) {
+
+    public LlmRecommendationContext(String occasion, String styleHint, List<WardrobeItem> wardrobe,
+            WeatherSnapshot weather, StyleProfile styleProfile, Map<Long, Double> itemRatings) {
+        this(occasion, styleHint, wardrobe, weather, styleProfile, itemRatings, null);
+    }
 
     public LlmRecommendationContext {
         wardrobe = List.copyOf(wardrobe);

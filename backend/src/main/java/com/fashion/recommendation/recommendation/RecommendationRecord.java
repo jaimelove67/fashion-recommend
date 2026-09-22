@@ -17,5 +17,13 @@ record RecommendationRecord(
         Integer weatherCode,
         Double windSpeedKmh,
         Instant weatherObservedAt,
-        String weatherSource) {
+        String weatherSource,
+        String modelName,
+        String promptVersion,
+        String providerCallId,
+        Integer promptTokens,
+        Integer completionTokens,
+        Integer totalTokens,
+        Long generationLatencyMs,
+        String fallbackReason) {
 }

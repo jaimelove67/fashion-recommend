@@ -4,11 +4,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fashion.recommendation.ai.AiModelCapability;
+import com.fashion.recommendation.ai.AiModelConfigurationService;
+import com.fashion.recommendation.ai.AiModelProvider;
+import com.fashion.recommendation.ai.AiModelRuntimeConfig;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
@@ -28,16 +34,21 @@ public class BailianGarmentRecognitionService implements GarmentRecognitionServi
     private final String apiKey;
     private final String model;
     private final boolean enabled;
+    private final AiModelConfigurationService modelConfigurationService;
 
     @Autowired
     public BailianGarmentRecognitionService(
             ObjectMapper objectMapper,
+            AiModelConfigurationService modelConfigurationService,
             @Value("${app.bailian.endpoint:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}")
                     String endpoint,
             @Value("${app.bailian.api-key:}") String apiKey,
             @Value("${app.bailian.vision-model:qwen-vl-plus}") String model,
-            @Value("${app.bailian.vision-enabled:false}") boolean enabled) {
-        this(RestClient.builder().build(), objectMapper, endpoint, apiKey, model, enabled);
+            @Value("${app.bailian.vision-enabled:false}") boolean enabled,
+            @Value("${app.bailian.connect-timeout:3s}") Duration connectTimeout,
+            @Value("${app.bailian.read-timeout:8s}") Duration readTimeout) {
+        this(createRestClient(connectTimeout, readTimeout), objectMapper, endpoint, apiKey, model, enabled,
+                modelConfigurationService);
     }
 
     BailianGarmentRecognitionService(
@@ -47,22 +58,35 @@ public class BailianGarmentRecognitionService implements GarmentRecognitionServi
             String apiKey,
             String model,
             boolean enabled) {
+        this(restClient, objectMapper, endpoint, apiKey, model, enabled, null);
+    }
+
+    private BailianGarmentRecognitionService(
+            RestClient restClient,
+            ObjectMapper objectMapper,
+            String endpoint,
+            String apiKey,
+            String model,
+            boolean enabled,
+            AiModelConfigurationService modelConfigurationService) {
         this.restClient = restClient;
         this.objectMapper = objectMapper;
         this.endpoint = endpoint;
         this.apiKey = apiKey;
         this.model = model;
         this.enabled = enabled;
+        this.modelConfigurationService = modelConfigurationService;
     }
 
     @Override
     public Optional<GarmentRecognitionResult> recognize(MultipartFile image) {
-        if (!enabled || !StringUtils.hasText(apiKey)) {
+        AiModelRuntimeConfig config = runtimeConfig();
+        if (!isEffectivelyEnabled(config) || !StringUtils.hasText(config.apiKey())) {
             return Optional.empty();
         }
         try {
             ObjectNode request = objectMapper.createObjectNode();
-            request.put("model", model);
+            request.put("model", config.model());
             request.put("temperature", 0.1);
             request.put("max_tokens", 200);
             ArrayNode messages = request.putArray("messages");
@@ -76,9 +100,9 @@ public class BailianGarmentRecognitionService implements GarmentRecognitionServi
             request.putObject("response_format").put("type", "json_object");
 
             String response = restClient.post()
-                    .uri(endpoint)
+                    .uri(config.endpoint())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .headers(headers -> headers.setBearerAuth(apiKey.trim()))
+                    .headers(headers -> headers.setBearerAuth(config.apiKey().trim()))
                     .body(request)
                     .retrieve()
                     .body(String.class);
@@ -95,7 +119,39 @@ public class BailianGarmentRecognitionService implements GarmentRecognitionServi
         }
     }
 
+    private AiModelRuntimeConfig runtimeConfig() {
+        if (modelConfigurationService != null) {
+            return modelConfigurationService.resolve(AiModelCapability.WARDROBE_RECOGNITION);
+        }
+        return new AiModelRuntimeConfig(
+                AiModelCapability.WARDROBE_RECOGNITION,
+                AiModelProvider.DASHSCOPE,
+                model,
+                apiKey,
+                enabled,
+                endpoint,
+                null,
+                StringUtils.hasText(apiKey) ? "ENVIRONMENT" : "MISSING",
+                StringUtils.hasText(apiKey),
+                false,
+                false,
+                null);
+    }
+
+    private boolean isEffectivelyEnabled(AiModelRuntimeConfig config) {
+        return modelConfigurationService == null
+                ? config.enabled()
+                : modelConfigurationService.isEffectivelyEnabled(config);
+    }
+
     private static String text(JsonNode node, String field) {
         return node.path(field).isTextual() ? node.path(field).asText().trim() : "";
+    }
+
+    private static RestClient createRestClient(Duration connectTimeout, Duration readTimeout) {
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(connectTimeout);
+        requestFactory.setReadTimeout(readTimeout);
+        return RestClient.builder().requestFactory(requestFactory).build();
     }
 }

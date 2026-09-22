@@ -5,13 +5,12 @@ import com.fashion.recommendation.recognition.GarmentRecognitionService;
 import com.fashion.recommendation.storage.ImageStorage;
 import com.fashion.recommendation.storage.StoredImage;
 import com.fashion.recommendation.storage.StoredImageData;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
@@ -21,16 +20,19 @@ public class WardrobeService {
     private final WardrobeRepository wardrobeRepository;
     private final ImageStorage imageStorage;
     private final GarmentRecognitionService recognitionService;
+    private final ImageCleanupRepository imageCleanupRepository;
     private final long maxFileSize;
 
     public WardrobeService(
             WardrobeRepository wardrobeRepository,
             ImageStorage imageStorage,
             GarmentRecognitionService recognitionService,
+            ImageCleanupRepository imageCleanupRepository,
             @Value("${app.storage.max-file-size:10485760}") long maxFileSize) {
         this.wardrobeRepository = wardrobeRepository;
         this.imageStorage = imageStorage;
         this.recognitionService = recognitionService;
+        this.imageCleanupRepository = imageCleanupRepository;
         this.maxFileSize = maxFileSize;
     }
 
@@ -42,20 +44,24 @@ public class WardrobeService {
         return wardrobeRepository.create(userId, request);
     }
 
+    @Transactional
     public WardrobeItem upload(
             String userId,
             MultipartFile image,
             String manualName,
             String manualCategory,
             String manualColor,
-            String manualStyle) {
+            String manualStyle,
+            boolean allowAiRecognition) {
         validateImage(image);
         StoredImage stored = imageStorage.store(userId, image);
-        Optional<GarmentRecognitionResult> recognition;
-        try {
-            recognition = recognitionService.recognize(image);
-        } catch (RuntimeException exception) {
-            recognition = Optional.empty();
+        Optional<GarmentRecognitionResult> recognition = Optional.empty();
+        if (allowAiRecognition) {
+            try {
+                recognition = recognitionService.recognize(image);
+            } catch (RuntimeException exception) {
+                recognition = Optional.empty();
+            }
         }
 
         GarmentRecognitionResult detected = recognition.orElse(new GarmentRecognitionResult("", "", "", ""));
@@ -66,17 +72,22 @@ public class WardrobeService {
         boolean complete = StringUtils.hasText(manualName) || StringUtils.hasText(detected.name());
         complete &= isRecognizedCategory(category) && !"待识别".equals(color);
         String status = complete ? (recognition.isPresent() ? "RECOGNIZED" : "MANUAL_CORRECTED") : "NEEDS_MANUAL_REVIEW";
-        String message = complete ? null : "图片识别未得到完整信息，请手动确认类别、颜色和名称";
+        String message = complete ? null : allowAiRecognition
+                ? "AI 识别未得到完整信息，请手动确认类别、颜色和名称"
+                : "请手动确认类别、颜色和名称";
         try {
             WardrobeItem item = wardrobeRepository.create(userId,
                     new WardrobeItemRequest(name, category, color, style, null),
                     stored.objectKey(), status, message);
-            String imageUrl = "/api/v1/me/wardrobe/" + item.id() + "/image?userId="
-                    + URLEncoder.encode(userId, StandardCharsets.UTF_8);
+            String imageUrl = "/api/v1/me/wardrobe/" + item.id() + "/image";
             wardrobeRepository.updateImageUrl(item.id(), userId, imageUrl);
             return wardrobeRepository.findByIdForUser(item.id(), userId).orElseThrow();
         } catch (RuntimeException exception) {
-            imageStorage.delete(stored.objectKey());
+            try {
+                imageStorage.delete(stored.objectKey());
+            } catch (Exception ignoreDeleteFailure) {
+                // deletion failure does not replace original DB failure
+            }
             throw exception;
         }
     }
@@ -95,14 +106,15 @@ public class WardrobeService {
         return imageStorage.read(item.imageObjectKey());
     }
 
+    @Transactional
     public void delete(String userId, Long itemId) {
         WardrobeItem item = wardrobeRepository.findByIdForUser(itemId, userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "衣物不存在或不属于当前用户"));
-        if (item.imageObjectKey() != null) {
-            imageStorage.delete(item.imageObjectKey());
-        }
         if (!wardrobeRepository.delete(itemId, userId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "衣物不存在或不属于当前用户");
+        }
+        if (item.imageObjectKey() != null) {
+            imageCleanupRepository.enqueue(item.imageObjectKey());
         }
     }
 

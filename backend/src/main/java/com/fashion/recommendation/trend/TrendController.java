@@ -16,7 +16,8 @@ public class TrendController {
     }
 
     @GetMapping
-    public ApiResponse<TrendFeed> list(@RequestParam(required = false) String platform, @RequestParam(required = false) String topic) {
-        return ApiResponse.ok(trendService.currentFeed(platform, topic));
+    public ApiResponse<TrendFeed> list(@RequestParam(required = false) String platform, @RequestParam(required = false) String topic,
+            @RequestParam(defaultValue = "week") String period) {
+        return ApiResponse.ok(trendService.currentFeed(platform, topic, period));
     }
 }

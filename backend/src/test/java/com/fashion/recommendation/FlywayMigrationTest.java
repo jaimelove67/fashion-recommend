@@ -1,0 +1,181 @@
+package com.fashion.recommendation;
+
+import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
+import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.MigrationVersion;
+import org.flywaydb.core.api.output.MigrateResult;
+import org.h2.jdbcx.JdbcDataSource;
+import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+class FlywayMigrationTest {
+    private static final List<String> V1_INDEXES = List.of(
+            "idx_wardrobe_items_user_created_id",
+            "idx_recommendations_user_created_id",
+            "idx_recommendation_items_wardrobe_item",
+            "idx_recommendation_feedback_user_recommendation");
+
+    @Test
+    void upgradesANonEmptyLegacySchemaOnceWithoutLosingExistingData() {
+        JdbcDataSource dataSource = legacyDataSource();
+        JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+        createLegacySchema(jdbcTemplate);
+        Flyway flyway = Flyway.configure()
+                .dataSource(dataSource)
+                .locations("classpath:db/migration")
+                .baselineOnMigrate(true)
+                .baselineVersion(MigrationVersion.fromVersion("0"))
+                .cleanDisabled(true)
+                .load();
+
+        MigrateResult firstMigration = flyway.migrate();
+
+        assertEquals(8, firstMigration.migrationsExecuted);
+        assertEquals("8", flyway.info().current().getVersion().getVersion());
+        assertEquals("旧衣物", jdbcTemplate.queryForObject(
+                "SELECT name FROM wardrobe_items WHERE id = 41", String.class));
+        assertEquals("MANUAL", jdbcTemplate.queryForObject(
+                "SELECT recognition_status FROM wardrobe_items WHERE id = 41", String.class));
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM app_users", Integer.class));
+        V1_INDEXES.forEach(indexName -> assertIndexExists(jdbcTemplate, indexName));
+        assertTableExists(jdbcTemplate, "admin_audit_logs");
+        assertIndexExists(jdbcTemplate, "idx_admin_audit_logs_created_id");
+        assertColumnExists(jdbcTemplate, "trend_contents", "moderation_status");
+        assertColumnExists(jdbcTemplate, "trend_contents", "ai_decision");
+        assertIndexExists(jdbcTemplate, "idx_trend_moderation_queue");
+        assertColumnExists(jdbcTemplate, "style_profiles", "gender");
+        assertTableExists(jdbcTemplate, "admin_ai_model_settings");
+
+        int appliedBeforeRestart = flyway.info().applied().length;
+        MigrateResult secondMigration = flyway.migrate();
+
+        assertEquals(0, secondMigration.migrationsExecuted);
+        assertEquals(appliedBeforeRestart, flyway.info().applied().length);
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM wardrobe_items WHERE id = 41 AND name = '旧衣物'", Integer.class));
+    }
+
+    @Test
+    void v3UpgradeKeepsLegacyRecommendationDataAndLeavesAuditColumnsNull() {
+        JdbcDataSource dataSource = legacyDataSource();
+        JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+        createLegacyRecommendationSchema(jdbcTemplate);
+        Flyway flyway = Flyway.configure()
+                .dataSource(dataSource)
+                .locations("classpath:db/migration")
+                .baselineOnMigrate(true)
+                .baselineVersion(MigrationVersion.fromVersion("0"))
+                .cleanDisabled(true)
+                .load();
+
+        MigrateResult migration = flyway.migrate();
+
+        assertEquals("8", flyway.info().current().getVersion().getVersion());
+        assertEquals("旧场合推荐", jdbcTemplate.queryForObject(
+                "SELECT summary FROM recommendations WHERE id = 91", String.class));
+        assertEquals("development-rule-v1", jdbcTemplate.queryForObject(
+                "SELECT engine FROM recommendations WHERE id = 91", String.class));
+        assertNull(jdbcTemplate.queryForObject(
+                "SELECT model_name FROM recommendations WHERE id = 91", String.class));
+        assertNull(jdbcTemplate.queryForObject(
+                "SELECT prompt_version FROM recommendations WHERE id = 91", String.class));
+        assertNull(jdbcTemplate.queryForObject(
+                "SELECT provider_call_id FROM recommendations WHERE id = 91", String.class));
+        assertNull(jdbcTemplate.queryForObject(
+                "SELECT prompt_tokens FROM recommendations WHERE id = 91", Integer.class));
+        assertNull(jdbcTemplate.queryForObject(
+                "SELECT total_tokens FROM recommendations WHERE id = 91", Integer.class));
+        assertNull(jdbcTemplate.queryForObject(
+                "SELECT generation_latency_ms FROM recommendations WHERE id = 91", Long.class));
+        assertNull(jdbcTemplate.queryForObject(
+                "SELECT fallback_reason FROM recommendations WHERE id = 91", String.class));
+        assertTableExists(jdbcTemplate, "admin_audit_logs");
+        assertTableExists(jdbcTemplate, "admin_ai_model_settings");
+    }
+
+    private static JdbcDataSource legacyDataSource() {
+        JdbcDataSource dataSource = new JdbcDataSource();
+        String databaseName = "flyway_upgrade_" + UUID.randomUUID().toString().replace("-", "");
+        dataSource.setURL("jdbc:h2:mem:" + databaseName + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
+        dataSource.setUser("sa");
+        dataSource.setPassword("");
+        return dataSource;
+    }
+
+    private static void createLegacySchema(JdbcTemplate jdbcTemplate) {
+        jdbcTemplate.execute("""
+                CREATE TABLE wardrobe_items (
+                    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                    user_id VARCHAR(100) NOT NULL,
+                    name VARCHAR(120) NOT NULL,
+                    category VARCHAR(40) NOT NULL,
+                    color VARCHAR(40) NOT NULL,
+                    style VARCHAR(120),
+                    image_url VARCHAR(500),
+                    created_at TIMESTAMP NOT NULL
+                )
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO wardrobe_items (id, user_id, name, category, color, created_at)
+                VALUES (41, 'legacy-user', '旧衣物', '上装', '灰色', TIMESTAMP '2026-07-20 08:00:00')
+                """);
+    }
+
+    private static void createLegacyRecommendationSchema(JdbcTemplate jdbcTemplate) {
+        jdbcTemplate.execute("""
+                CREATE TABLE recommendations (
+                    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                    user_id VARCHAR(100) NOT NULL,
+                    occasion VARCHAR(80) NOT NULL,
+                    city VARCHAR(80) NOT NULL,
+                    temperature_c DECIMAL(5, 2),
+                    summary VARCHAR(500) NOT NULL,
+                    reason VARCHAR(1200) NOT NULL,
+                    engine VARCHAR(80) NOT NULL,
+                    weather_apparent_temperature_c DECIMAL(5, 2),
+                    weather_precipitation_mm DECIMAL(6, 2),
+                    weather_code INT,
+                    weather_wind_speed_kmh DECIMAL(6, 2),
+                    weather_observed_at TIMESTAMP,
+                    weather_source VARCHAR(100),
+                    saved BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMP NOT NULL
+                )
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO recommendations (id, user_id, occasion, city, temperature_c, summary, reason, engine, saved, created_at)
+                VALUES (91, 'legacy-user', '通勤', '长沙', 26.0, '旧场合推荐', '旧规则理由', 'development-rule-v1', FALSE, TIMESTAMP '2026-07-20 08:00:00')
+                """);
+    }
+
+    private static void assertIndexExists(JdbcTemplate jdbcTemplate, String indexName) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.INDEXES WHERE UPPER(INDEX_NAME) = ?",
+                Integer.class,
+                indexName.toUpperCase(Locale.ROOT));
+        assertEquals(1, count, "missing index " + indexName);
+    }
+
+    private static void assertTableExists(JdbcTemplate jdbcTemplate, String tableName) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE UPPER(TABLE_NAME) = ?",
+                Integer.class,
+                tableName.toUpperCase(Locale.ROOT));
+        assertEquals(1, count, "missing table " + tableName);
+    }
+
+    private static void assertColumnExists(JdbcTemplate jdbcTemplate, String tableName, String columnName) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS "
+                        + "WHERE UPPER(TABLE_NAME) = ? AND UPPER(COLUMN_NAME) = ?",
+                Integer.class,
+                tableName.toUpperCase(Locale.ROOT),
+                columnName.toUpperCase(Locale.ROOT));
+        assertEquals(1, count, "missing column " + tableName + "." + columnName);
+    }
+}

@@ -2,6 +2,7 @@ package com.fashion.recommendation.wardrobe;
 
 import com.fashion.recommendation.common.ApiResponse;
 import jakarta.validation.Valid;
+import java.security.Principal;
 import java.util.List;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.MediaType;
@@ -13,7 +14,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
@@ -28,46 +28,43 @@ public class WardrobeController {
     }
 
     @GetMapping
-    public ApiResponse<List<WardrobeItem>> list(
-            @RequestHeader(value = "X-User-Id", defaultValue = "demo-user") String userId) {
-        return ApiResponse.ok(wardrobeService.list(userId));
+    public ApiResponse<List<WardrobeItem>> list(Principal principal) {
+        return ApiResponse.ok(wardrobeService.list(principal.getName()));
     }
 
     @PostMapping
     public ApiResponse<WardrobeItem> create(
-            @RequestHeader(value = "X-User-Id", defaultValue = "demo-user") String userId,
+            Principal principal,
             @Valid @RequestBody WardrobeItemRequest request) {
-        return ApiResponse.ok(wardrobeService.create(userId, request));
+        return ApiResponse.ok(wardrobeService.create(principal.getName(), request));
     }
 
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<WardrobeItem> upload(
-            @RequestHeader(value = "X-User-Id", defaultValue = "demo-user") String userId,
+            Principal principal,
             @RequestParam("image") MultipartFile image,
             @RequestParam(required = false) String name,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String color,
-            @RequestParam(required = false) String style) {
-        return ApiResponse.ok(wardrobeService.upload(userId, image, name, category, color, style));
+            @RequestParam(required = false) String style,
+            @RequestParam(defaultValue = "false") boolean allowAiRecognition) {
+        return ApiResponse.ok(wardrobeService.upload(
+                principal.getName(), image, name, category, color, style, allowAiRecognition));
     }
 
     @PutMapping("/{itemId}")
     public ApiResponse<WardrobeItem> update(
-            @RequestHeader(value = "X-User-Id", defaultValue = "demo-user") String userId,
+            Principal principal,
             @PathVariable Long itemId,
             @Valid @RequestBody WardrobeItemRequest request) {
-        return ApiResponse.ok(wardrobeService.update(userId, itemId, request));
+        return ApiResponse.ok(wardrobeService.update(principal.getName(), itemId, request));
     }
 
     @GetMapping("/{itemId}/image")
     public ResponseEntity<ByteArrayResource> image(
-            @RequestHeader(value = "X-User-Id", required = false) String headerUserId,
-            @RequestParam(required = false) String userId,
+            Principal principal,
             @PathVariable Long itemId) {
-        String effectiveUserId = headerUserId == null || headerUserId.isBlank()
-                ? (userId == null || userId.isBlank() ? "demo-user" : userId)
-                : headerUserId;
-        var data = wardrobeService.readImage(effectiveUserId, itemId);
+        var data = wardrobeService.readImage(principal.getName(), itemId);
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(data.contentType()))
                 .header("X-Content-Type-Options", "nosniff")
@@ -76,9 +73,9 @@ public class WardrobeController {
 
     @DeleteMapping("/{itemId}")
     public ApiResponse<Void> delete(
-            @RequestHeader(value = "X-User-Id", defaultValue = "demo-user") String userId,
+            Principal principal,
             @PathVariable Long itemId) {
-        wardrobeService.delete(userId, itemId);
+        wardrobeService.delete(principal.getName(), itemId);
         return ApiResponse.ok(null);
     }
 }

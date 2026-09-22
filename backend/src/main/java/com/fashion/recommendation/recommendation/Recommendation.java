@@ -17,5 +17,6 @@ public record Recommendation(
         Instant generatedAt,
         WeatherSnapshot weather,
         RecommendationFeedback feedback,
-        List<WardrobeItem> items) {
+        List<WardrobeItem> items,
+        RecommendationAudit generationAudit) {
 }

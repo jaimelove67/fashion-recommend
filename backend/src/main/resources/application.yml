@@ -1,34 +1,95 @@
 server:
   port: ${SERVER_PORT:8080}
+  servlet:
+    session:
+      timeout: ${SESSION_TIMEOUT:30m}
+      cookie:
+        http-only: true
+        same-site: lax
+        # The default app entrypoints use local HTTP. HTTPS deployments must
+        # explicitly set SESSION_COOKIE_SECURE=true.
+        secure: ${SESSION_COOKIE_SECURE:false}
 
 spring:
   application:
     name: fashion-recommendation-api
+  servlet:
+    multipart:
+      max-file-size: ${MINIO_MAX_FILE_SIZE:10485760}
+      # Leave room for multipart headers and garment fields around a 10 MiB photo.
+      max-request-size: 11MB
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5433/fashion_recommendation}
     username: ${SPRING_DATASOURCE_USERNAME:fashion}
     password: ${SPRING_DATASOURCE_PASSWORD:fashion_2404}
   sql:
     init:
-      mode: always
+      mode: never
+  flyway:
+    baseline-on-migrate: true
+    baseline-version: 0
+    clean-disabled: true
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info
 
 app:
+  ai-settings:
+    encryption-key: ${AI_SETTINGS_ENCRYPTION_KEY:}
+  auth:
+    registration-enabled: ${AUTH_REGISTRATION_ENABLED:true}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,http://localhost:8088,http://127.0.0.1:8088}
   bailian:
     api-key: ${DASHSCOPE_API_KEY:}
     model: ${BAILIAN_MODEL:qwen-plus}
+    # Recommendation LLM is the primary engine. Set BAILIAN_ENABLED=false only for offline tests.
+    enabled: ${BAILIAN_ENABLED:true}
     vision-enabled: ${BAILIAN_VISION_ENABLED:false}
     vision-model: ${BAILIAN_VISION_MODEL:qwen-vl-plus}
     endpoint: ${BAILIAN_ENDPOINT:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
     connect-timeout: ${BAILIAN_CONNECT_TIMEOUT:3s}
     read-timeout: ${BAILIAN_READ_TIMEOUT:8s}
+    image:
+      # Wan 2.6 image editing accepts the model prototype and wardrobe references as Base64.
+      enabled: ${BAILIAN_IMAGE_ENABLED:true}
+      model: ${BAILIAN_IMAGE_MODEL:wan2.6-image}
+      endpoint: ${BAILIAN_IMAGE_ENDPOINT:https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation}
+      task-endpoint: ${BAILIAN_IMAGE_TASK_ENDPOINT:https://dashscope.aliyuncs.com/api/v1/tasks}
+      prototype-male: ${BAILIAN_IMAGE_PROTOTYPE_MALE:classpath:reference_photo/model-male.png}
+      prototype-female: ${BAILIAN_IMAGE_PROTOTYPE_FEMALE:classpath:reference_photo/model-female.png}
+      # Relative seed/demo image URLs can be made usable as references by setting this base URL.
+      reference-base-url: ${BAILIAN_IMAGE_REFERENCE_BASE_URL:}
+      connect-timeout: ${BAILIAN_IMAGE_CONNECT_TIMEOUT:5s}
+      read-timeout: ${BAILIAN_IMAGE_READ_TIMEOUT:15s}
+      task-timeout: ${BAILIAN_IMAGE_TASK_TIMEOUT:90s}
+      poll-interval: ${BAILIAN_IMAGE_POLL_INTERVAL:2s}
+  trends:
+    # Optional anonymous hot boards contain words, not creator posts, so they are disabled by default.
+    hot-boards-enabled: ${TREND_HOT_BOARDS_ENABLED:false}
+    mainstream-followers: ${TREND_MAINSTREAM_FOLLOWERS:100000}
+    niche-share: ${TREND_NICHE_SHARE:0.25}
+    editorial-enabled: ${TREND_EDITORIAL_ENABLED:true}
+    # Comma or newline separated HTTPS publisher feeds. Each feed is fetched independently and a
+    # failing feed never removes another feed's items. Blank keeps the built-in publisher feed.
+    editorial-feeds: ${TREND_EDITORIAL_FEEDS:https://www.vogue.com/feed/rss,https://hypebeast.cn/feed,https://www.toodaylab.com/feed}
+    import-directory: ${TREND_IMPORT_DIRECTORY:}
+    douyin-endpoint: ${TREND_DOUYIN_URL:}
+    weibo-endpoint: ${TREND_WEIBO_URL:}
+    refresh-interval: ${TREND_REFRESH_INTERVAL:21600000}
+    initial-delay: ${TREND_INITIAL_DELAY:10000}
+    endpoint: ${TREND_JSON_URL:}
+    platform: ${TREND_PLATFORM:configured-feed}
+    web-urls: ${TREND_WEB_URLS:}
+    web-platform: ${TREND_WEB_PLATFORM:web-scrape}
+    web-max-page-chars: ${TREND_WEB_MAX_PAGE_CHARS:1000000}
+    web-max-articles-per-page: ${TREND_WEB_MAX_ARTICLES_PER_PAGE:10}
+    connect-timeout: ${TREND_CONNECT_TIMEOUT:3s}
+    read-timeout: ${TREND_READ_TIMEOUT:5s}
+    cache-ttl: ${TREND_CACHE_TTL:15m}
   weather:
     primary-base-url: ${WEATHER_PRIMARY_BASE_URL:${WEATHER_BASE_URL:https://wttr.in}}
     fallback-geocoding-base-url: ${WEATHER_FALLBACK_GEOCODING_BASE_URL:https://geocoding-api.open-meteo.com}
@@ -37,9 +98,20 @@ app:
     read-timeout: ${WEATHER_READ_TIMEOUT:3s}
     cache-ttl: ${WEATHER_CACHE_TTL:15m}
     cache-max-size: ${WEATHER_CACHE_MAX_SIZE:500}
+    # Offline presentation fallback: default off. Only when both real providers fail AND the
+    # requested city matches configured-city does it return a static snapshot (source=configured-demo).
+    # It is never real-time weather; enable only in .env for a defense/presentation run.
+    configured-demo-enabled: ${WEATHER_CONFIGURED_DEMO_ENABLED:false}
+    configured-city: ${WEATHER_CONFIGURED_CITY:}
+    configured-temperature-c: ${WEATHER_CONFIGURED_TEMPERATURE_C:}
+    configured-apparent-temperature-c: ${WEATHER_CONFIGURED_APPARENT_TEMPERATURE_C:}
+    configured-precipitation-mm: ${WEATHER_CONFIGURED_PRECIPITATION_MM:}
+    configured-weather-code: ${WEATHER_CONFIGURED_WEATHER_CODE:}
+    configured-wind-speed-kmh: ${WEATHER_CONFIGURED_WIND_SPEED_KMH:}
   storage:
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
     access-key: ${MINIO_ROOT_USER:fashion_minio_admin}
     secret-key: ${MINIO_ROOT_PASSWORD:fashion_2404}
     bucket: ${MINIO_BUCKET:garments-private}
     max-file-size: ${MINIO_MAX_FILE_SIZE:10485760}
+    cleanup-interval: ${MINIO_CLEANUP_INTERVAL:60s}

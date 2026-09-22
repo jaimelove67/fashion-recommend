@@ -75,3 +75,140 @@ The implementation intentionally uses product-specific copy instead of copying r
 - P3: Add a real user/profile image only after the backend or product contract supplies one.
 
 final result: passed
+
+
+## 2026-09-11 个人形象页联合分析流程复核
+
+- Source visual truth: `docx/reference_photo/personal_page.png` plus the selected “中心画像仪表盘” direction generated from that reference.
+- Implementation evidence: live Codex in-app browser at `http://localhost:5173/#profile`, authenticated as the local `demo-user`; desktop viewport measured 1280px wide with document scroll width 1265px, so the profile page has no root horizontal overflow.
+- Visual state: warm paper-like background, horizontal WEAVESELF header, left copy block, centered personal portrait with height/weight/photo fact cards, right AI analysis panel, three lower guidance modules, and a profile timeline. The reference’s AI score/BMI-style claims were intentionally replaced with editable qualitative analysis and explicit “not an appearance rating” copy.
+
+### Interaction and state checks
+
+- Height and weight are required before the second step; native 80–250 cm and 20–300 kg bounds plus a custom “请填写身高和体重后再继续” guard were verified.
+- The example portrait is not treated as the user’s upload. Starting analysis without a user-selected image is blocked with “请先选择个人照片，再开始分析”。
+- JPG/PNG/WEBP file selection, the combined-input summary, the “正在整理你的形象参考” state, the completed state, inline analysis editing, recommendation CTA, and the post-analysis notice were verified through the live accessibility tree.
+- Dialog semantics are present (`role=dialog`, `aria-modal=true`); body scrolling is locked while open and restored after close.
+- Browser runtime logs contained no warning or error entries during the final pass.
+
+### Findings
+
+No actionable P0, P1, or P2 findings remain.
+
+### Accepted Product Constraint
+
+- The current page implements the requested front-end flow with local demo persistence. The existing backend profile contract still does not expose height, weight, photo, or structured face-analysis fields; wiring these values to the real LLM endpoint remains a separate API/data-model task.
+
+final result: passed
+
+## 2026-09-10 推荐页一周穿搭工作台复核
+
+- Source visual truth: `docx/reference_photo/recommendation_page.png` (1132 × 1389 px).
+- Implementation evidence: live Codex in-app browser at `http://localhost:8090/?preview=20260910&fallback=1#recommend`, authenticated as `demo-user`; captured viewport was 653 × 694 CSS px. DOM metrics reported one weekly section, one selected-day detail, one generator, one generated-result region, and one signal grid; document scroll width stayed at 638 px, so there was no root horizontal overflow at this viewport.
+- State: current week `9月7日 — 9月13日`, Thursday selected, generator expanded. A second pass generated local recommendation `#33` under the fallback rule engine, saved it, rated it 5 stars, and confirmed it on the history page.
+
+### Intentional redesign boundary
+
+- Preserved from the reference: seven-day browsing, day-level weather/context, outfit item grouping, match score, and the ability to move across the week.
+- Redesigned per request: the header/hero, overview rail, selected-day detail, generator workbench, closet signal, trend signal, and usage notes. The new visual direction uses a warm paper surface, olive operational accents, brick action accents, editorial serif headlines, and tighter workbench grouping instead of copying the source page pixel-for-pixel.
+
+### Mandatory comparison passes
+
+- Typography: serif display treatment is reserved for the page promise and selected-day headline; metadata and controls use a compact sans system. The hero wraps cleanly at the captured width without clipped characters.
+- Spacing and layout: the weekly tabs remain the primary browsing band; the selected-day detail is visually separated from the generator; the generator collapses to a compact summary and expands back to its labeled fields. No overlapping regions were observed in the live DOM metrics.
+- Viewport resilience: at 653 px, the weekly cards use an intentional horizontal track while the page itself remains within the viewport. The responsive rules stack the detail/workbench regions below the weekly planner and preserve usable controls.
+- Colors and tokens: warm paper background, dark ink, olive selected states, brick action states, and low-contrast borders are applied consistently; no unrelated gradients or decorative blobs were introduced.
+- Image quality: visible outfit imagery uses existing repository assets and real wardrobe item URLs with fixed object-fit framing and alt text. The available project assets do not exactly reproduce the reference subjects; this remains an accepted asset constraint.
+- Copy and content: the main title remains `从你的衣橱，生成今天的答案。`; dynamic weekly details use the authenticated demo wardrobe and weather data. Generated result #33 explicitly identified `规则引擎降级 / 模型调用已关闭`.
+- Icons and controls: Lucide icons are used for weather, navigation, outfit states, save, rating, and section controls. Tabs expose semantic `role=tab`; form controls retain accessible labels.
+- States and interactions: verified day selection, next-week navigation, return-to-current-week, generator collapse/expand, generation, save, 5-star rating, and history persistence. Browser console warnings/errors were empty after the final page load.
+- Accessibility: labeled inputs, semantic buttons/tabs, disabled saved state, visible selection state, and no root horizontal overflow were verified in the live page.
+
+### Findings
+
+No actionable P0, P1, or P2 findings remain.
+
+### Accepted Product Constraints
+
+- The source reference is a populated marketing-style mockup while the implementation is driven by the authenticated demo wardrobe/history contract; content and counts intentionally come from live local data.
+- The live browser capture is available in the Codex in-app browser session rather than as a persisted PNG artifact; the page was inspected visually and through its accessibility tree/DOM metrics.
+- External model calls were disabled for this verification run through the existing E2E compose override; the real user-visible generation, save, rating, and persistence states were still exercised.
+
+final result: passed
+
+## 2026-09-08 自动轮播节奏最终复核
+
+- 行为目标：风潮画廊每 1000ms 自动切换一次；鼠标悬浮任意图片时暂停，移出后恢复。
+- 实现证据：`frontend/src/views/TrendView.vue` 的定时器为 `setInterval(..., 1000)`，并通过 `.gallery-card` 事件委托处理 `mouseover`/`mouseout`；键盘聚焦、页面隐藏和 reduced-motion 保护仍然有效。
+- 交互证据：无悬停等待 1.3 秒后焦点发生变化；悬浮图片等待 1.3 秒前后图片标题一致；移出图片等待 1.3 秒后焦点再次变化。
+- 工程证据：前端生产构建通过，Docker 前端容器健康启动，浏览器控制台 0 个错误；本轮仅改变轮播节奏和暂停边界，不改变已通过的桌面/移动视觉布局。
+
+final result: passed
+
+## 2026-09-08 Top 10 画廊视觉与自动轮播精修
+
+- Source visual truth: `C:/Users/jaime/AppData/Local/Temp/codex-clipboard-abbc4c01-d752-4199-921f-d966608019a2.png` (2159 × 1200 px).
+- Implementation evidence: desktop stage `C:/other/新建文件夹/毕设/基于大模型（LLM）的智能穿搭推荐/.playwright-cli/element-2026-09-08T09-01-44-749Z.png` (1241 × 404 px at 1440 × 900 CSS px, device scale factor 1); mobile stage `C:/other/新建文件夹/毕设/基于大模型（LLM）的智能穿搭推荐/.playwright-cli/element-2026-09-08T08-57-33-152Z.png` (343 × 381 px at 390 × 844 CSS px, device scale factor 1). Combined focused comparison: `C:/other/新建文件夹/毕设/基于大模型（LLM）的智能穿搭推荐/.playwright-cli/compare-gallery-final2.png`.
+- State: authenticated `demo-user`, trend feed in explicit development-sample mode, gallery at its automatic-rotation state. The source stage was cropped from the reference's x=69..1834 and y=219..897 region before being normalized to the desktop evidence height; the implementation was captured as the component region.
+
+### Fidelity surfaces
+
+- Typography: “风潮穿搭精选” keeps the existing serif display treatment and the small uppercase `DAILY TOP 10` label; no large position counter remains.
+- Spacing and layout: the dedicated pale stage fill, rounded panel, bottom caption, hint, arrows, and numeric tabs are removed. Desktop gaps measure about 30–46px; mobile gaps measure about 22–39px without root overflow.
+- Colors and tokens: the stage is transparent (`rgba(0, 0, 0, 0)`), letting the page surface show through; card borders and shadows remain restrained so the image row remains dominant.
+- Imagery: the same three repository fashion images remain the known development-asset constraint and are framed with `object-fit: cover`; no CSS-drawn imagery or placeholder shape was introduced.
+- Copy and content: the heading is now “风潮穿搭精选”; below-stage caption, interaction hint, `01 / 10`, and 01–10 navigation are absent as requested. The development-mode note remains above the gallery to keep the data boundary honest.
+- Icons and accessibility: arrow icons/buttons are removed. Image cards retain accessible names and click behavior; the stage keeps keyboard shortcuts, and reduced-motion disables autoplay while preserving access to the cards.
+
+### Comparison history
+
+- Initial refinement pass: removed the requested chrome and transparentized the stage; desktop capture showed the intended wider gaps, but the first mobile capture (`element-2026-09-08T08-56-20-656Z.png`) exposed card overlap.
+- Fix pass: calculated mobile offset from the rendered card width plus 16px; rebuilt the container and recaptured the final mobile evidence above. The final desktop/mobile captures show no actionable P0/P1/P2 mismatch.
+- Interaction pass: after a 5-second wait, the active image changed from “同色系丹宁的干净轮廓” to “黑色乐福鞋的利落收尾”, confirming autoplay; the static screenshot was captured while hovering the stage so the transition could settle. DOM checks confirmed zero arrows, captions, dots, or hints, and browser console reported 0 errors.
+
+final result: passed
+
+## 2026-09-08 Top 10 弧形画廊复核（精修前基线，已被后续结果取代）
+
+- Comparison target: `C:/Users/jaime/AppData/Local/Temp/codex-clipboard-73954b98-3246-43a6-9633-6907d8bcab84.png`.
+- Desktop evidence: `.playwright-cli/element-2026-09-08T08-41-56-366Z.png`; mobile evidence: `.playwright-cli/element-2026-09-08T08-43-10-044Z.png`.
+- The earlier baseline followed the reference's pale stage, portrait image cards, raised center, lowered/rotated outer cards, and photo-only visual treatment. Its controls and captions were intentionally removed in the later refinement above per the new user request.
+- Interaction evidence: next button moved `01 / 10` to `02 / 10`; keyboard `ArrowRight` moved it to `03 / 10`; all 10 cards and 10 tabs remained exposed to the accessibility tree.
+- Responsive evidence: at 390px, the stage measured 342.67px × 380px and the document did not exceed its layout width; no browser page errors were emitted.
+
+final result: passed
+
+## 2026-09-21 趋势页趋势拆解改版复核
+
+- Source visual truth: selected direction 2 at `C:/Users/jaime/.codex/generated_images/01a0c18b-eccf-76d3-b8ed-315554b2083a/exec-f8972f5c-74f3-48c2-b44c-426487cb42a9.png` (1235 × 1274 px). The original page screenshot is 1044 × 1076 px.
+- Screenshot evidence (device scale factor 1): desktop full page at `.playwright-cli/trend-desktop-full-20260921.png` (1044 × 1879 px, 1044 × 1076 CSS px); focused desktop panel at `.playwright-cli/trend-desktop-breakdown-20260921.png`; tablet at `.playwright-cli/trend-tablet-full-20260921.png` (768 × 1024 CSS px); mobile full page at `.playwright-cli/trend-mobile-full-20260921.png` (390 × 2763 px, 390 × 844 CSS px) and focused mobile panel at `.playwright-cli/trend-mobile-breakdown-20260921.png`.
+- Test data: local Playwright API fixtures (`demoMode=true`) with existing repository outfit and wardrobe assets. These screenshots verify layout and behavior; the fixture trend entries do not represent live source content or a real user's wardrobe.
+- Responsive checks: document scroll width equals viewport width at 1044, 980, 900, 768, 721, 720, 390, and 360 px. Two-column source/details boxes do not overlap at 980, 900, 768, and 721 px; at 720 px and below they stack. The mobile page title remains on one line at 390 and 360 px.
+- Interaction checks: switching to the 24-hour period updates the selected state; filtering to Weibo selects the matching item; the board-only trend shows the explicit no-image/no-body explanation; unmatched trends explain why no closet substitute is shown; the review-pending garment stays hidden; the “用我的衣橱试搭” action opens recommendations with the chosen trend in its reference banner.
+- Asset and runtime checks: all visible images loaded; browser console, page-error, failed-request, and HTTP error logs were empty.
+- First-pass findings and fixes: at 768 px, a minimum image height combined with the fixed aspect ratio made the hero image overflow its grid track and cover the details. The mobile title also left a two-character orphan. The tablet image now follows its grid track, and the mobile title uses a smaller balanced size. Screenshots and breakpoint checks were repeated after both fixes.
+- Engineering verification: `npm run build` passed after the final CSS changes. No unit or full E2E suite was run; the local Playwright browser pass exercised the trend page interactions above.
+- Preview diagnosis: before the frontend container refresh, `http://localhost:8090` served `index-C5Hdwf3B.js` and rendered the old heading “趋势观察”; `http://127.0.0.1:5173` already rendered the new heading. The Nginx root response had `Cache-Control: no-store`, ruling out a cached entry document.
+- Runtime fix and regression loop: rebuilt/recreated the frontend with `docker compose --profile app up -d --build frontend`; the backend and data containers remained running. The red-capable check at `frontend/.playwright-cli/verify-trend-view.mjs` failed before the refresh and passed after it. Port 8090 now serves `index-C6TqHSD6.js` and the expected heading “拆开看，一种趋势怎么穿”. An already-open browser tab still needs one refresh to load the replaced container page.
+
+### Findings
+
+No unresolved layout, image, interaction, or console findings remain in the checked states.
+
+final result: passed
+
+## 2026-09-21 趋势 3D 画廊与穿搭灵感联动复核
+
+- 实现：在趋势拆解面板上方恢复 3D 透视画廊；点击图片会更新同一条趋势的来源图、标题、主题线索、摘要、衣橱替代项和试搭入口。
+- 稳定性：点击图片只更新下方详情，卡片保持原 3D 卡位和尺寸；上一条/下一条及方向键显式移动画廊焦点，Home 和 End 定位两端；不自动轮播，阅读详情时内容不会自行切换。
+- 图片边界：使用趋势条目已有配图；原文没有配图或图片加载失败时显示来源文字，不生成替代穿搭图。
+- 验证：`npm run build` 通过；Playwright 回归 `clicking a gallery photo updates the detail without moving the photo from its slot` 在 `127.0.0.1:5173` 和 `127.0.0.1:8090` 均通过。点击第 3 张图后，下方详情对应第 3 条，图片卡位和尺寸不变；下一条控制切到第 4 条。容器预览实际请求 `/api/v1/trends` 返回 10 条数据，`demoMode=false`。
+- 响应式：1044 px 桌面、768 px 平板和 390 px 手机视口检查通过；平板与手机页面宽度分别等于视口宽度，没有横向溢出。浏览器控制台错误、页面错误及失败请求均为 0。
+- 截图：`C:/other/新建文件夹/毕设/基于大模型（LLM）的智能穿搭推荐/frontend/.playwright-cli/trend-gallery-desktop-20260921.png`（桌面全页）；`C:/other/新建文件夹/毕设/基于大模型（LLM）的智能穿搭推荐/frontend/.playwright-cli/trend-gallery-mobile-20260921.png`（手机全页）。
+- 验证数据使用本地 10 条测试趋势及生成的 SVG 图片，仅用于检查状态联动和布局，不代表真实趋势源内容。
+
+### 发现
+
+没有发现未解决的画廊交互问题。Docker Desktop 的陈旧 AF_UNIX 套接字重解析点已通过 `docker-desktop` WSL 发行版改名保留；Engine API 返回版本 `29.8.0`，Postgres、MinIO 和后端健康，前端运行在 `localhost:8090`。
+
+final result: interaction regression and container preview passed

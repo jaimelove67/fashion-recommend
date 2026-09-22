@@ -2,6 +2,7 @@ package com.fashion.recommendation.style;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -17,7 +18,7 @@ public class PersonalStyleProfileService {
 
     public StyleProfile current(String userId) {
         return profileRepository.findByUserId(userId).orElseGet(() -> {
-            StyleProfile profile = buildProfile("你", List.of("极简", "通勤"), List.of("低饱和"), List.of("通勤"));
+            StyleProfile profile = buildProfile("你", null, List.of("极简", "通勤"), List.of("低饱和"), List.of("通勤"));
             profileRepository.save(userId, profile);
             return profile;
         });
@@ -26,6 +27,7 @@ public class PersonalStyleProfileService {
     public StyleProfile refresh(String userId, StyleProfileRefreshRequest request) {
         StyleProfile profile = buildProfile(
                 request.displayName().trim(),
+                normalizeGender(request.gender()),
                 normalized(request.stylePreferences()),
                 normalized(request.colorPreferences()),
                 normalized(request.occasions()));
@@ -34,7 +36,7 @@ public class PersonalStyleProfileService {
     }
 
     private StyleProfile buildProfile(
-            String displayName, List<String> stylePreferences, List<String> colorPreferences, List<String> occasions) {
+            String displayName, String gender, List<String> stylePreferences, List<String> colorPreferences, List<String> occasions) {
         String joined = String.join(" ", stylePreferences);
         boolean likesMinimal = joined.contains("极简") || joined.contains("通勤");
         List<String> styles = stylePreferences.isEmpty()
@@ -43,6 +45,7 @@ public class PersonalStyleProfileService {
         List<String> colors = colorPreferences.isEmpty() ? List.of("雾蓝", "暖白", "石墨灰", "橄榄绿") : colorPreferences;
         return new StyleProfile(
                 displayName,
+                gender,
                 styles,
                 colors,
                 occasions,
@@ -54,6 +57,13 @@ public class PersonalStyleProfileService {
                 modelName + " (development fallback)",
                 Instant.now(),
                 false);
+    }
+
+    private static String normalizeGender(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim().toUpperCase(Locale.ROOT);
     }
 
     private static List<String> normalized(List<String> values) {

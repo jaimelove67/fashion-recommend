@@ -1,1 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS vector;
+-- 当前 schema 使用标准 PostgreSQL 类型，不需要任何扩展。
+-- 此前创建的 pgvector 扩展已随 pgvector 镜像一并移除；迁移、仓储查询均无 vector 列或向量查询。
+-- 如未来需要向量检索，再于此处新增 CREATE EXTENSION 语句并同步引入对应镜像。

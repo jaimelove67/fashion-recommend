@@ -2,15 +2,15 @@
 
 “知己”是一个面向个人衣橱的智能穿搭推荐毕业设计项目。用户可以录入或上传衣物，填写城市、场合和风格要求，系统结合天气与衣橱数据生成可解释的搭配方案，并支持保存、反馈和历史查看。
 
-当前项目的验收边界是“衣橱录入 -> 场景输入 -> 推荐生成 -> 保存反馈”的可运行闭环，属于毕业设计原型，不包含真实登录、在线交易、虚拟试衣或后台管理。
+当前项目的验收边界是“账号注册/登录 -> 衣橱录入 -> 场景输入 -> 推荐生成 -> 保存反馈”的可运行闭环，另提供受 `ROLE_ADMIN` 保护的后台运营工作台（概览、账号治理、反馈处理、模型配置和操作审计）。项目属于毕业设计原型，账号系统采用本地用户名、密码和服务端会话，暂不包含第三方统一登录、找回密码、在线交易或虚拟试衣。
 
 ## 技术栈
 
-- 前端：Vue 3、Vite、Lucide Vue，入口位于 frontend/。
-- 后端：Java 17、Spring Boot 3.4.2、Spring Web、JDBC、Validation、Actuator，入口位于 backend/。
-- 数据与存储：PostgreSQL 16（使用 pgvector 镜像）、MinIO 私有对象存储、Caffeine 天气缓存。
-- 智能能力：阿里云百炼兼容 OpenAI Chat Completions 协议；推荐模型和视觉识别默认可关闭。
-- 本地编排：Docker Compose。Redis 服务已纳入本地基础设施，便于后续缓存和趋势快照扩展。
+- 前端：Vue 3、Vite、Lucide Vue；运营总览使用本地 lieflat-charts 的 Lupi Basics 语法实现原生 SVG 图表，入口位于 frontend/。
+- 后端：Java 17、Spring Boot 3.4.2、Spring Web、Spring Security、JDBC、Validation、Flyway、Actuator，入口位于 backend/。
+- 数据与存储：PostgreSQL 16、MinIO 私有对象存储、Caffeine 进程内缓存。
+- 智能能力：阿里云百炼及 OpenAI Chat Completions 兼容调用；管理员可按识图、推荐和每日生图分别设置厂商、模型和 API Key，密钥使用 AES-GCM 加密存储。
+- 本地编排：Docker Compose，包含 PostgreSQL、MinIO，以及可选的前后端应用服务。
 
 ## 环境要求
 
@@ -18,7 +18,7 @@
 
 - Java 17+
 - Maven 3.9+
-- Node.js 20+ 和 npm
+- Node.js `^20.19.0 || >=22.12.0` 和 npm（Vite 8 的运行时要求）
 
 ## 启动项目
 
@@ -39,7 +39,8 @@ docker compose ps
 - 后端 API：<http://localhost:8088>
 - MinIO 控制台：<http://localhost:9001>
 - 后端健康检查：<http://localhost:8088/actuator/health>
-- Prometheus 指标：<http://localhost:8088/actuator/prometheus>
+
+安全策略保持默认不对外开放：Actuator 仅暴露 `health` 与 `info` 两个端点，不提供 Prometheus 或 metrics 指标端点。
 
 停止服务：
 
@@ -47,11 +48,11 @@ docker compose ps
 docker compose down
 ~~~
 
-docker compose down -v 会同时删除 PostgreSQL、Redis 和 MinIO 的本地数据，只应在需要清空演示环境时使用。
+`docker compose down -v` 会同时删除 PostgreSQL 和 MinIO 的本地数据，包括账号、衣橱、推荐记录和上传图片，只应在确认不再需要这些数据时使用。
 
 ### 方式二：本地运行前后端
 
-先启动数据库、Redis 和 MinIO：
+先启动 PostgreSQL 和 MinIO：
 
 ~~~powershell
 Copy-Item .env.example .env
@@ -82,54 +83,75 @@ $env:DASHSCOPE_API_KEY = "你的百炼 API Key"
 mvn spring-boot:run
 ~~~
 
-## 演示账号
+## 账号与会话
 
-项目当前没有登录页和密码认证。前端固定使用开发期用户标识：
+正常启动不会创建默认账号。首次打开页面后切换到“注册”，创建账号并自动登录；以后使用同一用户名和密码登录。用户名为 3-32 位小写字母、数字、下划线或连字符，密码至少 8 个字符且 UTF-8 编码不超过 72 字节。注册可通过 `AUTH_REGISTRATION_ENABLED=false` 关闭。
 
-~~~text
-demo-user
-~~~
+密码使用 BCrypt 存储。Spring Security 将认证状态保存在服务端 Session 中，浏览器只接收 HttpOnly、SameSite=Lax 的 `JSESSIONID` Cookie，前端不保存可伪造的用户 ID 或认证 Token。个人接口从认证上下文取得用户名；匿名访问返回 401，退出登录会使当前 Session 失效并清除会话数据。
 
-后端通过 X-User-Id 请求头隔离数据；未提供请求头时也默认使用 demo-user。这只是演示边界，不能作为生产环境的身份认证方案。
+前端在同源请求中携带 Cookie，并从 `GET /api/v1/auth/csrf` 取得 CSRF Token；所有 POST、PUT、DELETE 请求发送服务端返回的 `X-XSRF-TOKEN` 请求头。令牌过期导致 403 时前端只刷新一次令牌并重试。后端默认使用可兼容本地 HTTP 的 Session Cookie，源码启动后刷新页面仍会保留登录状态。生产部署应启用 HTTPS，并显式设置 `SESSION_COOKIE_SECURE=true`。
 
 ## 准备答辩演示数据
 
-完整应用启动并完成数据库初始化后，在项目根目录执行：
+完整应用启动且 Flyway 迁移完成后，在项目根目录执行：
 
 ~~~powershell
 .\scripts\seed-demo-data.ps1
 ~~~
 
-脚本会在一个事务内只重置 demo-user，并准备：
+脚本在单个事务中幂等重置 `demo-user`，准备 8 件衣物、3 条推荐、1 条收藏反馈、1 份风格档案和 1 条识别失败后人工修正记录。登录凭据仅用于本地演示：
 
-- 8 件衣物，其中 1 件经历“识别失败 -> 人工修正”，最终在衣橱中标记为“人工确认”。
-- 3 条不同场景的推荐历史。
-- 1 条已收藏且已提交 5 星反馈的推荐。
-- 1 份用于首页和个人档案页展示的风格档案。
+~~~text
+用户名：demo-user
+密码：demo-password-2026
+~~~
 
-脚本可以重复运行，数据量不会持续增加。预置推荐明确标记为 development-rule-v1，仅用于稳定演示，不伪装成真实大模型调用。
+管理员演示账号仅由本地 demo seed 创建，不应带入生产环境：
+
+~~~text
+用户名：demo-admin
+密码：demo-password-2026
+角色：ROLE_ADMIN
+~~~
+
+每次执行都会重置该演示账号的密码和业务数据，不影响其他账号。预置推荐标记为 `development-rule-v1`，不会伪装成真实模型结果；生产环境不应运行此脚本。
 
 ## 核心演示流程
 
-1. 进入“衣橱”，手动添加或上传衣物。建议准备上装、下装、鞋履各一件。
-2. 上传图片后，系统把图片写入 MinIO 私有桶，并通过后端图片代理展示。
-3. 未启用视觉模型时，上传记录会标记为“待完善”；在衣橱中补充名称、类别、颜色和风格后保存修正。
-4. 进入“推荐”，填写城市、场合和可选的风格要求，生成搭配。
-5. 查看天气、推荐单品和推荐理由，保存方案并提交满意度反馈。
-6. 进入“历史”查看已生成记录；“风潮”页面展示当前内置的开发期趋势样本。
+1. 注册账号或登录已有账号。
+2. 进入“衣橱”，手动添加或上传衣物。建议准备上装、下装、鞋履各一件。
+3. 上传图片后，系统把图片写入 MinIO 私有桶，并通过需要登录的后端图片代理展示。
+4. “使用 AI 自动识别”默认不勾选；此时需填写名称、类别和颜色。只有本次上传明确勾选后，后端才允许进入识别流程，实际外部调用还要求视觉开关和密钥均已配置。
+5. 进入“推荐”，填写城市、场合和可选的风格要求，生成搭配。
+6. 查看天气、推荐单品和推荐理由，保存方案并提交满意度反馈。
+7. 进入“历史”查看已生成记录；“风潮”展示已接入来源的真实内容（编辑订阅源、授权 JSON 源、公开网页源，以及抖音/微博采集导入内容），没有任何可用内容时显示空状态与来源状态说明，不伪造趋势。
+8. 管理员进入独立的“管理工作台”管理账号、反馈、模型配置和操作日志；符合来源契约的趋势内容采集后直接展示。
 
 推荐至少需要两件可组合的、已完善的不同类别衣物。衣物为空、只剩待人工确认记录或类别无法组合时，接口会返回明确错误，不会伪造推荐结果。
 
 ## 当前能力边界
 
-- 未配置 DASHSCOPE_API_KEY 时，推荐使用可测试的开发期规则引擎 development-rule-v1。
-- 配置百炼 Key 后，推荐会尝试调用 qwen-plus；请求超时、响应不合规或模型返回了非衣橱单品时，会回退到规则引擎。
-- BAILIAN_VISION_ENABLED 默认为 false。视觉识别未启用或失败时，系统保留图片并要求人工确认，不猜测衣物属性。
-- “风潮”当前返回内置的三条开发期样本数据，页面会明确标注开发样本，不代表实时平台热度。
-- X-User-Id 是开发期用户上下文，用于验证数据分区，不是生产认证方案。
-- 衣橱、推荐历史、反馈和个人风格档案均保存在 PostgreSQL 中。
+- 推荐大模型是首选引擎：`BAILIAN_ENABLED` 默认为 `true`，且配置 `DASHSCOPE_API_KEY` 后优先调用 qwen-plus。未配置 Key、请求超时、响应不合规、结果越界或模型返回了非衣橱单品时，系统才降级到规则引擎；降级记录会保留稳定的 `fallback_reason`（`missing-api-key`、`request-failed`、`response-invalid`、`result-invalid`、`duplicate-item-ids`、`foreign-item-ids`、`same-category`）。如需离线测试或避免模型费用，必须显式设置 `BAILIAN_ENABLED=false`，此时原因是 `llm-disabled`。
+- 每日推荐主区域按参考效果展示为“中央全身模特 + 四角衣橱单品卡”，下方固定解释天气适配、场合适配、风格方向、衣橱依据。页面会按当前衣橱 id 重新校验推荐快照，并排除 `NEEDS_MANUAL_REVIEW` 衣物；失效图片不使用通用时装图回退。模特性别只取个人档案中的 `gender`，每日模特图通过 `/api/v1/me/recommendations/{id}/visual` 调用阿里云万相图像编辑接口生成，未配置或失败时保留画板和已确认单品并明确显示未生成状态，不把原型或静态图冒充当日生图。
+- 每次生成都会持久化审计元数据：合法 LLM 结果保存真实 provider 元数据（provider call ID、模型名、prompt 版本与三类 token），规则降级只保存稳定的枚举式 fallback 原因，不保存异常原文。API 通过嵌套 `generationAudit` 返回这些字段，`engine` 仍保留在顶层。旧历史与降级路径保持为空，不伪造模型元数据。
+- BAILIAN_VISION_ENABLED 默认为 false。即使服务端已启用，仍需用户在每次上传时明确勾选 AI 识别；未同意、未启用或识别失败时，系统不会调用或不会采纳视觉模型结果，并要求人工确认不完整信息。
+- “风潮”以高传播度穿搭博主的真实穿搭图片和搭配思路为主，优先有图内容与高粉丝作者，并适量展示小众博主和穿搭测评视频；时尚出版方 RSS 和授权网页仅作补充。采集与展示统一排除明星红毯造型、时装周、秀场和明星时装大片。默认将 10 万及以上划为主流博主，粉丝数更少且有精确数据的作者列为小众博主，小众目标约占已分层博主条目的 25%；作者粉丝数缺失时列为未分类补充项。视频标题或摘要命中测评、点评、试穿、对比等词时会标记为穿搭测评视频。匿名热榜只含话题词，没有博主和正文信息，因此默认关闭；可通过 `TREND_HOT_BOARDS_ENABLED=true` 显式启用。没有来源返回可用内容时接口返回空列表（`demoMode` 恒为 `false`，开发样本回退已移除）。符合来源与穿搭相关性校验的趋势内容直接展示。
+- 登录后的全局天气条会优先请求浏览器当前位置；用户拒绝定位时可输入城市。天气由后端调用 Open-Meteo/wttr.in 并标注数据来源，当前位置坐标只保存在浏览器本地，不写入业务数据库。
+- 个人数据接口要求 Spring Security Session 认证，服务端从认证上下文取得用户身份；客户端自定义用户请求头不会改变身份。
+- 衣橱、推荐历史、反馈和个人风格档案均保存在 PostgreSQL 中。推荐历史接口按页返回，页码从 0 开始，默认每页 20 条、最大 50 条；`page * size` 不得超过 1,000,000，越界返回 400，限制深分页查询成本。到达此边界时 `hasNext=false`，`totalElements` 仍为该用户的实际记录总数。图片删除在数据库事务内写入清理任务，由后台调度器异步重试 MinIO 清理，避免对象存储瞬时故障阻塞业务删除。
+- 管理端接口由服务端 `ROLE_ADMIN` 强制保护：`/api/v1/admin/overview` 返回真实聚合指标，`/api/v1/admin/users` 与 `/api/v1/admin/users/{username}/status` 支持账号查询和启停治理，`/api/v1/admin/feedback` 与 `/api/v1/admin/feedback/{recommendationId}/status` 支持反馈筛选和处理，`/api/v1/admin/audit-logs` 支持管理操作审计查询。运营总览将推荐引擎结果和账号状态分别可视化，图表只使用当前数据库聚合，不虚构历史趋势。后台只返回脱敏元数据、反馈处理状态和推荐运行统计，不返回密码哈希、私有图片或推荐正文；普通用户、伪造 `X-User-Id` 或未认证请求均不能进入管理分支，当前管理员不能停用自己。
+- 管理员可通过 `/api/v1/admin/ai-models` 配置三种模型能力及启停状态：识图、穿搭推荐、每日搭配图生成。前两类支持百炼/OpenAI 兼容接口；每日生图使用百炼专用异步协议。API Key 单独以 AES-GCM 密文写入数据库；空白输入保留已有密钥，显式操作才清除密钥覆盖，恢复环境配置会删除该能力的整条自定义记录。接口与审计日志不返回密钥或密文；密钥保存需要部署端提供 `AI_SETTINGS_ENCRYPTION_KEY`。
+- 管理员可通过受 `ROLE_ADMIN` 保护的 `/api/v1/admin/trends/refresh` 手动刷新趋势来源；趋势审核接口已移除。
+
+## 数据库迁移
+
+数据库结构由 Flyway 管理，运行时 SQL 初始化已关闭。V1 是兼容旧结构的基线迁移，V2 增加图片清理任务表，V3 为推荐增加审计元数据列，V4 增加管理员治理，V5 增加趋势快照，V6 曾增加趋势审核状态及审计字段，V7 增加个人档案 `gender` 字段，V8 增加管理员 AI 模型配置表：新数据库依次执行 V1 至 V8；已有表但没有 Flyway 历史的旧数据库会先以版本 0 建立基线，再依次执行。V6 审核列作为已执行的历史结构保留，当前运行时不读取它们；本次刷新会清除旧趋势内容和互动快照。迁移测试覆盖既有衣物/推荐数据保留、V2–V8 升级和重复启动不重复执行。
+
+`baseline-on-migrate=true` 只用于接管本项目旧数据库，`clean-disabled=true` 禁止 Flyway 清库。已执行的迁移文件不应修改；后续结构变化应继续新增版本迁移。迁移不能替代备份，升级包含重要数据的环境前仍应先备份 PostgreSQL。
 
 这些边界的设计理由、安全失败方式和生产化替换方案见 [开发期边界与生产化路径](docs/development-boundaries.md)。
+
+趋势内容的来源范围、编辑订阅源配置、抖音/微博的内容导入步骤和博主分层见 [趋势内容来源与接入说明](docs/trend-collection.md)。
 
 ## 大模型证明材料
 
@@ -151,25 +173,45 @@ demo-user
 | POSTGRES_DB | fashion_recommendation | 数据库名 |
 | POSTGRES_USER / POSTGRES_PASSWORD | fashion / fashion_2404 | 数据库账号 |
 | POSTGRES_PORT | 5433 | PostgreSQL 主机端口 |
-| REDIS_PORT / REDIS_PASSWORD | 6380 / fashion_2404 | Redis 主机端口和密码 |
 | MINIO_PORT / MINIO_CONSOLE_PORT | 9000 / 9001 | MinIO API 和控制台端口 |
 | MINIO_ROOT_USER / MINIO_ROOT_PASSWORD | fashion_minio_admin / fashion_2404 | MinIO 管理账号 |
 | MINIO_BUCKET | garments-private | 私有图片桶名称 |
 | MINIO_MAX_FILE_SIZE | 10485760 | 最大图片大小，单位为字节 |
+| MINIO_CLEANUP_INTERVAL | 60s | 已删除图片对象的后台清理重试间隔 |
 
 应用和模型变量：
 
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
 | BACKEND_PORT / FRONTEND_PORT | 8088 / 8090 | Docker 应用的主机端口 |
-| DASHSCOPE_API_KEY | 空 | 百炼 API Key；为空时使用规则推荐 |
+| AUTH_REGISTRATION_ENABLED | true | 是否允许创建本地账号 |
+| SESSION_TIMEOUT | 30m | 服务端 Session 有效期 |
+| AI_SETTINGS_ENCRYPTION_KEY | 空 | 管理后台保存模型 API Key 所需的 AES-256 主密钥，必须是 Base64 编码的 32 字节随机值；所有后端实例必须使用同一值，轮换前需迁移已有密文 |
+| SESSION_COOKIE_SECURE | false（本地 HTTP 默认值） | 生产 HTTPS 必须设置为 true |
+| DASHSCOPE_API_KEY | 空 | 百炼 API Key；配置后由首选 LLM 引擎调用 |
+| BAILIAN_ENABLED | true | 是否启用文本推荐大模型（默认优先使用；离线测试需显式设为 false） |
 | BAILIAN_MODEL | qwen-plus | 文本推荐模型 |
 | BAILIAN_VISION_ENABLED | false | 是否启用图片视觉识别 |
 | BAILIAN_VISION_MODEL | qwen-vl-plus | 视觉识别模型 |
 | BAILIAN_ENDPOINT | 百炼兼容接口 | 模型请求地址 |
 | BAILIAN_CONNECT_TIMEOUT / BAILIAN_READ_TIMEOUT | 3s / 8s | 模型连接和读取超时 |
+| BAILIAN_IMAGE_ENABLED | true | 是否启用每日模特生图 |
+| BAILIAN_IMAGE_MODEL | wan2.6-image | 阿里云万相图像编辑模型 |
+| BAILIAN_IMAGE_ENDPOINT | 万相多模态生成接口 | 图像生成任务地址 |
+| BAILIAN_IMAGE_TASK_ENDPOINT | `/api/v1/tasks` | 异步任务轮询地址 |
+| BAILIAN_IMAGE_PROTOTYPE_MALE / FEMALE | classpath 原型资源 | 男/女模特原型图 |
+| BAILIAN_IMAGE_REFERENCE_BASE_URL | 空 | 仅用于把相对演示衣物图片转换为公网参考地址；上传衣物优先走私有图片 Base64 |
+| BAILIAN_IMAGE_TASK_TIMEOUT / POLL_INTERVAL | 90s / 2s | 生图任务最长等待时间和轮询间隔 |
+
+管理员首次通过界面保存模型 API Key 前，应生成一次 `AI_SETTINGS_ENCRYPTION_KEY` 并安全备份；示例生成命令见 `.env.example`。部署端未配置该值时，读取现有环境变量密钥和修改非敏感模型信息仍可用，但不能保存新的数据库密钥。
+
+授权趋势源变量：`TREND_EDITORIAL_ENABLED`、`TREND_EDITORIAL_FEEDS`、`TREND_HOT_BOARDS_ENABLED`、`TREND_MAINSTREAM_FOLLOWERS`、`TREND_NICHE_SHARE`、`TREND_IMPORT_DIRECTORY`、`TREND_JSON_URL`、`TREND_PLATFORM`、`TREND_WEB_URLS`、`TREND_WEB_PLATFORM`、`TREND_WEB_MAX_PAGE_CHARS`、`TREND_WEB_MAX_ARTICLES_PER_PAGE`、`TREND_CONNECT_TIMEOUT`、`TREND_READ_TIMEOUT`、`TREND_CACHE_TTL`。编辑订阅源是逗号或换行分隔的 HTTPS 出版方 RSS，逐源独立抓取，某一源不可用不影响其他源。匿名热榜默认关闭；显式开启后，同一平台的优先级是导入文件 > 配置端点 > 公开热榜。任何来源都没有返回可用内容时，趋势接口返回空列表，并在 `sources` 中给出每个来源的状态，不回退到开发样本。JSON 源必须返回只含 `items` 的对象；每条记录必须包含 `id`、`platform`、`title`、`topicTags`、`heatScore`、`publishedAt`、`sourceUrl`、`imageUrl`，可选 `summary`。互动证据中的 `authorFollowers` 是可选的非负整数；条目数为 1-50，热度为 0-100 整数，时间为 ISO-8601，链接为 HTTP(S)，`imageUrl` 和 `summary` 可为 `null`。任一 JSON 条目约束失败时整批拒绝，不会把部分脏数据标记为实时趋势。
+
+网页源是逗号或换行分隔的、由服务端管理员配置的公开 HTTP(S) URL，不接受前端传入任意地址。`ConfiguredWebTrendSourceAdapter` 会限制 URL 数量、单页大小和文章数量，拒绝 localhost、内网/回环地址、带用户信息的 URL，并按缓存 TTL 复用结果。它优先读取 OpenGraph/JSON-LD，缺失时回退到页面标题、`article` 标题、可见摘要、标签、`time` 和图片；网页没有统一可信热度，因此界面会显示“来源页信号评分”。配置前仍需确认来源授权、服务条款和 robots 规则，不能绕过登录、验证码或访问控制。
 
 天气变量：WEATHER_PRIMARY_BASE_URL、WEATHER_FALLBACK_GEOCODING_BASE_URL、WEATHER_FALLBACK_FORECAST_BASE_URL、WEATHER_CONNECT_TIMEOUT、WEATHER_READ_TIMEOUT、WEATHER_CACHE_TTL、WEATHER_CACHE_MAX_SIZE。默认使用 wttr.in，失败后回退到 Open-Meteo，并在进程内缓存天气结果。
+
+离线答辩演示（默认关闭）：WEATHER_CONFIGURED_DEMO_ENABLED 默认 `false`，仅当两个真实天气 provider 都失败且请求城市与 WEATHER_CONFIGURED_CITY 一致时，才返回静态快照，`source` 为 `configured-demo`，前端明确标注“配置演示天气/非实时”。这是静态演示数据，不是实时天气，绝不能冒充实时天气；启用时需在 `.env` 显式填全 WEATHER_CONFIGURED_CITY、WEATHER_CONFIGURED_TEMPERATURE_C、WEATHER_CONFIGURED_APPARENT_TEMPERATURE_C、WEATHER_CONFIGURED_PRECIPITATION_MM、WEATHER_CONFIGURED_WEATHER_CODE、WEATHER_CONFIGURED_WIND_SPEED_KMH，任一字段缺失、非有限、温度不合理或降水风速为负都会导致应用启动失败（fail-fast）。城市未找到（NOT_FOUND）不会被静态快照掩盖，仍返回 404。
 
 直接运行后端时还可以使用 SERVER_PORT、CORS_ALLOWED_ORIGINS、SPRING_DATASOURCE_URL、SPRING_DATASOURCE_USERNAME、SPRING_DATASOURCE_PASSWORD、MINIO_ENDPOINT 覆盖 application.yml 中的默认配置。
 
@@ -188,7 +230,10 @@ mvn test
 Set-Location frontend
 npm ci
 npm run build
+npm audit --audit-level=high
 ~~~
+
+`npm audit` 只接受当前锁文件真实结果；若报告 high 或 critical，先修复依赖并重新生成 `package-lock.json`，不要把历史审计结果当作当前通过证明。
 
 Compose 文件校验：
 
@@ -199,7 +244,7 @@ docker compose config -q
 前端 E2E 冒烟验证：
 
 ~~~powershell
-docker compose --profile app up --build -d
+docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profile app up --build -d
 Set-Location frontend
 npm ci
 npm run test:e2e
@@ -216,6 +261,17 @@ git diff --check
 git status --short
 ~~~
 
+## 研究评估（离线、可复现）
+
+推荐结果输入边界与规则引擎的评估协议默认离线运行，只读取本地文件并计算，不联网、不调用百炼或任何模型 API：
+
+~~~powershell
+python scripts/evaluation/evaluate_recommendations.py
+python -m unittest discover -s scripts/evaluation -p "test_*.py"
+~~~
+
+指标定义、数据集格式、输入边界、固定 seed 与对抗性用例见 [推荐评估协议](docs/evaluation-protocol.md)。仓库内的 `fixture_wardrobe.json` 仅为演示 fixture，不作为实验结论。
+
 ## 常见问题
 
 ### 页面能打开，但推荐失败
@@ -226,13 +282,15 @@ git status --short
 
 确认 MinIO 和 minio-init 已成功运行，并使用 JPG、PNG 或 WEBP 图片，大小不超过 MINIO_MAX_FILE_SIZE。minio-init 显示 Exited (0) 是一次性初始化成功，不是错误。
 
+默认单张图片上限为 10 MiB；Nginx 与后端 multipart 请求上限为 11 MiB，为表单字段和请求头预留空间。如果提高 `MINIO_MAX_FILE_SIZE`，也应同步提高 `frontend/nginx.conf` 的 `client_max_body_size` 与后端 `spring.servlet.multipart.max-request-size`。
+
 ### 没有百炼 API Key 是否无法使用
 
-不会。推荐会使用开发期规则引擎；只有需要真实文本推荐或视觉识别时才需要配置 DASHSCOPE_API_KEY。视觉识别另外受 BAILIAN_VISION_ENABLED 控制。
+没有 Key 时仍然可以使用规则降级推荐；配置 `DASHSCOPE_API_KEY` 后，默认优先使用 qwen-plus。若要离线运行或避免模型费用，请显式设置 `BAILIAN_ENABLED=false` 和 `BAILIAN_IMAGE_ENABLED=false`。视觉识别另外受 BAILIAN_VISION_ENABLED 控制。
 
 ### 端口被占用
 
-Docker 模式可修改 .env 中的 POSTGRES_PORT、REDIS_PORT、BACKEND_PORT 或 FRONTEND_PORT 后重新启动。源码模式下，后端默认使用 8080，前端默认使用 5173，代理地址见 frontend/vite.config.js。
+Docker 模式可修改 .env 中的 POSTGRES_PORT、MINIO_PORT、BACKEND_PORT 或 FRONTEND_PORT 后重新启动。源码模式下，后端默认使用 8080，前端默认使用 5173，代理地址见 frontend/vite.config.js。
 
 ### 如何清空本地演示数据
 
@@ -241,4 +299,4 @@ docker compose down -v
 docker compose --profile app up --build -d
 ~~~
 
-这会删除所有本地数据库、对象存储和 Redis 数据，请确认不再需要当前演示数据后再执行。
+这会删除所有本地数据库和对象存储数据，包括账号、衣橱、推荐记录和上传图片，请确认不再需要当前演示数据后再执行。

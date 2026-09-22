@@ -2,7 +2,7 @@ name: fashion-recommendation
 
 services:
   postgres:
-    image: pgvector/pgvector@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
+    image: public.ecr.aws/docker/library/postgres:16-alpine@sha256:3c5c8892d184f738f4fe282d14ddaa613a38f00f4189d2d94725ebe6f2909ddb
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-fashion_recommendation}
       POSTGRES_USER: ${POSTGRES_USER:-fashion}
@@ -18,21 +18,8 @@ services:
       timeout: 3s
       retries: 20
 
-  redis:
-    image: redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-fashion_2404}"]
-    ports:
-      - "127.0.0.1:${REDIS_PORT:-6380}:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a $${REDIS_PASSWORD} ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
   minio:
-    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    image: quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-fashion_minio_admin}
@@ -49,7 +36,7 @@ services:
       retries: 20
 
   minio-init:
-    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    image: quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     depends_on:
       minio:
         condition: service_healthy
@@ -78,13 +65,49 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-fashion_2404}
       MINIO_BUCKET: ${MINIO_BUCKET:-garments-private}
       MINIO_MAX_FILE_SIZE: ${MINIO_MAX_FILE_SIZE:-10485760}
+      MINIO_CLEANUP_INTERVAL: ${MINIO_CLEANUP_INTERVAL:-60s}
+      AUTH_REGISTRATION_ENABLED: ${AUTH_REGISTRATION_ENABLED:-true}
+      SESSION_TIMEOUT: ${SESSION_TIMEOUT:-30m}
+      # Local loopback HTTP only; HTTPS deployments must override this to true.
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      AI_SETTINGS_ENCRYPTION_KEY: ${AI_SETTINGS_ENCRYPTION_KEY:-}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       BAILIAN_MODEL: ${BAILIAN_MODEL:-qwen-plus}
+      BAILIAN_ENABLED: ${BAILIAN_ENABLED:-true}
       BAILIAN_VISION_ENABLED: ${BAILIAN_VISION_ENABLED:-false}
       BAILIAN_VISION_MODEL: ${BAILIAN_VISION_MODEL:-qwen-vl-plus}
       BAILIAN_ENDPOINT: ${BAILIAN_ENDPOINT:-https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
       BAILIAN_CONNECT_TIMEOUT: ${BAILIAN_CONNECT_TIMEOUT:-3s}
       BAILIAN_READ_TIMEOUT: ${BAILIAN_READ_TIMEOUT:-8s}
+      BAILIAN_IMAGE_ENABLED: ${BAILIAN_IMAGE_ENABLED:-true}
+      BAILIAN_IMAGE_MODEL: ${BAILIAN_IMAGE_MODEL:-wan2.6-image}
+      BAILIAN_IMAGE_ENDPOINT: ${BAILIAN_IMAGE_ENDPOINT:-https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation}
+      BAILIAN_IMAGE_TASK_ENDPOINT: ${BAILIAN_IMAGE_TASK_ENDPOINT:-https://dashscope.aliyuncs.com/api/v1/tasks}
+      BAILIAN_IMAGE_PROTOTYPE_MALE: ${BAILIAN_IMAGE_PROTOTYPE_MALE:-classpath:reference_photo/model-male.png}
+      BAILIAN_IMAGE_PROTOTYPE_FEMALE: ${BAILIAN_IMAGE_PROTOTYPE_FEMALE:-classpath:reference_photo/model-female.png}
+      BAILIAN_IMAGE_REFERENCE_BASE_URL: ${BAILIAN_IMAGE_REFERENCE_BASE_URL:-}
+      BAILIAN_IMAGE_CONNECT_TIMEOUT: ${BAILIAN_IMAGE_CONNECT_TIMEOUT:-5s}
+      BAILIAN_IMAGE_READ_TIMEOUT: ${BAILIAN_IMAGE_READ_TIMEOUT:-15s}
+      BAILIAN_IMAGE_TASK_TIMEOUT: ${BAILIAN_IMAGE_TASK_TIMEOUT:-90s}
+      BAILIAN_IMAGE_POLL_INTERVAL: ${BAILIAN_IMAGE_POLL_INTERVAL:-2s}
+      TREND_JSON_URL: ${TREND_JSON_URL:-}
+      TREND_EDITORIAL_ENABLED: ${TREND_EDITORIAL_ENABLED:-true}
+      TREND_EDITORIAL_FEEDS: ${TREND_EDITORIAL_FEEDS:-https://www.vogue.com/feed/rss,https://hypebeast.cn/feed,https://www.toodaylab.com/feed}
+      TREND_HOT_BOARDS_ENABLED: ${TREND_HOT_BOARDS_ENABLED:-false}
+      TREND_MAINSTREAM_FOLLOWERS: ${TREND_MAINSTREAM_FOLLOWERS:-100000}
+      TREND_NICHE_SHARE: ${TREND_NICHE_SHARE:-0.25}
+      TREND_IMPORT_DIRECTORY: /app/trend-data
+      TREND_DOUYIN_URL: ${TREND_DOUYIN_URL:-}
+      TREND_WEIBO_URL: ${TREND_WEIBO_URL:-}
+      TREND_REFRESH_INTERVAL: ${TREND_REFRESH_INTERVAL:-21600000}
+      TREND_PLATFORM: ${TREND_PLATFORM:-configured-feed}
+      TREND_WEB_URLS: ${TREND_WEB_URLS:-}
+      TREND_WEB_PLATFORM: ${TREND_WEB_PLATFORM:-web-scrape}
+      TREND_WEB_MAX_PAGE_CHARS: ${TREND_WEB_MAX_PAGE_CHARS:-1000000}
+      TREND_WEB_MAX_ARTICLES_PER_PAGE: ${TREND_WEB_MAX_ARTICLES_PER_PAGE:-10}
+      TREND_CONNECT_TIMEOUT: ${TREND_CONNECT_TIMEOUT:-3s}
+      TREND_READ_TIMEOUT: ${TREND_READ_TIMEOUT:-5s}
+      TREND_CACHE_TTL: ${TREND_CACHE_TTL:-15m}
       WEATHER_PRIMARY_BASE_URL: ${WEATHER_PRIMARY_BASE_URL:-https://wttr.in}
       WEATHER_FALLBACK_GEOCODING_BASE_URL: ${WEATHER_FALLBACK_GEOCODING_BASE_URL:-https://geocoding-api.open-meteo.com}
       WEATHER_FALLBACK_FORECAST_BASE_URL: ${WEATHER_FALLBACK_FORECAST_BASE_URL:-https://api.open-meteo.com}
@@ -92,15 +115,28 @@ services:
       WEATHER_READ_TIMEOUT: ${WEATHER_READ_TIMEOUT:-3s}
       WEATHER_CACHE_TTL: ${WEATHER_CACHE_TTL:-15m}
       WEATHER_CACHE_MAX_SIZE: ${WEATHER_CACHE_MAX_SIZE:-500}
+      WEATHER_CONFIGURED_DEMO_ENABLED: ${WEATHER_CONFIGURED_DEMO_ENABLED:-false}
+      WEATHER_CONFIGURED_CITY: ${WEATHER_CONFIGURED_CITY:-}
+      WEATHER_CONFIGURED_TEMPERATURE_C: ${WEATHER_CONFIGURED_TEMPERATURE_C:-}
+      WEATHER_CONFIGURED_APPARENT_TEMPERATURE_C: ${WEATHER_CONFIGURED_APPARENT_TEMPERATURE_C:-}
+      WEATHER_CONFIGURED_PRECIPITATION_MM: ${WEATHER_CONFIGURED_PRECIPITATION_MM:-}
+      WEATHER_CONFIGURED_WEATHER_CODE: ${WEATHER_CONFIGURED_WEATHER_CODE:-}
+      WEATHER_CONFIGURED_WIND_SPEED_KMH: ${WEATHER_CONFIGURED_WIND_SPEED_KMH:-}
+    volumes:
+      - ./tools/trend-collector/data:/app/trend-data:ro
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8088}:8080"
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 20
 
   frontend:
     profiles: ["app"]
@@ -110,9 +146,8 @@ services:
       - "127.0.0.1:${FRONTEND_PORT:-8090}:80"
     depends_on:
       backend:
-        condition: service_started
+        condition: service_healthy
 
 volumes:
   postgres_data:
-  redis_data:
   minio_data:
