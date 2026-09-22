@@ -7,6 +7,8 @@ import java.time.Duration;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.web.client.RestClient;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTimeout;
@@ -28,14 +30,16 @@ class BailianGarmentRecognitionServiceTest {
         server.start();
 
         try {
+            SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+            requestFactory.setConnectTimeout(Duration.ofMillis(50));
+            requestFactory.setReadTimeout(Duration.ofMillis(50));
             var service = new BailianGarmentRecognitionService(
+                    RestClient.builder().requestFactory(requestFactory).build(),
                     new ObjectMapper(),
                     "http://127.0.0.1:" + server.getAddress().getPort() + "/chat",
                     "test-key",
                     "vision-test",
-                    true,
-                    Duration.ofMillis(50),
-                    Duration.ofMillis(50));
+                    true);
             var image = new MockMultipartFile("image", "shirt.png", "image/png", new byte[] {1, 2, 3});
 
             Optional<GarmentRecognitionResult> result = assertTimeout(

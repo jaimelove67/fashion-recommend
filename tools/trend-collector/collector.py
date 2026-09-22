@@ -1,4 +1,4 @@
-"""Small bridge from xhs-cli / MediaCrawler exports to the application's trend feeds.
+"""Small bridge from MediaCrawler exports to the application's trend feeds.
 
 Only public content fields are emitted. Login cookies and raw provider responses
 are never served or logged. A failed collection leaves the last feed untouched.
@@ -6,7 +6,6 @@ are never served or logged. A failed collection leaves the last feed untouched.
 Modes:
   import  normalize a MediaCrawler-style content JSON export into data/<platform>.json
   status  inventory data/ against the backend contract without contacting the backend
-  xhs     collect from a signed-in xhs-cli session (requires a local login)
   serve   expose data/<platform>.json over HTTP for TREND_DOUYIN_URL and friends
 """
 from __future__ import annotations
@@ -16,16 +15,11 @@ from datetime import datetime, timezone, timedelta
 import html
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-import os
 from pathlib import Path
 import re
-import shutil
-import subprocess
-import sys
-import time
 from urllib.parse import urlparse
 
-PLATFORMS = {"xhs": "xiaohongshu", "dy": "douyin", "wb": "weibo"}
+PLATFORMS = {"dy": "douyin", "wb": "weibo"}
 # The backend rejects an import file larger than this, so status reports readiness the same way.
 MAX_FEED_BYTES = 2_000_000
 RULES = {
@@ -35,6 +29,11 @@ RULES = {
     "针织": ("针织", "毛衣", "knit"), "裙装": ("裙", "dress", "skirt"),
     "层次叠穿": ("叠穿", "外套", "layer"), "街头": ("街头", "street"),
 }
+SHOW_MARKERS = ("红毯", "red carpet", "red-carpet", "时装周", "fashion week", "fashion-week",
+                "runway", "runway show", "catwalk", "秀场", "走秀", "大秀")
+CELEBRITY_MARKERS = ("明星", "艺人", "演员", "歌手", "女星", "男星", "影后", "影帝", "偶像", "名人")
+CELEBRITY_STYLE_MARKERS = ("造型", "穿搭", "搭配", "礼服", "首映", "典礼", "封面", "大片", "珠宝", "亮相", "出席")
+EDITORIAL_STYLE_MARKERS = ("红毯造型", "明星造型", "明星穿搭", "女星造型", "男星造型", "时装大片", "封面造型")
 
 
 def text(value):
@@ -47,6 +46,14 @@ def count(value):
         return None
     number = int(value)
     return number if 0 <= number <= 10**12 else None
+
+
+def count_label(value):
+    """Keep rounded follower labels for display and conservative tier classification."""
+    if count(value) is not None or value is None:
+        return None
+    label = str(value).strip()
+    return label if re.fullmatch(r"\d+(?:\.\d+)?\s*(?:万|亿|[wW]|千|[kK])", label) else None
 
 
 def instant(value):
@@ -81,14 +88,28 @@ def image_urls(raw):
     return result[:20]
 
 
+def excluded_show_or_celebrity(value):
+    """Keep creator outfit sharing out of red-carpet, runway and celebrity-editorial feeds."""
+    lower = text(value).lower()
+    if any(marker in lower for marker in SHOW_MARKERS + EDITORIAL_STYLE_MARKERS):
+        return True
+    return any(marker in lower for marker in CELEBRITY_MARKERS) and any(
+        marker in lower for marker in CELEBRITY_STYLE_MARKERS)
+
+
 def normalize(row, platform, observed=None):
     """Accept MediaCrawler content export fields (not comment/creator exports)."""
+    if platform not in PLATFORMS.values():
+        raise ValueError("unsupported platform")
     item_id = row.get("aweme_id") if platform == "douyin" else row.get("note_id")
     if not item_id:
         raise ValueError("content ID missing")
     title = text(row.get("title") or row.get("content") or row.get("desc"))
     description = text(row.get("desc") or row.get("content"))
-    combined = title + " " + description
+    raw_tags = row.get("topicTags") or row.get("tags") or ""
+    combined = title + " " + description + " " + text(raw_tags)
+    if excluded_show_or_celebrity(combined):
+        raise ValueError("outside creator outfit trend scope")
     tags = [tag for tag, keywords in RULES.items() if any(k in combined.lower() for k in keywords)]
     if not tags and not any(k in combined.lower() for k in ("穿搭", "搭配", "outfit", "ootd", "fashion")):
         raise ValueError("not fashion content")
@@ -102,7 +123,17 @@ def normalize(row, platform, observed=None):
     images = image_urls(row.get("image_list") or row.get("note_download_url") or [])
     cover = http_url(row.get("cover_url")) or (images[0] if images else None)
     source = http_url(row.get("aweme_url") or row.get("note_url"))
-    allowed = {"douyin": ("douyin.com",), "xiaohongshu": ("xiaohongshu.com",), "weibo": ("weibo.com", "weibo.cn")}[platform]
+    follower_count = next((row.get(field) for field in (
+        "authorFollowers", "author_followers_count", "author_follower_count", "author_followers",
+        "user_followers_count", "user_follower_count", "followerCount", "followers_count", "follower_count",
+        "followers", "author_fans_count", "fans_count", "fans",
+    ) if row.get(field) not in (None, "")), None)
+    video_flag = str(row.get("is_video") or "").strip().lower() in ("1", "true", "yes")
+    media_type = str(row.get("media_type") or row.get("type") or "").lower()
+    is_video = platform == "douyin" or any(row.get(field) for field in (
+        "video_download_url", "video_url", "video_play_url", "video_info", "video_list", "video_urls",
+    )) or video_flag or media_type.startswith("video") or media_type in ("short_video", "2")
+    allowed = {"douyin": ("douyin.com",), "weibo": ("weibo.com", "weibo.cn", "sina.cn")}[platform]
     host = urlparse(source or "").hostname or ""
     if not any(host == domain or host.endswith("." + domain) for domain in allowed):
         raise ValueError("source platform mismatch")
@@ -111,10 +142,12 @@ def normalize(row, platform, observed=None):
         "topicTags": (tags or ["穿搭灵感"])[:10], "heatScore": 0,
         "publishedAt": published.isoformat(), "fetchedAt": fetched.isoformat(),
         "sourceUrl": source, "imageUrl": cover,
-        "evidence": {"author": text(row.get("nickname"))[:120], "mediaType": "video" if row.get("video_download_url") else "image",
+        "evidence": {"author": text(row.get("nickname"))[:120], "mediaType": "video" if is_video else "image",
                      "images": images or ([cover] if cover else []), "likes": count(row.get("liked_count")),
                      "favorites": count(row.get("collected_count")), "comments": count(row.get("comment_count", row.get("comments_count"))),
-                     "reposts": count(row.get("share_count", row.get("shared_count")))},
+                     "reposts": count(row.get("share_count", row.get("shared_count"))),
+                     "authorFollowers": count(follower_count),
+                     "authorFollowersLabel": count_label(follower_count)},
     }
 
 
@@ -138,37 +171,6 @@ def write_feed(rows, platform, output, observed=None):
     temporary.write_text(json.dumps({"items": ordered}, ensure_ascii=False), encoding="utf-8")
     temporary.replace(target)
     print(json.dumps({"platform": platform, "items": len(ordered), "skipped": skipped}))
-
-
-def xhs_search(keyword, limit):
-    if not (Path.home() / ".xiaohongshu-cli" / "cookies.json").exists():
-        raise ValueError("XHS_SESSION_REQUIRED: run xhs login after signing in to Xiaohongshu")
-    executable = shutil.which("xhs") or str(Path(sys.executable).parent / ("xhs.exe" if os.name == "nt" else "xhs"))
-    def call(*args):
-        result = subprocess.run([executable, *args, "--json"], capture_output=True, encoding="utf-8", timeout=90,
-                                env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        if result.returncode:
-            raise ValueError("XHS_REQUEST_FAILED: check session in xhs; raw output not logged")
-        data = json.loads(result.stdout)
-        return data.get("data", data)
-    search = call("search", keyword, "--sort", "popular", "--type", "image")
-    rows = []
-    for result in search.get("items", [])[:limit]:
-        note_id = result.get("id")
-        if not note_id or not result.get("note_card"):
-            continue
-        # Search has cached the source-bound security token; never construct a naked note URL for read.
-        detail = call("read", note_id)
-        notes = detail.get("items", [])
-        for note in notes:
-            card = note.get("note_card", {})
-            interaction = card.get("interact_info", {})
-            rows.append({"note_id": card.get("note_id") or note_id, "title": card.get("title"), "desc": card.get("desc"),
-                         "time": card.get("time"), "nickname": card.get("user", {}).get("nickname"),
-                         "image_list": card.get("image_list"), "note_url": f"https://www.xiaohongshu.com/explore/{note_id}",
-                         **interaction})
-        time.sleep(3)
-    return rows
 
 
 def report(output):
@@ -200,7 +202,7 @@ def report(output):
         elif not items:
             state, note = "empty", "文件存在但没有可用条目"
         else:
-            state, note = "ready", "可被后端读取；下一步刷新趋势来源并完成 AI 初审与人工终审"
+            state, note = "ready", "可被后端读取；刷新趋势来源后即可展示"
         published = sorted(str(i.get("publishedAt")) for i in items
                            if isinstance(i, dict) and i.get("publishedAt"))
         sources.append({**entry, "state": state, "items": len(items),
@@ -232,34 +234,24 @@ def serve(directory, port):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("mode", choices=["import", "status", "xhs", "serve"])
-    parser.add_argument("--platform", choices=list(PLATFORMS.values()), default="xiaohongshu")
+    parser.add_argument("mode", choices=["import", "status", "serve"])
+    parser.add_argument("--platform", choices=list(PLATFORMS.values()), default="douyin")
     parser.add_argument("--input", type=Path, nargs="+", help="MediaCrawler content JSON export (one or more files)")
     parser.add_argument("--output", type=Path, default=Path(__file__).parent / "data")
-    parser.add_argument("--keyword", default="通勤穿搭")
-    parser.add_argument("--limit", type=int, default=10)
-    parser.add_argument("--interval", type=int, default=0, help="Repeat xhs collection in seconds (minimum 21600)")
     parser.add_argument("--port", type=int, default=8767)
     args = parser.parse_args()
-    if not 1 <= args.limit <= 20: parser.error("limit must be 1..20")
-    if args.interval and args.interval < 21600: parser.error("interval must be at least 21600 seconds")
     if args.mode == "status": report(args.output); return
     if args.mode == "serve": serve(args.output, args.port); return
     if args.mode == "import":
         if not args.input: parser.error("--input is required")
+        rows = []
         for path in args.input:
             if not path.is_file(): parser.error(f"input file not found: {path}")
             data = json.loads(path.read_text(encoding="utf-8-sig"))
-            write_feed(data if isinstance(data, list) else data["items"], args.platform, args.output)
+            rows.extend(data if isinstance(data, list) else data["items"])
+        write_feed(rows, args.platform, args.output)
         report(args.output)
         return
-    while True:
-        try: write_feed(xhs_search(args.keyword, args.limit), "xiaohongshu", args.output, datetime.now(timezone.utc))
-        except (ValueError, subprocess.TimeoutExpired, OSError) as error:
-            print(str(error), file=sys.stderr)
-            if not args.interval: raise SystemExit(1) from None
-        if not args.interval: break
-        time.sleep(args.interval)
 
 
 if __name__ == "__main__":

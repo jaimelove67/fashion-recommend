@@ -462,3 +462,112 @@
 - 阿里云万相 2.6 支持 1–4 张 Base64/公网图片输入；实现把用户指定的性别原型作为第一张参考，并最多附带三件当前衣橱图片，全部已选单品的名称/类别/颜色/风格进入受限提示词。图像任务使用异步创建和轮询，返回的结果 URL 按当日会话使用。
 - 对抗用例已经覆盖：未填写 gender 不调用图像客户端；跨用户或不在当前衣橱的推荐单品不进入视觉请求；图像生成关闭时不发出提供商请求；客户端请求体包含 Wan 模型、原型 Base64 和编辑模式参数。
 - 上一轮的两张固定生图过渡资产已从 `frontend/public/assets` 移到 `_codex_docx_work/obsolete-generated-assets/`，未再作为每日结果匹配依据。
+
+## 2026-09-20 管理员 AI 模型配置初步审计
+
+- 管理工作台目前有运营总览、账号与权限、反馈审核、趋势审核、操作日志五个分区，尚无模型配置分区。
+- 运行配置当前由环境变量注入 `application.yml`，多个调用客户端在 Spring 启动时保存 API Key / endpoint / model：`BailianGarmentRecognitionService`、`BailianRecommendationClient`、`BailianTrendModerationClient`、`BailianImageGenerationClient`。只加表单而不改这些实际消费路径不会使配置生效。
+- 当前 Flyway 最新版本为 V7；新增设置需使用下一版本迁移，不改写 V1–V7。
+- 当前工作区只有用户未跟踪目录 `tools/trend-capture/`；必须原样保留，不纳入本功能清单。
+- 安全设计约束：API key 不得由 GET 响应回显，不能记入操作日志；DB 只保存加密凭据。加密根密钥必须来自部署环境，缺失时拒绝保存密钥，不允许明文降级。
+
+### 阶段二十八恢复后的代码核对
+
+- 四个现有客户端（衣物识别、穿搭推荐、趋势审核、Wan 生图）均在 Spring 构造时把 `@Value` 配置保存为实例字段；其中前三者走 DashScope 的 OpenAI 兼容 chat completions 接口，Wan 生图走固定的 DashScope 原生多模态生成与任务轮询接口。
+- 当前调用协议与 URL 都固定为 DashScope，支持的最小安全配置应只暴露该厂商与 capability-specific 模型名/API Key，不接受管理员输入任意 endpoint；运行时管理配置只覆盖厂商、模型、密钥，启用/同意开关、超时、Wan 任务地址及图像原型仍由部署配置控制。
+- 计划中的“系统内置模型”映射为推荐、趋势审核、衣物识别和每日模特生图四种 capability；需要在调用每次请求时解析 DB overlay，否则仅写管理界面不会生效。
+- 当前 PowerShell 不支持 Bash 的 `rg` 花括号路径展开；首次代码定位命令因此得到 ParserError，已改为从推荐目录单路径检索成功，未产生文件改动。
+- 识图、推荐和趋势初审均使用 OpenAI Chat Completions 形状（含 JSON mode / 多模态图像），适配器可将厂商限制为经过实现验证的 DashScope 与 OpenAI，而不是开放任意 endpoint。
+- 每日搭配图生成使用 DashScope 专有异步任务协议和 `X-DashScope-Async`，不应伪装成可切换到通用 OpenAI 图像 API；后台该能力若提供配置，只允许 DashScope，或暂时保留环境变量只读配置。
+- 当前一个 `app.bailian.api-key` 被识图、文本推荐、趋势初审和图像生成共享；管理端可按能力提供独立加密 key override，未覆盖时继续继承环境变量 key。
+- “不设置 API Key”有两个不同状态：空输入表示保留已有 DB 凭据；明确恢复/清除操作表示删除 DB override 并回退环境变量，不能用空字符串模糊两种意图。
+- 最小可管理集合确定为四项真实模型能力：衣物识别、穿搭推荐、趋势 AI 初审、每日搭配图生成；仅实现前两者会留下后台无法管理的内置模型调用。
+- 对前三个 OpenAI Chat Completions 客户端，仅将 provider 限制为实现已验证的 DashScope / OpenAI，endpoint 由 provider 枚举解析，不开放管理员自填 URL；Wan 2.6 图像生成继续走 DashScope 异步协议，provider 固定 DashScope。
+- 一条配置记录代表一个 capability，可分别覆盖厂商、模型名、启用开关和 API Key。留空 key 表示保留当前数据库密钥；明确“恢复环境变量配置”删除这项记录并完整回到环境配置。
+- 应用默认启用/禁用、模型和 endpoint 仍由当前环境变量提供；数据库覆盖只在管理员明确保存后生效。每次调用读取最新设置，可做到无重启生效，且调用开关在管理界面可即时关闭。
+- 管理接口可独立放在 `/api/v1/admin/**` 下，现有 `SecurityConfig` 已在 `.authenticated()` 之前统一要求 `ROLE_ADMIN`；操作可写入现有 `admin_audit_logs`，审计详情只记录能力、厂商、模型和密钥动作（已保留/更新/恢复），绝不记录密钥。
+- 现有 `AdminControllerTest` 与 `FlywayMigrationTest` 可作为权限/API、迁移兼容性回归入口；新迁移应把当前预期迁移数从 7 提升至 8，并保留既有 V1–V7。
+- 管理台前端由 `AdminView.vue` 分区切换、`useFashionApp.js` 统一持有 admin API 状态；登出会调用 `resetPrivateState()`，新增模型配置和 key 草稿也必须一并清空。
+- API Key 加密根密钥使用独立 `AI_SETTINGS_ENCRYPTION_KEY`（32 字节 Base64）从容器环境注入，区别于供应商 API Key；不在代码/迁移中生成默认值，不启用时仍允许读取环境配置和管理非密钥字段，但禁止写密钥。
+
+### 阶段二十八继续：现有实现审计（2026-09-20）
+
+- 继续任务时发现工作区已有较完整的未提交阶段二十八改动：V8 表、四能力/厂商模型、设置仓储与服务、管理 API、四个调用客户端接入、容器环境变量和迁移断言。保留这些改动并在其上完善，未触碰 `tools/trend-capture/`。
+- 当前 `AiApiKeyCipher` 使用 AES-GCM、随机 12 字节 nonce、128 位认证标签和版本前缀；密钥从独立环境配置解码 32 字节，缺省时 `isAvailable=false`，不会明文回退。密文含 nonce，不随 GET DTO 返回。后续需覆盖篡改、错误根密钥和不回显用例。
+- V8 schema 限制 provider 为 DashScope/OpenAI，并限制 `DAILY_IMAGE_GENERATION` 为 DashScope；管理 API 位于 `/api/v1/admin/**`，已有 `SecurityConfig` 统一要求 `ROLE_ADMIN`。
+- 管理界面当前仍是五个分区；`AdminView.vue`、`useFashionApp.js` 尚无模型设置 UI/API 状态，登出重置逻辑也尚未包含模型草稿。
+- 四客户端已调用运行时配置解析器，但需核验数据库 `enabled` 与环境级离线开关的合并语义，防止管理配置绕开 E2E/离线禁用；当前请求 DTO 也应显式对 `toString()` 中的 API Key 脱敏。
+
+### 阶段二十八实现完成（2026-09-20）
+
+- 管理台已新增四能力 AI 配置分区，支持模型厂商、模型名、启停和按能力独立 API Key；配置由识别、推荐、趋势初审和每日生图客户端在请求时读取。
+- 运行时启用状态取数据库设置与部署级开关的交集，管理配置不能绕过部署禁用；模型/凭据未覆盖时继续读取环境默认值。图像生成只支持 DashScope，避免把专有异步协议伪装成通用 OpenAI 图像接口。
+- V8 PostgreSQL 迁移已在本地 Compose 数据库真实应用。`AI_SETTINGS_ENCRYPTION_KEY` 当前未配置：管理员可读配置状态，但写入非空 API Key 会被拒绝；部署配置 32 字节 Base64 主密钥后才可启用密钥加密写入。
+- 密钥使用 AES-GCM + 随机 nonce 加密，GET/审计/响应不含明文或密文；不同厂商切换需新 key 或明确清除旧 key。管理页面仅保留短暂密码输入草稿并在切换/登出时清除。
+- 全量后端测试 129 项（失败/错误 0、跳过 1），前端生产构建、Compose 配置检查通过；Docker 前后端镜像重建后真实 PostgreSQL 到 V8，管理员 Playwright E2E 1/1 通过，含移动视口溢出检查。
+- 本次未操作用户未跟踪目录 `tools/trend-capture/`；工作区变更保持未提交、未推送。
+
+### 阶段二十八继续复核（2026-09-20）
+
+- 复核确认四个模型客户端的有效启用状态均受部署环境开关硬约束；管理员不能通过数据库配置重新启用部署已关闭的能力。切换厂商时不会沿用旧厂商密钥，必须提交新密钥或显式清除。
+- 管理界面展示环境开关阻断状态、密钥来源和根密钥缺失提示。管理员端到端流程验证了保存合成 API Key 后响应既不含明文也不含 `v1:` 密文、输入草稿会清空、显式清除与恢复环境配置成功；未调用真实供应商模型。
+- 复核验证：Maven 全量测试 129 项（0 失败、0 错误、1 跳过）；前端生产构建通过；Compose 配置校验通过；`git diff --check` 通过。管理员 Playwright E2E 在 390px 视口下通过，无横向溢出。
+- 本次会话 Docker Engine 不可用，因此本轮浏览器复核使用临时 H2 数据库与测试专用 CORS 配置；此前真实 Compose PostgreSQL / 容器验证记录仍保留为先前结果。
+- 测试服务已停止。临时测试目录 `C:\Users\jaime\AppData\Local\Temp\codex-fashion-ai-model-e2e-20260920` 因执行策略拒绝精确路径清理而保留；无关未跟踪的毕业设计文档及 `tools/trend-capture/` 未触碰，工作区未提交或推送。
+
+## 2026-09-20 趋势审核取消与刷新：已核实约束
+
+- 运行中的 Compose 前后端、PostgreSQL、MinIO 均健康；当前工作树有多处无关未提交改动，必须保留。
+- TrendService 已实现抖音/微博社交优先、10 万粉丝分层、小众内容目标比例 25%、编辑补充比例上限、7 日窗口与匿名热榜默认关闭；继续沿用。
+- 普通趋势仓储当前强制 `hidden=false AND moderation_status='APPROVED'`，故抓取成功也会展示为空；TrendAdminController 仍提供 AI 审核、人工审核与下架路由。
+- 管理员模型设置仍公开 `TREND_MODERATION` 能力；应用配置与 Compose 仍包含趋势 AI 审核参数。
+- `tools/trend-collector/collector.py` 当前仍支持 xhs CLI 和小红书导入；用户已明确取消小红书，需从采集器命令与测试中移除。
+- 趋势表 V6 审核列保留为向后兼容；仅取消运行时审核，不做破坏性 DDL。
+- 旧内容重置只删除 `trend_contents` 与其子表 `trend_snapshots`；`trend_source_status` 保留以反映来源连通状态，其他业务表不动。
+- 采集器没有现成导入数据，且 `.env`/运行后端未配置抖音或微博 JSON URL；需确认公开可用 RSS 能刷新，但它只能作为社交内容之外的补充，不能伪装成博主内容。
+- 管理端 `AdminView.vue` 和 `useFashionApp.js` 除了趋势审核队列外仍包含通用刷新/审计/模型配置加载；移除趋势专属状态和请求时需保留反馈审核与 AI 管理配置。
+- `TREND_MODERATION` 当前作为模型配置的第四项暴露；移除枚举能力即可令现有 DB 行不再映射到 UI/API，V8 表结构无需清除密钥或做破坏性迁移。
+- `TREND_AI_REVIEW_*` 只用于 `AiModelDefaults`、`TrendModerationService` 和部署环境，应从运行配置中删除。
+- 采集器 README/status 仍声称需要 AI 与人工终审，需同步改成可直接展示；Feedback 的 `moderation_status` 是另一条业务流程，必须保留。
+- 后端工作流已移除：`TrendAdminController` 只剩 `/refresh`；AI 初审服务/客户端、人工审核 DTO/枚举、审核查询与变更 SQL 和对应测试已删除；`TrendRepository.find/since` 不再过滤 `hidden` 或审核状态。
+- 已补仓储测试：默认审核状态内容可立即查询；遗留 `REJECTED + hidden=true` 也不会被已取消的审核流程过滤。推荐接口测试已改为新写入趋势无需审核即可引用。
+- 模型能力枚举已移除 `TREND_MODERATION`，默认 AI 配置和生产配置已删除审核开关/调度参数；V6 数据库迁移保留。
+- 两次大范围 `apply_patch` 因锚点空格不匹配而未写入；改用方法边界替换和较小补丁成功，随后需 `git diff --check` 复核空白。
+- 后端管理集成测试的审核用例已按新行为替换，仍需编译运行测试确认。
+- `tools/trend-collector` 的 MediaCrawler 导入路径现在只允许 Douyin/Weibo；额外移除了 xhs CLI 收集 helper。XHS 的单元测试改为证明导入参数与 normalize 均拒绝小红书。
+- `tools/trend-capture/capture.js` 仍有小红书 bookmarklet 平台和页面解析器，必须从平台白名单/文案移除，防止手动抓取入口继续收录。
+- README 与 `docs/trend-collection.md`、`docs/development-boundaries.md` 仍全面描述审核后发布、TREND_AI_REVIEW 配置及保留历史小红书记录，需改成直接展示与清理旧行后的现实状态。V6 DDL 可保留为历史迁移说明，须注明仅兼容保留、运行时不再使用。
+- 趋势采集器这次移除 xhs helper 后保留只读页面书签抓取/MediaCrawler 导入，不使用平台 cookies、私人 API 或 X/Instagram。
+- 小红书已从 `capture.js` 的支持平台与 DOM 解析器移除，未知平台提示改为仅列抖音和微博；新增 Node 反例测试验证小红书 URL 不可识别。
+- 采集器的 CLI 参数现仅能选择抖音/微博，默认抖音；XHS 在线收集器与依赖已移除，保留标准库实现的 JSON 导入/状态/只读服务。
+- AdminView 中趋势审核页、队列状态和审核请求已从管理界面移除；反馈审核继续保留。AdminView 仍需确认 AI 描述文案只覆盖三项能力。
+- README 与趋势接入说明已改为直接展示；趋势审核路由和环境变量已从对外文档移除，管理员模型配置文档改为三类能力。开发边界说明将 V6 审核列标为保留的历史 schema。
+- 文档第一次批量改写因 README 中全角括号锚点与实际不同而中止，没写入文件；随后改用小块精确补丁，已生效。
+- `git diff --check` 已通过；仅有 Git 的 LF→CRLF 工作区提示，没有空白错误。
+- 仍要检查 docs 中“三平台导入”旧称是否已改为抖音/微博两平台，并确认旧审核名词仅出现在历史 V6 说明或测试反例中。
+- 后端 Maven 首轮测试共 123 项，唯一失败是 `AdminControllerTest` 仍期待 4 个模型能力；把断言改为 3 后重跑，不涉及实现故障。
+- 前端 `npm run build` 通过；collector 9/9、bookmarklet capture 2/2 通过；Docker Compose 配置通过。
+- 文档残留审核描述已收敛为 V6 历史字段说明；趋势接入文档的采集目标明确为抖音/微博两平台，XHS 仅出现在“不接入/拒绝输入”的声明和负向测试。
+- Maven 后端全量测试在修正模型能力条目数后通过，123 项中 0 失败、0 错误、1 跳过。
+- 公共搜索的抖音候选可验证穿搭测评格式与部分作者粉丝展示，但这次返回的直接视频最晚集中在 2026-09-08，早于当前 7 日趋势窗；不写入新趋势数据，避免把过期内容标为新内容。
+- 本次可复核候选：视频 `https://www.douyin.com/video/7677527003293057509`（2026-08-24，测评类，作者页显示 70.1 万粉丝）；`https://www.douyin.com/video/7682827859967262656`（2026-09-08，作者页显示 1.1 万粉丝）。因日期不符合 7 日窗，二者均排除。
+- 第二次公开搜索仍未找到 2026-09-13 之后可核实的抖音穿搭帖；较新的候选为 2026-09-08（`https://www.douyin.com/video/7682827859967262656`，作者 1.2 万粉）与 2026-09-12（`https://www.douyin.com/video/7684312247778319078`，作者 1.0 万粉），都早于本页 7 日窗且不能代表高粉主流作者，排除。
+- 没有从公开搜索结果拼接/导入这些旧帖；需依赖可用 RSS 刷新内容，社交内容端点继续按未配置处理。
+- 运行容器仍是旧镜像：环境仍含 `TREND_AI_REVIEW_*`、`TREND_XIAOHONGSHU_URL`，热榜开关为 `true`，source status 仍列 `xiaohongshu`；这解释了先前改代码但趋势页没变。重建镜像后这些状态应消失。
+- 当前运行时社交 JSON URL 为空，`TREND_IMPORT_DIRECTORY=/app/trend-data`，挂载目录为空；状态显示 editorial RSS 最近 31 条，Douyin 4 条，Weibo 0 条，热榜仍开启。公开趋势仍受旧镜像审核门槛，因此接口读不到它们。
+- 最新本地来源目录为空，不能把这 4 个旧状态计数当作已准备好的新抖音导入文件；刷新前需靠新镜像计划内的默认 RSS 源，或明确报告缺少可用社交授权导入。
+- 公开搜索已找到两条近 7 日内的真实抖音穿搭作者作品，可作为小众补充：`https://www.douyin.com/video/7685922485557314127`（9/16，丰衣小铺，搜索页显示 9034 粉丝）和 `https://www.douyin.com/video/7686759051816607859`（9/18，文洲时尚穿搭，显示 1.2 万粉丝）；两条有直达作品链接和清晰穿搭描述。
+- 同一搜索找到 Douyin精选 9/15 的穿搭建议 `https://jingxuan.douyin.com/m/video/7685725438815063348`，但它是精选汇总来源、没有作者粉丝/个人博主身份，最多能作编辑型补充，不计入创作者主流。
+- 高粉账号“小水”资料页显示 50 万粉丝且 9/19 有穿搭作品，但搜索索引没有给出该单条作品 URL/发布时间对应关系；不能用个人主页 URL 冒充单条视频，也不能把“最新发布”推定为 9/19 的某个具体条目。
+- 公开搜索新增一条合适的高粉丝抖音穿搭候选：`https://www.douyin.com/video/7686097191785552378`，作品发布时间 2026-09-16 19:42，标题“ 不管怎么样都是美好的一天呀 #秋冬穿搭灵感 ”，作者“大群裘装精选”页面展示 23.2 万粉丝；日期、链接、作者和穿搭主题由抖音索引摘要提供。直接打开页面仅返回 SPA 壳，互动数与正文细节不可读取。
+- 用户粉丝显示为 `23.2万` 是平台舍入值，不能写成 232000 精确数；若将其导入，需新增 raw label 并以安全区间分类（下界仍显著高于 10 万阈值）。
+- 2026-09-20 新采集文件已准备并通过 `collector.py status`：抖音 3 条、微博 5 条，全部为 2026-09-16 至 2026-09-20 的近期内容；来源只含抖音和微博，不含小红书、X 或 Instagram。
+- 抖音样本为大群裘装精选（23.2万，区间下界仍高于主流阈值）、丰衣小铺（9034）、天天都想吃炸鸡（6055，光腿神器试穿对比测评）；微博样本为 GO时尚、FashionTrending、少女囤货官、时尚OOTD、金刚萌，作者粉丝标签均按平台原始显示值存储。
+- 微博采用新浪公开镜像的具体内容页（`sina.cn/news/detail/<id>.html`），页面可核实发布时间、正文和作者粉丝展示；采集器仅将该域名用于微博，来源适配测试覆盖这一限制。
+- 互动计数和图片来源未能核实的条目留空，热度值为 0，不从搜索摘要推算；`23.2万`、`1.2万` 等显示标签保留原样，由后端按舍入区间保守分层。
+- 运行库当前有 44 条旧 `trend_contents`、0 条 `trend_snapshots`；`app_users` 为 152 行、`wardrobe_items` 为 25 行。刷新/清理仅会操作两张趋势表。
+- 旧容器的 `/api/v1/trends?period=week` 返回空列表，并仍显示 `xiaohongshu` 来源；容器镜像约 2 小时未更新。这证实改动未进入运行容器是趋势页仍无内容的直接原因。
+- 重建后首轮 API 暴露了补充比例实现缺口：8 条社交内容后仍继续返回全部编辑来源。已将编辑补充上限改为社交内容的四分之一（不足 4 条时最多补 1 条、无社交来源时保留 RSS 兜底），并增加反例测试；最终页面为 8 条社交内容 + 2 条编辑文章。
+- 最新成功刷新后按 `min(last_success_at)`（毫秒精度）核对新旧边界：41 条由本轮来源成功写入，其中抖音 3、微博 5、编辑 RSS 33；13 条仍未刷新。单事务清除了这 13 条旧趋势行及其关联快照，最终数据库有 41 条本轮数据、0 条旧行、0 条小红书内容、0 条互动快照。
+- 最终 `/api/v1/trends?period=week` 返回 10 条：抖音 3、微博 5、编辑 RSS 2；主流博主 6、小众博主 2，25% 比例符合设定，含「光腿神器穿搭测评」视频。来源状态只含当前适配器，抖音和微博均为 `ready`。
+- 清理前后用户/衣橱行数保持 `app_users=152`、`wardrobe_items=25`；前后端容器健康，前端 HTTP 200。后端全量 Maven 测试 126 项（0 失败/错误，1 跳过）、前端构建、采集器 11 项测试、Compose 配置和 `git diff --check` 均通过。

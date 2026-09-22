@@ -2,14 +2,14 @@
 
 “知己”是一个面向个人衣橱的智能穿搭推荐毕业设计项目。用户可以录入或上传衣物，填写城市、场合和风格要求，系统结合天气与衣橱数据生成可解释的搭配方案，并支持保存、反馈和历史查看。
 
-当前项目的验收边界是“账号注册/登录 -> 衣橱录入 -> 场景输入 -> 推荐生成 -> 保存反馈”的可运行闭环，另提供受 `ROLE_ADMIN` 保护的后台运营工作台（概览、账号治理、反馈审核、推荐运行数据和操作审计）。项目属于毕业设计原型，账号系统采用本地用户名、密码和服务端会话，暂不包含第三方统一登录、找回密码、在线交易或虚拟试衣。
+当前项目的验收边界是“账号注册/登录 -> 衣橱录入 -> 场景输入 -> 推荐生成 -> 保存反馈”的可运行闭环，另提供受 `ROLE_ADMIN` 保护的后台运营工作台（概览、账号治理、反馈处理、模型配置和操作审计）。项目属于毕业设计原型，账号系统采用本地用户名、密码和服务端会话，暂不包含第三方统一登录、找回密码、在线交易或虚拟试衣。
 
 ## 技术栈
 
 - 前端：Vue 3、Vite、Lucide Vue；运营总览使用本地 lieflat-charts 的 Lupi Basics 语法实现原生 SVG 图表，入口位于 frontend/。
 - 后端：Java 17、Spring Boot 3.4.2、Spring Web、Spring Security、JDBC、Validation、Flyway、Actuator，入口位于 backend/。
 - 数据与存储：PostgreSQL 16、MinIO 私有对象存储、Caffeine 进程内缓存。
-- 智能能力：阿里云百炼兼容 OpenAI Chat Completions 协议；文本推荐模型默认优先使用，视觉识别默认关闭。
+- 智能能力：阿里云百炼及 OpenAI Chat Completions 兼容调用；管理员可按识图、推荐和每日生图分别设置厂商、模型和 API Key，密钥使用 AES-GCM 加密存储。
 - 本地编排：Docker Compose，包含 PostgreSQL、MinIO，以及可选的前后端应用服务。
 
 ## 环境要求
@@ -124,8 +124,8 @@ mvn spring-boot:run
 4. “使用 AI 自动识别”默认不勾选；此时需填写名称、类别和颜色。只有本次上传明确勾选后，后端才允许进入识别流程，实际外部调用还要求视觉开关和密钥均已配置。
 5. 进入“推荐”，填写城市、场合和可选的风格要求，生成搭配。
 6. 查看天气、推荐单品和推荐理由，保存方案并提交满意度反馈。
-7. 进入“历史”查看已生成记录；“风潮”展示已接入来源的真实内容（编辑订阅源、授权 JSON 源、公开网页源，以及采集导入的三平台内容），没有任何可用内容时显示空状态与来源状态说明，不伪造趋势。
-8. 管理员进入独立的“管理工作台”，在“趋势内容审核”中运行 AI 初审，再对内容作人工终审；普通用户只看到人工通过且未下架的趋势。
+7. 进入“历史”查看已生成记录；“风潮”展示已接入来源的真实内容（编辑订阅源、授权 JSON 源、公开网页源，以及抖音/微博采集导入内容），没有任何可用内容时显示空状态与来源状态说明，不伪造趋势。
+8. 管理员进入独立的“管理工作台”管理账号、反馈、模型配置和操作日志；符合来源契约的趋势内容采集后直接展示。
 
 推荐至少需要两件可组合的、已完善的不同类别衣物。衣物为空、只剩待人工确认记录或类别无法组合时，接口会返回明确错误，不会伪造推荐结果。
 
@@ -135,23 +135,23 @@ mvn spring-boot:run
 - 每日推荐主区域按参考效果展示为“中央全身模特 + 四角衣橱单品卡”，下方固定解释天气适配、场合适配、风格方向、衣橱依据。页面会按当前衣橱 id 重新校验推荐快照，并排除 `NEEDS_MANUAL_REVIEW` 衣物；失效图片不使用通用时装图回退。模特性别只取个人档案中的 `gender`，每日模特图通过 `/api/v1/me/recommendations/{id}/visual` 调用阿里云万相图像编辑接口生成，未配置或失败时保留画板和已确认单品并明确显示未生成状态，不把原型或静态图冒充当日生图。
 - 每次生成都会持久化审计元数据：合法 LLM 结果保存真实 provider 元数据（provider call ID、模型名、prompt 版本与三类 token），规则降级只保存稳定的枚举式 fallback 原因，不保存异常原文。API 通过嵌套 `generationAudit` 返回这些字段，`engine` 仍保留在顶层。旧历史与降级路径保持为空，不伪造模型元数据。
 - BAILIAN_VISION_ENABLED 默认为 false。即使服务端已启用，仍需用户在每次上传时明确勾选 AI 识别；未同意、未启用或识别失败时，系统不会调用或不会采纳视觉模型结果，并要求人工确认不完整信息。
-- “风潮”只展示已接入来源的真实内容：`TREND_EDITORIAL_FEEDS` 的出版方订阅源、`TREND_JSON_URL` 的授权数据、`TREND_WEB_URLS` 的公开网页，以及 `TREND_IMPORT_DIRECTORY` 中由采集器导入的 `<platform>.json`。这些来源都没有返回可用内容时，接口返回空列表（`demoMode` 恒为 `false`，开发样本回退已移除），页面显示空状态并在“来源与统计说明”中列出各来源状态。网页适配器抽取 HTML/OpenGraph/JSON-LD 的标题、摘要、标签、发布时间、图片和来源链接，并生成“来源页信号评分”；该评分只表示新鲜度与内容完整度，不代表平台实时热度。抖音与微博的热榜是**匿名可读**的（实测 HTTP 200），因此在既没有导入文件、也没有配置端点时，后端会读取它们的公开热榜，条目只含"榜单词 + 平台自己的热度值 + 搜索入口"，没有正文和图片，评分口径明确标为"平台热榜热度（归一化）"或"平台热榜位次"，不冒充互动量。小红书三家平台中唯一没有任何匿名入口，内容只能通过导入通道进入，来源状态明确显示"未接通"。
-- 趋势内容采用轻量审核工作流：抓取后进入 `PENDING_AI`，AI 只输出结构化的相关性、风险和理由，成功后进入 `PENDING_HUMAN`；AI 失败进入 `AI_FAILED`，管理员可以重试或填写说明后人工接管。只有人工 `APPROVED` 且 `hidden=false` 才能被普通趋势接口读取，AI 的 PASS/REJECT 都不能直接发布或驳回。
+- “风潮”以高传播度穿搭博主的真实穿搭图片和搭配思路为主，优先有图内容与高粉丝作者，并适量展示小众博主和穿搭测评视频；时尚出版方 RSS 和授权网页仅作补充。采集与展示统一排除明星红毯造型、时装周、秀场和明星时装大片。默认将 10 万及以上划为主流博主，粉丝数更少且有精确数据的作者列为小众博主，小众目标约占已分层博主条目的 25%；作者粉丝数缺失时列为未分类补充项。视频标题或摘要命中测评、点评、试穿、对比等词时会标记为穿搭测评视频。匿名热榜只含话题词，没有博主和正文信息，因此默认关闭；可通过 `TREND_HOT_BOARDS_ENABLED=true` 显式启用。没有来源返回可用内容时接口返回空列表（`demoMode` 恒为 `false`，开发样本回退已移除）。符合来源与穿搭相关性校验的趋势内容直接展示。
 - 登录后的全局天气条会优先请求浏览器当前位置；用户拒绝定位时可输入城市。天气由后端调用 Open-Meteo/wttr.in 并标注数据来源，当前位置坐标只保存在浏览器本地，不写入业务数据库。
 - 个人数据接口要求 Spring Security Session 认证，服务端从认证上下文取得用户身份；客户端自定义用户请求头不会改变身份。
 - 衣橱、推荐历史、反馈和个人风格档案均保存在 PostgreSQL 中。推荐历史接口按页返回，页码从 0 开始，默认每页 20 条、最大 50 条；`page * size` 不得超过 1,000,000，越界返回 400，限制深分页查询成本。到达此边界时 `hasNext=false`，`totalElements` 仍为该用户的实际记录总数。图片删除在数据库事务内写入清理任务，由后台调度器异步重试 MinIO 清理，避免对象存储瞬时故障阻塞业务删除。
 - 管理端接口由服务端 `ROLE_ADMIN` 强制保护：`/api/v1/admin/overview` 返回真实聚合指标，`/api/v1/admin/users` 与 `/api/v1/admin/users/{username}/status` 支持账号查询和启停治理，`/api/v1/admin/feedback` 与 `/api/v1/admin/feedback/{recommendationId}/status` 支持反馈筛选和处理，`/api/v1/admin/audit-logs` 支持管理操作审计查询。运营总览将推荐引擎结果和账号状态分别可视化，图表只使用当前数据库聚合，不虚构历史趋势。后台只返回脱敏元数据、反馈处理状态和推荐运行统计，不返回密码哈希、私有图片或推荐正文；普通用户、伪造 `X-User-Id` 或未认证请求均不能进入管理分支，当前管理员不能停用自己。
-- 趋势审核接口由同一 `ROLE_ADMIN` 边界保护：`/api/v1/admin/trends/contents` 查询审核队列，`/api/v1/admin/trends/ai-review` 触发 AI 初审，`/api/v1/admin/trends/contents/{id}/review` 完成人工终审，`/api/v1/admin/trends/{id}/visibility` 管理已通过内容的展示状态。
+- 管理员可通过 `/api/v1/admin/ai-models` 配置三种模型能力及启停状态：识图、穿搭推荐、每日搭配图生成。前两类支持百炼/OpenAI 兼容接口；每日生图使用百炼专用异步协议。API Key 单独以 AES-GCM 密文写入数据库；空白输入保留已有密钥，显式操作才清除密钥覆盖，恢复环境配置会删除该能力的整条自定义记录。接口与审计日志不返回密钥或密文；密钥保存需要部署端提供 `AI_SETTINGS_ENCRYPTION_KEY`。
+- 管理员可通过受 `ROLE_ADMIN` 保护的 `/api/v1/admin/trends/refresh` 手动刷新趋势来源；趋势审核接口已移除。
 
 ## 数据库迁移
 
-数据库结构由 Flyway 管理，运行时 SQL 初始化已关闭。V1 是兼容旧结构的基线迁移，V2 增加图片清理任务表，V3 为推荐增加审计元数据列，V4 增加管理员治理，V5 增加趋势快照，V6 增加趋势 AI 初审与人工终审状态及审计字段，V7 增加个人档案 `gender` 字段：新数据库依次执行 V1 至 V7；已有表但没有 Flyway 历史的旧数据库会先以版本 0 建立基线，再依次执行。V6 不清除趋势内容，既有内容默认进入 `PENDING_AI` 隔离区，需完成 AI 初审和人工终审后才重新进入公共趋势。迁移测试覆盖既有衣物/推荐数据保留、V2/V3/V4/V5/V6/V7 升级和重复启动不重复执行。
+数据库结构由 Flyway 管理，运行时 SQL 初始化已关闭。V1 是兼容旧结构的基线迁移，V2 增加图片清理任务表，V3 为推荐增加审计元数据列，V4 增加管理员治理，V5 增加趋势快照，V6 曾增加趋势审核状态及审计字段，V7 增加个人档案 `gender` 字段，V8 增加管理员 AI 模型配置表：新数据库依次执行 V1 至 V8；已有表但没有 Flyway 历史的旧数据库会先以版本 0 建立基线，再依次执行。V6 审核列作为已执行的历史结构保留，当前运行时不读取它们；本次刷新会清除旧趋势内容和互动快照。迁移测试覆盖既有衣物/推荐数据保留、V2–V8 升级和重复启动不重复执行。
 
 `baseline-on-migrate=true` 只用于接管本项目旧数据库，`clean-disabled=true` 禁止 Flyway 清库。已执行的迁移文件不应修改；后续结构变化应继续新增版本迁移。迁移不能替代备份，升级包含重要数据的环境前仍应先备份 PostgreSQL。
 
 这些边界的设计理由、安全失败方式和生产化替换方案见 [开发期边界与生产化路径](docs/development-boundaries.md)。
 
-趋势内容的来源边界、编辑订阅源配置、抖音/小红书/微博的内容导入步骤与审核流程见 [趋势内容来源与接入说明](docs/trend-collection.md)。
+趋势内容的来源范围、编辑订阅源配置、抖音/微博的内容导入步骤和博主分层见 [趋势内容来源与接入说明](docs/trend-collection.md)。
 
 ## 大模型证明材料
 
@@ -186,6 +186,7 @@ mvn spring-boot:run
 | BACKEND_PORT / FRONTEND_PORT | 8088 / 8090 | Docker 应用的主机端口 |
 | AUTH_REGISTRATION_ENABLED | true | 是否允许创建本地账号 |
 | SESSION_TIMEOUT | 30m | 服务端 Session 有效期 |
+| AI_SETTINGS_ENCRYPTION_KEY | 空 | 管理后台保存模型 API Key 所需的 AES-256 主密钥，必须是 Base64 编码的 32 字节随机值；所有后端实例必须使用同一值，轮换前需迁移已有密文 |
 | SESSION_COOKIE_SECURE | false（本地 HTTP 默认值） | 生产 HTTPS 必须设置为 true |
 | DASHSCOPE_API_KEY | 空 | 百炼 API Key；配置后由首选 LLM 引擎调用 |
 | BAILIAN_ENABLED | true | 是否启用文本推荐大模型（默认优先使用；离线测试需显式设为 false） |
@@ -201,12 +202,10 @@ mvn spring-boot:run
 | BAILIAN_IMAGE_PROTOTYPE_MALE / FEMALE | classpath 原型资源 | 男/女模特原型图 |
 | BAILIAN_IMAGE_REFERENCE_BASE_URL | 空 | 仅用于把相对演示衣物图片转换为公网参考地址；上传衣物优先走私有图片 Base64 |
 | BAILIAN_IMAGE_TASK_TIMEOUT / POLL_INTERVAL | 90s / 2s | 生图任务最长等待时间和轮询间隔 |
-| TREND_AI_REVIEW_ENABLED | true | 是否启用趋势 AI 初审；关闭时内容保持隔离 |
-| TREND_AI_REVIEW_MODEL | qwen-plus | 趋势 AI 初审使用的百炼模型 |
-| TREND_AI_REVIEW_INITIAL_DELAY / TREND_AI_REVIEW_INTERVAL | 30s / 300s | AI 初审调度器的首次延迟和间隔 |
-| TREND_AI_REVIEW_BATCH_SIZE | 10 | 每次自动初审最多处理的内容数 |
 
-授权趋势源变量：`TREND_EDITORIAL_ENABLED`、`TREND_EDITORIAL_FEEDS`、`TREND_HOT_BOARDS_ENABLED`、`TREND_IMPORT_DIRECTORY`、`TREND_JSON_URL`、`TREND_PLATFORM`、`TREND_WEB_URLS`、`TREND_WEB_PLATFORM`、`TREND_WEB_MAX_PAGE_CHARS`、`TREND_WEB_MAX_ARTICLES_PER_PAGE`、`TREND_CONNECT_TIMEOUT`、`TREND_READ_TIMEOUT`、`TREND_CACHE_TTL`。编辑订阅源是逗号或换行分隔的 HTTPS 出版方 RSS，逐源独立抓取，某一源不可用不影响其他源。同一平台的优先级是导入文件 > 配置端点 > 公开热榜，所以显式导入的内容永远优先。任何来源都没有返回可用内容时，趋势接口返回空列表，并在 `sources` 中给出每个来源的状态，不回退到开发样本。JSON 源必须返回只含 `items` 的对象；每条记录必须包含 `id`、`platform`、`title`、`topicTags`、`heatScore`、`publishedAt`、`sourceUrl`、`imageUrl`，可选 `summary`。条目数为 1-50，热度为 0-100 整数，时间为 ISO-8601，链接为 HTTP(S)，`imageUrl` 和 `summary` 可为 `null`。任一 JSON 条目约束失败时整批拒绝，不会把部分脏数据标记为实时趋势。
+管理员首次通过界面保存模型 API Key 前，应生成一次 `AI_SETTINGS_ENCRYPTION_KEY` 并安全备份；示例生成命令见 `.env.example`。部署端未配置该值时，读取现有环境变量密钥和修改非敏感模型信息仍可用，但不能保存新的数据库密钥。
+
+授权趋势源变量：`TREND_EDITORIAL_ENABLED`、`TREND_EDITORIAL_FEEDS`、`TREND_HOT_BOARDS_ENABLED`、`TREND_MAINSTREAM_FOLLOWERS`、`TREND_NICHE_SHARE`、`TREND_IMPORT_DIRECTORY`、`TREND_JSON_URL`、`TREND_PLATFORM`、`TREND_WEB_URLS`、`TREND_WEB_PLATFORM`、`TREND_WEB_MAX_PAGE_CHARS`、`TREND_WEB_MAX_ARTICLES_PER_PAGE`、`TREND_CONNECT_TIMEOUT`、`TREND_READ_TIMEOUT`、`TREND_CACHE_TTL`。编辑订阅源是逗号或换行分隔的 HTTPS 出版方 RSS，逐源独立抓取，某一源不可用不影响其他源。匿名热榜默认关闭；显式开启后，同一平台的优先级是导入文件 > 配置端点 > 公开热榜。任何来源都没有返回可用内容时，趋势接口返回空列表，并在 `sources` 中给出每个来源的状态，不回退到开发样本。JSON 源必须返回只含 `items` 的对象；每条记录必须包含 `id`、`platform`、`title`、`topicTags`、`heatScore`、`publishedAt`、`sourceUrl`、`imageUrl`，可选 `summary`。互动证据中的 `authorFollowers` 是可选的非负整数；条目数为 1-50，热度为 0-100 整数，时间为 ISO-8601，链接为 HTTP(S)，`imageUrl` 和 `summary` 可为 `null`。任一 JSON 条目约束失败时整批拒绝，不会把部分脏数据标记为实时趋势。
 
 网页源是逗号或换行分隔的、由服务端管理员配置的公开 HTTP(S) URL，不接受前端传入任意地址。`ConfiguredWebTrendSourceAdapter` 会限制 URL 数量、单页大小和文章数量，拒绝 localhost、内网/回环地址、带用户信息的 URL，并按缓存 TTL 复用结果。它优先读取 OpenGraph/JSON-LD，缺失时回退到页面标题、`article` 标题、可见摘要、标签、`time` 和图片；网页没有统一可信热度，因此界面会显示“来源页信号评分”。配置前仍需确认来源授权、服务条款和 robots 规则，不能绕过登录、验证码或访问控制。
 
@@ -282,6 +281,8 @@ python -m unittest discover -s scripts/evaluation -p "test_*.py"
 ### 图片上传失败
 
 确认 MinIO 和 minio-init 已成功运行，并使用 JPG、PNG 或 WEBP 图片，大小不超过 MINIO_MAX_FILE_SIZE。minio-init 显示 Exited (0) 是一次性初始化成功，不是错误。
+
+默认单张图片上限为 10 MiB；Nginx 与后端 multipart 请求上限为 11 MiB，为表单字段和请求头预留空间。如果提高 `MINIO_MAX_FILE_SIZE`，也应同步提高 `frontend/nginx.conf` 的 `client_max_body_size` 与后端 `spring.servlet.multipart.max-request-size`。
 
 ### 没有百炼 API Key 是否无法使用
 

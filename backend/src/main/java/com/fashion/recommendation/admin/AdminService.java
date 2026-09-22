@@ -87,6 +87,7 @@ public class AdminService {
         return new AdminFeedbackPage(items, total, page, size, offset + size < total);
     }
 
+    @Transactional
     public AdminFeedback updateFeedbackStatus(
             String actor,
             long recommendationId,

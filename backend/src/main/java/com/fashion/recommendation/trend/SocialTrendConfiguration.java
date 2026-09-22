@@ -11,21 +11,19 @@ import org.springframework.core.env.Environment;
  * Separate endpoints allow a failure on one platform without losing the others.
  *
  * <p>Precedence per platform: an imported file beats a configured endpoint, and a configured
- * endpoint beats the platform's public hot board. The built-in hot board is only consulted when
- * nothing is configured, so explicit imports and endpoints always keep full control. Xiaohongshu
- * has no anonymously readable board and stays unconfigured until a file or endpoint is provided.
+ * endpoint beats the optional public hot board. The hot board is disabled by default because it
+ * contains trend words rather than creator content. Xiaohongshu is excluded from trend collection.
  */
 @Configuration
 public class SocialTrendConfiguration {
     @Bean TrendSourceAdapter douyinFeed(ObjectMapper mapper, Environment env) { return source("douyin", mapper, env); }
-    @Bean TrendSourceAdapter xiaohongshuFeed(ObjectMapper mapper, Environment env) { return source("xiaohongshu", mapper, env); }
     @Bean TrendSourceAdapter weiboFeed(ObjectMapper mapper, Environment env) { return source("weibo", mapper, env); }
     private TrendSourceAdapter source(String platform, ObjectMapper mapper, Environment env) {
         String url = env.getProperty("app.trends." + platform + "-endpoint", "");
         var adapter = new ConfiguredJsonTrendSourceAdapter(mapper, url, platform,
                 Duration.ofSeconds(3), Duration.ofSeconds(8), Duration.ofMinutes(5));
         String directory = env.getProperty("app.trends.import-directory", "");
-        boolean hotBoard = env.getProperty("app.trends.hot-boards-enabled", Boolean.class, true)
+        boolean hotBoard = env.getProperty("app.trends.hot-boards-enabled", Boolean.class, false)
                 && PublicHotBoards.supports(platform);
         return new TrendSourceAdapter() {
             public String platform() { return platform; }

@@ -24,6 +24,10 @@ docx_work/
 .$*
 ~$*
 
+# Graduation documents are maintained outside the code repository
+docx/
+AGENTS.md
+
 # Frontend dependencies and build output
 frontend/node_modules/
 frontend/dist/

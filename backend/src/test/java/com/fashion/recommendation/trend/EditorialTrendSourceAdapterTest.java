@@ -72,6 +72,22 @@ class EditorialTrendSourceAdapterTest {
         assertEquals(List.of(), EditorialTrendSourceAdapter.parse(xml, NOW));
     }
 
+    @Test
+    void dropsRedCarpetAndFashionWeekArticles() {
+        String xml = """
+                <rss><channel>
+                <item><title>艾美奖红毯礼服造型</title><link>https://hypebeast.cn/2026/9/red-carpet</link>
+                <pubDate>Thu, 17 Sep 2026 02:10:00 +0800</pubDate>
+                <description>明星在红毯上的礼服造型。</description></item>
+                <item><title>2026 春夏时装周秀场趋势</title><link>https://hypebeast.cn/2026/9/runway</link>
+                <pubDate>Thu, 17 Sep 2026 02:10:00 +0800</pubDate>
+                <description>时装周秀场发布趋势。</description></item>
+                </channel></rss>
+                """;
+
+        assertEquals(List.of(), EditorialTrendSourceAdapter.parse(xml, NOW));
+    }
+
     @Test void readsTheInlineImageChineseTrendFeedsActuallyPublish() {
         String xml = """
                 <rss><channel><item>

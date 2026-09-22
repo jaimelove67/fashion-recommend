@@ -85,6 +85,7 @@ public class ConfiguredJsonTrendSourceAdapter implements TrendSourceAdapter {
             Set<String> ids = new HashSet<>();
             for (JsonNode node : root.get("items")) {
                 TrendItem item = parseItem(node, fetchedAt);
+                if (TrendTopics.excludedShowOrCelebrity(item)) continue;
                 if (!ids.add(item.id())) {
                     throw new TrendSourceException("趋势源包含重复 ID");
                 }
@@ -137,7 +138,8 @@ public class ConfiguredJsonTrendSourceAdapter implements TrendSourceAdapter {
             }
             evidence = new TrendEvidence(optionalText(detail, "author", 120), optionalText(detail, "mediaType", 20), images,
                     counter(detail, "likes"), counter(detail, "favorites"), counter(detail, "comments"), counter(detail, "reposts"),
-                    "来源内评分", null);
+                    "来源内评分", null, counter(detail, "authorFollowers"),
+                    optionalText(detail, "authorFollowersLabel", 40), null);
         }
         return new TrendItem(id, itemPlatform, title, tags, heatScore, publishedAt, observedAt,
                 sourceUrl, false, imageUrl, optionalText(node, "summary", 600), evidence);

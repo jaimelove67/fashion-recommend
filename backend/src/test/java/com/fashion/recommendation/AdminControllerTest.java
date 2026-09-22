@@ -3,6 +3,7 @@ package com.fashion.recommendation;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -23,8 +24,15 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
+import com.fashion.recommendation.ai.AiModelCapability;
+import com.fashion.recommendation.ai.AiModelConfigurationService;
+import com.fashion.recommendation.ai.AiModelProvider;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -41,9 +49,15 @@ class AdminControllerTest {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private AiModelConfigurationService aiModelConfigurationService;
+
     @AfterEach
     void removeTrendFixtures() {
         jdbcTemplate.update("DELETE FROM trend_contents WHERE id LIKE 'weibo:admin-moderation-%'");
+        jdbcTemplate.update("DELETE FROM admin_ai_model_settings");
+        jdbcTemplate.update(
+                "DELETE FROM admin_audit_logs WHERE action IN ('AI_MODEL_CONFIG_UPDATE', 'AI_MODEL_CONFIG_RESET')");
     }
 
     @Test
@@ -60,6 +74,156 @@ class AdminControllerTest {
                         .header("X-User-Id", admin))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(403));
+
+        mockMvc.perform(get("/api/v1/admin/ai-models")
+                        .with(user(member).roles("USER")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(403));
+    }
+
+    @Test
+    void adminCanConfigureRuntimeModelsWithoutLeakingKeysAndCanRestoreEnvironmentDefaults() throws Exception {
+        String admin = createUser("adm", true, "ROLE_ADMIN");
+        String member = createUser("member", true, "ROLE_USER");
+        String secret = "sk-test-admin-model-secret-" + UUID.randomUUID();
+
+        mockMvc.perform(get("/api/v1/admin/ai-models")
+                        .with(user(admin).roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(3))
+                .andExpect(jsonPath("$.data[0].apiKey").doesNotExist())
+                .andExpect(jsonPath("$.data[0].encryptedApiKey").doesNotExist());
+
+        mockMvc.perform(put("/api/v1/admin/ai-models/OUTFIT_RECOMMENDATION")
+                        .with(user(member).roles("USER"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"provider":"DASHSCOPE","model":"qwen3-max","enabled":true,"apiKey":"forbidden"}
+                                """))
+                .andExpect(status().isForbidden());
+
+        var firstUpdate = mockMvc.perform(put("/api/v1/admin/ai-models/OUTFIT_RECOMMENDATION")
+                        .with(user(admin).roles("ADMIN"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"provider":"DASHSCOPE","model":"qwen3-max","enabled":true,"apiKey":"%s"}
+                                """.formatted(secret)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.credentialSource").value("DATABASE"))
+                .andExpect(jsonPath("$.data.credentialConfigured").value(true))
+                .andExpect(jsonPath("$.data.managedOverride").value(true))
+                .andExpect(jsonPath("$.data.apiKey").doesNotExist())
+                .andExpect(jsonPath("$.data.encryptedApiKey").doesNotExist())
+                .andReturn();
+        assertFalse(firstUpdate.getResponse().getContentAsString().contains(secret));
+
+        String encrypted = jdbcTemplate.queryForObject(
+                "SELECT api_key_ciphertext FROM admin_ai_model_settings WHERE capability = ?",
+                String.class,
+                AiModelCapability.OUTFIT_RECOMMENDATION.name());
+        assertTrue(encrypted.startsWith("v1:"));
+        assertNotEquals(secret, encrypted);
+        assertEquals(secret, aiModelConfigurationService.resolve(AiModelCapability.OUTFIT_RECOMMENDATION).apiKey());
+        assertEquals("qwen3-max", aiModelConfigurationService.resolve(
+                AiModelCapability.OUTFIT_RECOMMENDATION).model());
+
+        mockMvc.perform(put("/api/v1/admin/ai-models/OUTFIT_RECOMMENDATION")
+                        .with(user(admin).roles("ADMIN"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"provider":"DASHSCOPE","model":"qwen3-max","enabled":true,"apiKey":""}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.credentialSource").value("DATABASE"));
+        assertEquals(encrypted, jdbcTemplate.queryForObject(
+                "SELECT api_key_ciphertext FROM admin_ai_model_settings WHERE capability = ?",
+                String.class,
+                AiModelCapability.OUTFIT_RECOMMENDATION.name()));
+
+        mockMvc.perform(put("/api/v1/admin/ai-models/OUTFIT_RECOMMENDATION")
+                        .with(user(admin).roles("ADMIN"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"provider":"OPENAI","model":"gpt-4o-mini","enabled":true,"apiKey":""}
+                                """))
+                .andExpect(status().isBadRequest());
+        assertEquals(encrypted, jdbcTemplate.queryForObject(
+                "SELECT api_key_ciphertext FROM admin_ai_model_settings WHERE capability = ?",
+                String.class,
+                AiModelCapability.OUTFIT_RECOMMENDATION.name()));
+
+        String openAiSecret = "sk-test-openai-model-secret-" + UUID.randomUUID();
+        mockMvc.perform(put("/api/v1/admin/ai-models/OUTFIT_RECOMMENDATION")
+                        .with(user(admin).roles("ADMIN"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"provider":"OPENAI","model":"gpt-4o-mini","enabled":true,"apiKey":"%s"}
+                                """.formatted(openAiSecret)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.credentialSource").value("DATABASE"));
+        String openAiEncrypted = jdbcTemplate.queryForObject(
+                "SELECT api_key_ciphertext FROM admin_ai_model_settings WHERE capability = ?",
+                String.class,
+                AiModelCapability.OUTFIT_RECOMMENDATION.name());
+        assertNotEquals(encrypted, openAiEncrypted);
+        var runtimeConfig = aiModelConfigurationService.resolve(AiModelCapability.OUTFIT_RECOMMENDATION);
+        assertEquals(AiModelProvider.OPENAI, runtimeConfig.provider());
+        assertEquals("gpt-4o-mini", runtimeConfig.model());
+        assertEquals(openAiSecret, runtimeConfig.apiKey());
+        assertEquals(AiModelProvider.OPENAI.chatCompletionsEndpoint(), runtimeConfig.endpoint());
+
+        mockMvc.perform(put("/api/v1/admin/ai-models/OUTFIT_RECOMMENDATION")
+                        .with(user(admin).roles("ADMIN"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"provider":"OPENAI","model":"gpt-4o-mini","enabled":true,"clearApiKey":true}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.credentialSource").value(
+                        org.hamcrest.Matchers.not("DATABASE")));
+        assertNull(jdbcTemplate.queryForObject(
+                "SELECT api_key_ciphertext FROM admin_ai_model_settings WHERE capability = ?",
+                String.class,
+                AiModelCapability.OUTFIT_RECOMMENDATION.name()));
+
+        mockMvc.perform(put("/api/v1/admin/ai-models/DAILY_IMAGE_GENERATION")
+                        .with(user(admin).roles("ADMIN"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"provider":"OPENAI","model":"image-model","enabled":true}
+                                """))
+                .andExpect(status().isBadRequest());
+
+        Integer loggedSecret = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM admin_audit_logs "
+                        + "WHERE action = 'AI_MODEL_CONFIG_UPDATE' AND details LIKE ?",
+                Integer.class,
+                "%" + secret + "%");
+        assertEquals(0, loggedSecret);
+        Integer loggedOpenAiSecret = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM admin_audit_logs "
+                        + "WHERE action = 'AI_MODEL_CONFIG_UPDATE' AND details LIKE ?",
+                Integer.class,
+                "%" + openAiSecret + "%");
+        assertEquals(0, loggedOpenAiSecret);
+
+        mockMvc.perform(delete("/api/v1/admin/ai-models/OUTFIT_RECOMMENDATION")
+                        .with(user(admin).roles("ADMIN"))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.managedOverride").value(false))
+                .andExpect(jsonPath("$.data.model").value("qwen-plus-test"));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM admin_ai_model_settings WHERE capability = ?",
+                Integer.class,
+                AiModelCapability.OUTFIT_RECOMMENDATION.name()));
     }
 
     @Test
@@ -295,9 +459,8 @@ class AdminControllerTest {
     }
 
     @Test
-    void keepsTrendContentIsolatedUntilHumanReviewAndProtectsModerationApi() throws Exception {
+    void publishesTrendContentImmediatelyAndRemovesModerationApi() throws Exception {
         String admin = createUser("adm", true, "ROLE_ADMIN");
-        String member = createUser("member", true, "ROLE_USER");
         String trendId = "weibo:admin-moderation-" + UUID.randomUUID().toString().replace("-", "");
         Instant fetchedAt = Instant.now().minusSeconds(30);
         jdbcTemplate.update(
@@ -315,55 +478,29 @@ class AdminControllerTest {
                 Timestamp.from(fetchedAt),
                 Timestamp.from(fetchedAt));
 
-        mockMvc.perform(get("/api/v1/admin/trends/contents")
-                        .with(user(member).roles("USER")))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value(403));
-
-        mockMvc.perform(get("/api/v1/admin/trends/contents")
-                        .param("status", "PENDING_AI")
-                        .param("query", "后台审核测试")
-                        .with(user(admin).roles("ADMIN")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.items.length()").value(1))
-                .andExpect(jsonPath("$.data.items[0].moderationStatus").value("PENDING_AI"))
-                .andExpect(jsonPath("$.data.items[0].title").value("后台审核测试"));
-
-        mockMvc.perform(post("/api/v1/admin/trends/ai-review")
-                        .param("limit", "10")
-                        .with(user(admin).roles("ADMIN"))
-                        .with(csrf()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.aiEnabled").value(false))
-                .andExpect(jsonPath("$.data.reviewed").value(0));
-
         mockMvc.perform(get("/api/v1/trends").param("period", "week"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.items.length()").value(0));
+                .andExpect(jsonPath("$.data.items.length()").value(1))
+                .andExpect(jsonPath("$.data.items[0].id").value(trendId));
 
-        jdbcTemplate.update(
-                "UPDATE trend_contents SET moderation_status='PENDING_HUMAN', ai_decision='PASS', "
-                        + "ai_risk_level='LOW', ai_reason='与穿搭内容相关', ai_model='qwen-plus-test', "
-                        + "ai_prompt_version='trend-moderation-v1', ai_reviewed_at=? WHERE id=?",
-                Timestamp.from(Instant.now()),
-                trendId);
-
-        mockMvc.perform(put("/api/v1/admin/trends/contents/{id}/review", trendId)
-                        .with(user(admin).roles("ADMIN"))
-                        .with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"status\":\"APPROVED\",\"note\":\"人工确认来源与穿搭主题一致\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.moderationStatus").value("APPROVED"))
-                .andExpect(jsonPath("$.data.hidden").value(false))
-                .andExpect(jsonPath("$.data.reviewedBy").value(admin));
-
+        jdbcTemplate.update("UPDATE trend_contents SET moderation_status='REJECTED', hidden=TRUE WHERE id=?", trendId);
         mockMvc.perform(get("/api/v1/trends").param("period", "week"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items[0].id").value(trendId));
 
-        assertEquals("APPROVED", jdbcTemplate.queryForObject(
-                "SELECT moderation_status FROM trend_contents WHERE id = ?", String.class, trendId));
+        mockMvc.perform(post("/api/v1/admin/trends/ai-review")
+                        .with(user(admin).roles("ADMIN"))
+                        .with(csrf()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/admin/trends/contents")
+                        .with(user(admin).roles("ADMIN")))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(put("/api/v1/admin/trends/contents/{id}/review", trendId)
+                        .with(user(admin).roles("ADMIN"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"APPROVED\"}"))
+                .andExpect(status().isNotFound());
     }
 
     private long createRecommendation(String userId) {

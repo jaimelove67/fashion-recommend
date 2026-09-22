@@ -10,6 +10,8 @@ This stack provides the local PostgreSQL and MinIO infrastructure, plus optional
 | Backend (`app` profile) | `http://localhost:8088` | Spring Boot API and health check |
 | Frontend (`app` profile) | `http://localhost:8090` | Vue application with same-origin API proxy |
 
+The Compose services use digest-pinned PostgreSQL from AWS Public ECR and MinIO server/client images from MinIO's Quay registry. The Dockerfiles use the same AWS Public ECR mirror for Docker Official base images so builds do not depend on Docker Hub.
+
 All published ports bind to `127.0.0.1`. PostgreSQL, MinIO, and the MinIO client are pinned by image digest; update the digests deliberately when applying upstream fixes. `minio-init` creates the private bucket once and exits with code 0 on success.
 
 Use `docker compose up -d` to start the stack and `docker compose down` to stop it. `docker compose down -v` also deletes all local development data.

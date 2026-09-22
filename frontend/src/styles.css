@@ -69,7 +69,7 @@ button {
   transition: transform 160ms cubic-bezier(.22, .8, .32, 1), border-color 180ms ease, background-color 180ms ease, color 180ms ease, box-shadow 180ms ease;
 }
 
-button:active:not(:disabled) {
+button:active:not(:disabled):not(.gallery-card) {
   transform: translateY(1px) scale(.99);
 }
 

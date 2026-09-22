@@ -4,6 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fashion.recommendation.ai.AiModelCapability;
+import com.fashion.recommendation.ai.AiModelConfigurationService;
+import com.fashion.recommendation.ai.AiModelProvider;
+import com.fashion.recommendation.ai.AiModelRuntimeConfig;
 import com.fashion.recommendation.storage.ImageStorage;
 import com.fashion.recommendation.storage.StoredImageData;
 import com.fashion.recommendation.wardrobe.WardrobeItem;
@@ -49,10 +53,12 @@ public class BailianImageGenerationClient {
     private final String referenceBaseUrl;
     private final Duration taskTimeout;
     private final Duration pollInterval;
+    private final AiModelConfigurationService modelConfigurationService;
 
     @Autowired
     public BailianImageGenerationClient(
             ObjectMapper objectMapper,
+            AiModelConfigurationService modelConfigurationService,
             ResourceLoader resourceLoader,
             ImageStorage imageStorage,
             @Value("${app.bailian.image.endpoint:https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation}") String endpoint,
@@ -69,7 +75,7 @@ public class BailianImageGenerationClient {
             @Value("${app.bailian.image.poll-interval:2s}") Duration pollInterval) {
         this(createRestClient(connectTimeout, readTimeout), objectMapper, resourceLoader, imageStorage,
                 endpoint, taskEndpoint, apiKey, model, enabled, prototypeMale, prototypeFemale,
-                referenceBaseUrl, taskTimeout, pollInterval);
+                referenceBaseUrl, taskTimeout, pollInterval, modelConfigurationService);
     }
 
     BailianImageGenerationClient(
@@ -87,6 +93,26 @@ public class BailianImageGenerationClient {
             String referenceBaseUrl,
             Duration taskTimeout,
             Duration pollInterval) {
+        this(restClient, objectMapper, resourceLoader, imageStorage, endpoint, taskEndpoint, apiKey, model,
+                enabled, prototypeMale, prototypeFemale, referenceBaseUrl, taskTimeout, pollInterval, null);
+    }
+
+    private BailianImageGenerationClient(
+            RestClient restClient,
+            ObjectMapper objectMapper,
+            ResourceLoader resourceLoader,
+            ImageStorage imageStorage,
+            String endpoint,
+            String taskEndpoint,
+            String apiKey,
+            String model,
+            boolean enabled,
+            String prototypeMale,
+            String prototypeFemale,
+            String referenceBaseUrl,
+            Duration taskTimeout,
+            Duration pollInterval,
+            AiModelConfigurationService modelConfigurationService) {
         this.restClient = restClient;
         this.objectMapper = objectMapper;
         this.resourceLoader = resourceLoader;
@@ -101,6 +127,7 @@ public class BailianImageGenerationClient {
         this.referenceBaseUrl = referenceBaseUrl;
         this.taskTimeout = taskTimeout;
         this.pollInterval = pollInterval;
+        this.modelConfigurationService = modelConfigurationService;
     }
 
     public OutfitImageGenerationResult generate(
@@ -109,12 +136,13 @@ public class BailianImageGenerationClient {
             String city,
             Double temperatureC,
             List<WardrobeItem> items) {
+        AiModelRuntimeConfig config = runtimeConfig();
         String normalizedGender = normalizeGender(gender);
-        if (!enabled) {
+        if (!isEffectivelyEnabled(config)) {
             return unavailable("阿里云人物生图未启用");
         }
-        if (!StringUtils.hasText(apiKey)) {
-            return unavailable("尚未配置 DASHSCOPE_API_KEY");
+        if (!StringUtils.hasText(config.apiKey())) {
+            return unavailable("尚未配置图像生成 API Key");
         }
         if (normalizedGender == null) {
             return unavailable("个人档案中尚未选择模特性别");
@@ -126,13 +154,13 @@ public class BailianImageGenerationClient {
                 return unavailable("缺少对应性别的模特原型图");
             }
             String responseBody = restClient.post()
-                    .uri(endpoint)
+                    .uri(config.endpoint())
                     .contentType(MediaType.APPLICATION_JSON)
                     .headers(headers -> {
-                        headers.setBearerAuth(apiKey.trim());
+                        headers.setBearerAuth(config.apiKey().trim());
                         headers.set("X-DashScope-Async", "enable");
                     })
-                    .body(buildRequest(normalizedGender, occasion, city, temperatureC, items, prototype))
+                    .body(buildRequest(normalizedGender, occasion, city, temperatureC, items, prototype, config.model()))
                     .retrieve()
                     .body(String.class);
             JsonNode response = objectMapper.readTree(responseBody);
@@ -140,7 +168,7 @@ public class BailianImageGenerationClient {
             JsonNode output = response.path("output");
             String taskId = text(output, "task_id");
             if (StringUtils.hasText(taskId)) {
-                return poll(taskId, requestId);
+                return poll(taskId, requestId, config);
             }
             String imageUrl = findImageUrl(response);
             return imageUrl == null
@@ -165,8 +193,19 @@ public class BailianImageGenerationClient {
             Double temperatureC,
             List<WardrobeItem> items,
             String prototype) {
+        return buildRequest(gender, occasion, city, temperatureC, items, prototype, model);
+    }
+
+    private ObjectNode buildRequest(
+            String gender,
+            String occasion,
+            String city,
+            Double temperatureC,
+            List<WardrobeItem> items,
+            String prototype,
+            String selectedModel) {
         ObjectNode request = objectMapper.createObjectNode();
-        request.put("model", model);
+        request.put("model", selectedModel);
         ObjectNode input = request.putObject("input");
         ArrayNode messages = input.putArray("messages");
         ObjectNode message = messages.addObject().put("role", "user");
@@ -185,13 +224,14 @@ public class BailianImageGenerationClient {
         return request;
     }
 
-    private OutfitImageGenerationResult poll(String taskId, String requestId) throws Exception {
+    private OutfitImageGenerationResult poll(
+            String taskId, String requestId, AiModelRuntimeConfig config) throws Exception {
         long timeoutMillis = Math.max(1_000L, taskTimeout.toMillis());
         long deadline = System.nanoTime() + Duration.ofMillis(timeoutMillis).toNanos();
         while (System.nanoTime() < deadline) {
             String responseBody = restClient.get()
-                    .uri(taskUrl(taskId))
-                    .headers(headers -> headers.setBearerAuth(apiKey.trim()))
+                    .uri(taskUrl(taskId, config.taskEndpoint()))
+                    .headers(headers -> headers.setBearerAuth(config.apiKey().trim()))
                     .retrieve()
                     .body(String.class);
             JsonNode response = objectMapper.readTree(responseBody);
@@ -289,8 +329,33 @@ public class BailianImageGenerationClient {
         return StringUtils.hasText(value) ? value.trim() : fallback;
     }
 
-    private String taskUrl(String taskId) {
-        return taskEndpoint.replaceAll("/+$", "") + "/" + taskId;
+    private String taskUrl(String taskId, String configuredTaskEndpoint) {
+        return configuredTaskEndpoint.replaceAll("/+$", "") + "/" + taskId;
+    }
+
+    private AiModelRuntimeConfig runtimeConfig() {
+        if (modelConfigurationService != null) {
+            return modelConfigurationService.resolve(AiModelCapability.DAILY_IMAGE_GENERATION);
+        }
+        return new AiModelRuntimeConfig(
+                AiModelCapability.DAILY_IMAGE_GENERATION,
+                AiModelProvider.DASHSCOPE,
+                model,
+                apiKey,
+                enabled,
+                endpoint,
+                taskEndpoint,
+                StringUtils.hasText(apiKey) ? "ENVIRONMENT" : "MISSING",
+                StringUtils.hasText(apiKey),
+                false,
+                false,
+                null);
+    }
+
+    private boolean isEffectivelyEnabled(AiModelRuntimeConfig config) {
+        return modelConfigurationService == null
+                ? config.enabled()
+                : modelConfigurationService.isEffectivelyEnabled(config);
     }
 
     private static String dataUri(byte[] content, String contentType) {

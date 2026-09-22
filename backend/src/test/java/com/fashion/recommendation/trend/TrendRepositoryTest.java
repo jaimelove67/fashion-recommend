@@ -3,6 +3,7 @@ package com.fashion.recommendation.trend;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -13,7 +14,8 @@ import static org.junit.jupiter.api.Assertions.*;
 @Transactional
 class TrendRepositoryTest {
     @Autowired TrendRepository repository;
-    @Test void persistsHistoryWithoutFabricatingGrowthAndRetainsModeration() {
+    @Autowired JdbcTemplate jdbc;
+    @Test void persistsHistoryWithoutFabricatingGrowthAndPublishesWithoutModeration() {
         Instant now = Instant.now();
         TrendItem first = item(now.minus(2, ChronoUnit.DAYS), 10L);
         repository.save("weibo", first);
@@ -23,19 +25,13 @@ class TrendRepositoryTest {
         repository.save("weibo", current);
         assertEquals(30L, repository.growth(current, now.minus(1, ChronoUnit.DAYS)));
         assertNull(repository.growth(item(now, 5L), now.minus(1, ChronoUnit.DAYS)));
-        assertTrue(repository.find(current.id()).isEmpty(), "未完成人工终审的趋势不能进入公共查询");
-        assertEquals(1, repository.pendingAi(10).stream().filter(i -> i.id().equals(current.id())).count());
-        assertTrue(repository.markAiReviewed(
-                current.id(),
-                new TrendAiReviewResult("PASS", "LOW", "与穿搭内容相关", "qwen-plus", "call-1", "trend-moderation-v1"),
-                now));
-        assertTrue(repository.finalizeHuman(current.id(), "APPROVED", "admin", now, "人工确认通过"));
         assertEquals(40L, repository.find(current.id()).orElseThrow().evidence().likes());
-        repository.hide(current.id(), true);
-        repository.save("weibo", current);
-        assertTrue(repository.find(current.id()).isEmpty());
-        repository.hide(current.id(), false);
+        assertTrue(repository.since(now.minus(1, ChronoUnit.DAYS)).stream()
+                .anyMatch(item -> item.id().equals(current.id())), "新抓取内容应立即进入公共查询");
+        jdbc.update("UPDATE trend_contents SET moderation_status='REJECTED', hidden=TRUE WHERE id=?", current.id());
         assertTrue(repository.find(current.id()).isPresent());
+        assertTrue(repository.since(now.minus(1, ChronoUnit.DAYS)).stream()
+                .anyMatch(item -> item.id().equals(current.id())), "已弃用的审核字段不能再阻断旧行查询");
     }
     @Test void aFailedRefreshPreservesLastSuccessfulTime() {
         Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);

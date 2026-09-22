@@ -121,6 +121,23 @@ test('routes a restored admin session to the admin workspace', async ({ page }) 
   await page.goto('/#home')
   await expect(page).toHaveURL(/#admin$/)
   await expect(page.getByRole('heading', { name: '管理工作台', exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: /模型配置/ }).click()
+  await expect(page.getByRole('heading', { name: 'AI 模型配置', exact: true })).toBeVisible()
+  await expect(page.locator('.admin-ai-model-row')).toHaveCount(4)
+  const dailyImageConfig = page.locator('.admin-ai-model-row').filter({ hasText: '每日搭配图生成' })
+  await expect(dailyImageConfig.locator('select option')).toHaveCount(1)
+  const keyInputs = await page.locator('.admin-ai-model-row input[type=\"password\"]').evaluateAll((inputs) => (
+    inputs.map((input) => ({ type: input.type, value: input.value }))
+  ))
+  expect(keyInputs).toHaveLength(4)
+  expect(keyInputs.every((input) => input.type === 'password' && input.value === '')).toBe(true)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const pageOverflowsHorizontally = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth
+  )
+  expect(pageOverflowsHorizontally).toBe(false)
 })
 
 async function csrfHeaders(api) {

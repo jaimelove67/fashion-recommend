@@ -13,6 +13,8 @@ spring:
     clean-disabled: true
 
 app:
+  ai-settings:
+    encryption-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
   auth:
     registration-enabled: true
   cors:
@@ -31,10 +33,6 @@ app:
     connect-timeout: 100ms
     read-timeout: 100ms
     cache-ttl: 1m
-    ai-review-enabled: false
-    ai-review-initial-delay: 3600000
-    ai-review-interval: 3600000
-    ai-review-batch-size: 10
   weather:
     primary-base-url: https://wttr.in
     fallback-geocoding-base-url: https://geocoding-api.open-meteo.com

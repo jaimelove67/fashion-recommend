@@ -7,6 +7,19 @@ import java.util.Locale;
 /** Transparent keyword classification, not an AI or platform ranking. */
 public final class TrendTopics {
     private TrendTopics() {}
+    private static final String[] SHOW_MARKERS = {
+        "红毯", "red carpet", "red-carpet", "时装周", "fashion week", "fashion-week",
+        "runway", "runway show", "catwalk", "秀场", "走秀", "大秀"
+    };
+    private static final String[] CELEBRITY_MARKERS = {
+        "明星", "艺人", "演员", "歌手", "女星", "男星", "影后", "影帝", "偶像", "名人"
+    };
+    private static final String[] CELEBRITY_STYLE_MARKERS = {
+        "造型", "穿搭", "搭配", "礼服", "首映", "典礼", "封面", "大片", "珠宝", "亮相", "出席"
+    };
+    private static final String[] EDITORIAL_STYLE_MARKERS = {
+        "红毯造型", "明星造型", "明星穿搭", "女星造型", "男星造型", "时装大片", "封面造型"
+    };
     private static final String[][] RULES = {
         {"通勤", "通勤", "office", "workwear", "tailoring", "blazer", "西装"},
         {"极简", "极简", "minimal", "quiet luxury", "简约"},
@@ -58,8 +71,33 @@ public final class TrendTopics {
     }
     public static boolean fashion(String text) {
         if (text == null) return false;
+        if (excludedShowOrCelebrity(text)) return false;
         return !classify(text).equals(List.of("穿搭灵感"))
                 || text.toLowerCase(Locale.ROOT).matches("(?s).*(fashion|outfit|wearing|穿搭|搭配|时装|时尚).*");
+    }
+
+    /**
+     * The trend feed is for high-reach creator outfit sharing and practical styling ideas.
+     * Red-carpet, runway and celebrity editorial looks are intentionally outside that scope.
+     */
+    public static boolean excludedShowOrCelebrity(String text) {
+        if (text == null || text.isBlank()) return false;
+        String lower = text.toLowerCase(Locale.ROOT);
+        for (String marker : SHOW_MARKERS) if (lower.contains(marker)) return true;
+        for (String marker : EDITORIAL_STYLE_MARKERS) if (lower.contains(marker)) return true;
+        boolean celebrity = false;
+        boolean style = false;
+        for (String marker : CELEBRITY_MARKERS) celebrity |= lower.contains(marker);
+        for (String marker : CELEBRITY_STYLE_MARKERS) style |= lower.contains(marker);
+        return celebrity && style;
+    }
+
+    public static boolean excludedShowOrCelebrity(TrendItem item) {
+        if (item == null) return false;
+        String tags = String.join(" ", item.topicTags() == null ? List.of() : item.topicTags());
+        return excludedShowOrCelebrity(String.join(" ",
+                item.title() == null ? "" : item.title(),
+                item.summary() == null ? "" : item.summary(), tags));
     }
 
     /**
@@ -68,6 +106,7 @@ public final class TrendTopics {
      */
     public static boolean boardFashion(String word) {
         if (word == null || word.isBlank()) return false;
+        if (excludedShowOrCelebrity(word)) return false;
         String lower = word.toLowerCase(Locale.ROOT);
         for (String marker : BOARD_MARKERS) if (lower.contains(marker)) return true;
         return false;

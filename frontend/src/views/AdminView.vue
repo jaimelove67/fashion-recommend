@@ -1,16 +1,14 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   Activity,
   ArrowLeft,
-  ArrowUpRight,
   Bot,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
   CircleOff,
-  ClipboardCheck,
   Database,
   FileClock,
   LoaderCircle,
@@ -18,6 +16,7 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Settings2,
   UsersRound
 } from '@lucide/vue'
 
@@ -29,7 +28,7 @@ const sections = [
   { id: 'overview', label: '运营总览', description: '平台数据', icon: Activity },
   { id: 'users', label: '账号与权限', description: '状态治理', icon: UsersRound },
   { id: 'feedback', label: '反馈审核', description: '处理用户声音', icon: MessageSquareText },
-  { id: 'moderation', label: '趋势审核', description: 'AI 初审 / 人工终审', icon: ClipboardCheck },
+  { id: 'aiModels', label: '模型配置', description: 'AI 能力与密钥', icon: Settings2 },
   { id: 'audit', label: '操作日志', description: '追踪管理动作', icon: FileClock }
 ]
 
@@ -40,23 +39,14 @@ const feedbackStatuses = [
   { value: 'ALL', label: '全部状态' }
 ]
 
-const moderationStatuses = [
-  { value: 'PENDING_HUMAN', label: '待人工终审' },
-  { value: 'AI_FAILED', label: 'AI 初审失败' },
-  { value: 'PENDING_AI', label: '等待 AI 初审' },
-  { value: 'APPROVED', label: '已通过' },
-  { value: 'REJECTED', label: '已驳回' },
-  { value: 'ALL', label: '全部状态' }
-]
-
 const activeSection = ref('overview')
 const overview = computed(() => props.app.state.adminOverview)
 const currentUsername = computed(() => props.app.state.authUser?.username || '')
 const users = computed(() => props.app.state.adminUsers)
 const feedback = computed(() => props.app.state.adminFeedback)
-const trendContents = computed(() => props.app.state.adminTrendContents)
 const auditLogs = computed(() => props.app.state.adminAuditLogs)
-const moderationNotes = ref({})
+const aiModels = computed(() => props.app.state.adminAiModels)
+const aiModelDrafts = reactive({})
 const overviewChartsRef = ref(null)
 const overviewChartsVisible = ref(false)
 const overviewChartsKey = ref(0)
@@ -65,8 +55,10 @@ let overviewChartsScrollHandler = null
 const anyAdminLoading = computed(() => props.app.state.adminOverviewLoading
   || props.app.state.adminUsersLoading
   || props.app.state.adminFeedbackLoading
-  || props.app.state.adminTrendLoading
-  || props.app.state.adminAuditLoading)
+  || props.app.state.adminAuditLoading
+  || props.app.state.adminAiModelsLoading
+  || Boolean(props.app.state.adminAiModelAction))
+const missingAiEncryptionKey = computed(() => aiModels.value.some((model) => !model.encryptionAvailable))
 
 const monoInk = '#1C1C1A'
 const monoMid = '#6A6963'
@@ -237,21 +229,106 @@ function scheduleOverviewChartReveal() {
   })
 }
 
-function selectSection(section) {
+async function selectSection(section) {
+  if (activeSection.value === 'aiModels' && section !== 'aiModels') clearAiModelKeyDrafts()
   activeSection.value = section
   if (section === 'overview') props.app.loadAdminOverview()
   if (section === 'users') props.app.loadAdminUsers({ page: 0 })
   if (section === 'feedback') props.app.loadAdminFeedback({ page: 0 })
-  if (section === 'moderation') props.app.loadAdminTrendContents({ page: 0 })
+  if (section === 'aiModels') {
+    const models = await props.app.loadAdminAiModels()
+    if (models) models.forEach(syncAiModelDraft)
+  }
   if (section === 'audit') props.app.loadAdminAuditLogs({ page: 0 })
 }
 
-function refreshWorkspace() {
+async function refreshWorkspace() {
   props.app.loadAdminOverview()
   props.app.loadAdminUsers({ page: props.app.state.adminUsersPage })
   props.app.loadAdminFeedback({ page: props.app.state.adminFeedbackPage })
-  props.app.loadAdminTrendContents({ page: props.app.state.adminTrendPage })
   props.app.loadAdminAuditLogs({ page: props.app.state.adminAuditPage })
+  const models = await props.app.loadAdminAiModels()
+  if (models) models.forEach(syncAiModelDraft)
+}
+
+function createAiModelDraft(model) {
+  return {
+    provider: model.provider,
+    model: model.model,
+    enabled: model.enabled,
+    apiKey: ''
+  }
+}
+
+function clearAiModelKeyDrafts() {
+  Object.values(aiModelDrafts).forEach((draft) => {
+    draft.apiKey = ''
+  })
+}
+
+watch(aiModels, (models) => {
+  models.forEach((model) => {
+    if (!aiModelDrafts[model.capability]) {
+      aiModelDrafts[model.capability] = createAiModelDraft(model)
+    }
+  })
+}, { immediate: true })
+
+watch(() => props.app.state.authUser?.username, () => {
+  clearAiModelKeyDrafts()
+  Object.keys(aiModelDrafts).forEach((capability) => delete aiModelDrafts[capability])
+})
+
+function credentialSourceLabel(source) {
+  const labels = {
+    DATABASE: '数据库密钥',
+    ENVIRONMENT: '部署环境变量',
+    MISSING: '未配置密钥',
+    UNAVAILABLE: '密钥不可用'
+  }
+  return labels[source] || '未知状态'
+}
+
+function credentialSourceDescription(model) {
+  if (model.credentialSource === 'DATABASE') return '密钥已加密保存在数据库；接口和操作日志不会返回密钥内容。'
+  if (model.credentialSource === 'ENVIRONMENT') return '当前使用部署环境中的密钥；留空保存不会覆盖它。'
+  if (model.credentialSource === 'UNAVAILABLE') return '密钥无法解密，请确认各实例使用同一主密钥后重新录入。'
+  return '尚未检测到可用密钥；保存模型信息不会自动调用外部服务。'
+}
+
+function providerChangeNeedsKey(model) {
+  const draft = aiModelDrafts[model.capability]
+  return model.credentialSource === 'DATABASE'
+    && Boolean(draft)
+    && draft.provider !== model.provider
+    && !draft.apiKey.trim()
+}
+
+function syncAiModelDraft(model) {
+  aiModelDrafts[model.capability] = createAiModelDraft(model)
+}
+
+async function saveAiModelConfiguration(model, clearApiKey = false) {
+  const draft = aiModelDrafts[model.capability]
+  if (!draft || !draft.model.trim()) return
+  const configuration = {
+    provider: draft.provider,
+    model: draft.model.trim(),
+    enabled: draft.enabled
+  }
+  if (clearApiKey) configuration.clearApiKey = true
+  else configuration.apiKey = draft.apiKey
+
+  const updated = await props.app.saveAdminAiModel(model.capability, configuration)
+  if (updated) syncAiModelDraft(updated)
+}
+
+async function restoreEnvironmentConfiguration(model) {
+  if (!window.confirm('恢复后将移除此能力的自定义厂商、模型与数据库密钥覆盖，改用部署环境默认值。继续吗？')) {
+    return
+  }
+  const restored = await props.app.resetAdminAiModel(model.capability)
+  if (restored) syncAiModelDraft(restored)
 }
 
 function searchUsers() {
@@ -260,10 +337,6 @@ function searchUsers() {
 
 function applyFeedbackFilters() {
   props.app.loadAdminFeedback({ page: 0 })
-}
-
-function applyModerationFilters() {
-  props.app.loadAdminTrendContents({ page: 0 })
 }
 
 function applyAuditFilters() {
@@ -294,18 +367,6 @@ function nextFeedbackPage() {
   }
 }
 
-function previousModerationPage() {
-  if (props.app.state.adminTrendPage > 0) {
-    props.app.loadAdminTrendContents({ page: props.app.state.adminTrendPage - 1 })
-  }
-}
-
-function nextModerationPage() {
-  if (props.app.state.adminTrendHasNext) {
-    props.app.loadAdminTrendContents({ page: props.app.state.adminTrendPage + 1 })
-  }
-}
-
 function previousAuditPage() {
   if (props.app.state.adminAuditPage > 0) {
     props.app.loadAdminAuditLogs({ page: props.app.state.adminAuditPage - 1 })
@@ -328,46 +389,11 @@ function feedbackStatusLabel(status) {
   return feedbackStatuses.find((item) => item.value === status)?.label || status || '未知'
 }
 
-function moderationStatusLabel(status) {
-  return moderationStatuses.find((item) => item.value === status)?.label || status || '未知'
-}
-
-function moderationDecisionLabel(decision) {
-  const labels = { PASS: '建议通过', REVIEW: '建议复核', REJECT: '建议驳回', ERROR: 'AI 失败' }
-  return labels[decision] || '未生成建议'
-}
-
-function moderationRiskLabel(level) {
-  const labels = { LOW: '低风险', MEDIUM: '中风险', HIGH: '高风险', UNKNOWN: '未知风险' }
-  return labels[level] || '未评估'
-}
-
-function moderationStatusClass(status) {
-  return (status || 'unknown').toLowerCase().replace('_', '-')
-}
-
-function moderationActionBusy(id, action) {
-  return props.app.state.adminTrendAction === `${action}:${id}`
-}
-
-async function reviewTrend(item, status) {
-  const note = moderationNotes.value[item.id] || ''
-  const updated = await props.app.finalizeAdminTrendReview(item.id, status, note)
-  if (updated) delete moderationNotes.value[item.id]
-}
-
-async function retryTrend(item) {
-  const updated = await props.app.retryAdminTrendAi(item.id)
-  if (updated) delete moderationNotes.value[item.id]
-}
-
-function toggleTrendVisibility(item) {
-  props.app.updateAdminTrendVisibility(item.id, !item.hidden)
-}
-
 function auditActionLabel(action) {
   if (action === 'USER_STATUS_UPDATE') return '账号状态调整'
   if (action === 'FEEDBACK_STATUS_UPDATE') return '反馈状态处理'
+  if (action === 'AI_MODEL_CONFIG_UPDATE') return 'AI 模型配置调整'
+  if (action === 'AI_MODEL_CONFIG_RESET') return '恢复 AI 环境配置'
   return action || '未知操作'
 }
 
@@ -414,8 +440,8 @@ onMounted(() => {
   if (!overview.value) props.app.loadAdminOverview()
   if (!users.value.length && !props.app.state.adminUsersTotal) props.app.loadAdminUsers()
   if (!feedback.value.length && !props.app.state.adminFeedbackTotal) props.app.loadAdminFeedback()
-  if (!trendContents.value.length && !props.app.state.adminTrendTotal) props.app.loadAdminTrendContents()
   if (!auditLogs.value.length && !props.app.state.adminAuditTotal) props.app.loadAdminAuditLogs()
+  if (!aiModels.value.length) props.app.loadAdminAiModels()
   scheduleOverviewChartReveal()
 })
 
@@ -544,7 +570,7 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
               </div>
               <div class="mono-chart-legend" aria-label="账号状态图例"><span v-for="segment in accountComposition" :key="segment.label"><i :style="{ backgroundColor: segment.color }"></i>{{ segment.label }} {{ segment.value }}（{{ segment.percent }}%）</span></div>
               <div class="boundary-note"><ShieldCheck :size="15" aria-hidden="true" /><span>衣物识别待人工确认：{{ overview.manualReviewItems }} 件</span></div>
-              <p class="admin-caption">后台继续只管理用户私有衣橱和推荐记录；公共趋势内容另见趋势审核。</p>
+              <p class="admin-caption">后台只管理账号、反馈、AI 配置与操作记录；趋势内容在风潮页直接展示。</p>
               <p class="mono-chart-source">F4 TICK DONUT · ACCOUNT STATUS · DATABASE</p>
             </section>
 
@@ -623,94 +649,133 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
           </section>
         </section>
 
-        <section v-else-if="activeSection === 'moderation'" class="admin-section" aria-labelledby="moderation-title">
+        <section v-else-if="activeSection === 'aiModels'" class="admin-section" aria-labelledby="ai-models-title">
           <header class="admin-section-heading">
-            <div><span>CONTENT GOVERNANCE</span><h2 id="moderation-title">趋势内容审核</h2></div>
-            <p>AI 只提供初审建议，管理员负责最终发布决定</p>
+            <div><h2 id="ai-models-title">AI 模型配置</h2></div>
+            <p>按能力分别设置厂商、模型和密钥；保存后立即作用于新请求</p>
           </header>
-          <section class="admin-table-panel">
-            <form class="admin-toolbar moderation-toolbar" role="search" @submit.prevent="applyModerationFilters">
-              <label class="admin-select-field"><span>状态</span><select v-model="app.state.adminTrendStatus" @change="applyModerationFilters"><option v-for="item in moderationStatuses" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
-              <label class="admin-search-field moderation-search"><Search :size="16" aria-hidden="true" /><span class="sr-only">搜索趋势内容</span><input v-model="app.state.adminTrendQuery" type="search" maxlength="64" placeholder="搜索标题、平台或内容 ID" /></label>
-              <button class="toolbar-button" type="submit" :disabled="app.state.adminTrendLoading">筛选</button>
-              <button class="toolbar-button toolbar-primary" type="button" :disabled="app.state.adminTrendAction || !app.state.adminTrendContents.length && app.state.adminTrendStatus === 'PENDING_AI'" @click="app.runAdminTrendAiReview()">
-                <LoaderCircle v-if="app.state.adminTrendAction === 'ai-review'" class="spinning" :size="13" aria-hidden="true" />
-                <Bot v-else :size="13" aria-hidden="true" />
-                运行 AI 初审
-              </button>
-              <span class="toolbar-total">共 {{ app.state.adminTrendTotal }} 条</span>
-            </form>
-            <div v-if="app.state.adminTrendRun" class="moderation-run" role="status" aria-live="polite">
-              <Bot :size="15" aria-hidden="true" />
-              <span v-if="app.state.adminTrendRun.aiEnabled">本次请求 {{ app.state.adminTrendRun.requested }} 条，完成 {{ app.state.adminTrendRun.reviewed }} 条，失败 {{ app.state.adminTrendRun.failed }} 条。完成后请在“待人工终审”中作出最终决定。</span>
-              <span v-else>AI 初审当前未启用，内容仍保持隔离，不会自动发布。</span>
-            </div>
-            <p class="table-privacy-note"><ShieldCheck :size="14" aria-hidden="true" />仅向模型发送标题、摘要、标签、来源等趋势元数据，不发送用户私有衣橱。</p>
-            <div v-if="app.state.adminTrendLoading && !trendContents.length" class="admin-loading" role="status" aria-live="polite"><LoaderCircle class="spinning" :size="18" />正在读取趋势审核队列…</div>
-            <div v-else-if="!trendContents.length" class="admin-empty"><ClipboardCheck :size="21" aria-hidden="true" /><span v-if="app.state.adminTrendStatus === 'PENDING_HUMAN'">当前没有待人工终审内容；可切换状态或先运行 AI 初审。</span><span v-else>当前没有符合条件的趋势内容</span></div>
-            <div v-else class="admin-table-wrap">
-              <table class="admin-table moderation-table">
-                <caption class="sr-only">趋势内容 AI 初审与人工终审列表</caption>
-                <thead><tr><th scope="col">趋势内容</th><th scope="col">AI 初审建议</th><th scope="col">审核状态</th><th scope="col">人工终审</th></tr></thead>
-                <tbody>
-                  <tr v-for="item in trendContents" :key="item.id">
-                    <th scope="row">
-                      <div class="moderation-content">
-                        <strong>{{ item.title || '未命名内容' }}</strong>
-                        <span>{{ item.platform }} · 来源热度 {{ item.heatScore }}</span>
-                        <a v-if="item.sourceUrl" :href="item.sourceUrl" target="_blank" rel="noreferrer">查看原始来源 <ArrowUpRight :size="12" aria-hidden="true" /></a>
-                        <p v-if="item.summary">{{ item.summary }}</p>
-                        <small>{{ item.id }} · 抓取于 {{ formatDate(item.fetchedAt) }}</small>
-                      </div>
-                    </th>
-                    <td>
-                      <div v-if="item.aiDecision" class="moderation-ai-summary">
-                        <div><span class="moderation-decision">{{ moderationDecisionLabel(item.aiDecision) }}</span><span class="moderation-risk">{{ moderationRiskLabel(item.aiRiskLevel) }}</span></div>
-                        <p>{{ item.aiReason || '模型未提供说明' }}</p>
-                        <small>{{ item.aiModel || '未记录模型' }} · {{ formatDate(item.aiReviewedAt) }}</small>
-                      </div>
-                      <span v-else class="moderation-pending-note">等待 AI 初审</span>
-                    </td>
-                    <td>
-                      <div class="moderation-status-cell">
-                        <span class="review-status" :class="moderationStatusClass(item.moderationStatus)"><i></i>{{ moderationStatusLabel(item.moderationStatus) }}</span>
-                        <small v-if="item.reviewedBy">人工：{{ item.reviewedBy }} · {{ formatDate(item.reviewedAt) }}</small>
-                        <small v-if="item.reviewNote">说明：{{ item.reviewNote }}</small>
-                      </div>
-                    </td>
-                    <td>
-                      <div v-if="item.moderationStatus === 'PENDING_HUMAN' || item.moderationStatus === 'AI_FAILED'" class="moderation-review-form">
-                        <label class="moderation-note-field"><span class="sr-only">{{ item.id }} 的人工终审说明</span><textarea v-model="moderationNotes[item.id]" maxlength="500" :placeholder="item.moderationStatus === 'AI_FAILED' ? 'AI 失败时必须填写人工依据' : '可选：填写终审说明'"></textarea></label>
-                        <div class="moderation-actions">
-                          <button class="moderation-approve" type="button" :disabled="app.state.adminTrendAction" @click="reviewTrend(item, 'APPROVED')"><LoaderCircle v-if="moderationActionBusy(item.id, 'review')" class="spinning" :size="13" aria-hidden="true" />通过并发布</button>
-                          <button class="moderation-reject" type="button" :disabled="app.state.adminTrendAction" @click="reviewTrend(item, 'REJECTED')">驳回</button>
-                          <button v-if="item.moderationStatus === 'AI_FAILED'" type="button" :disabled="app.state.adminTrendAction" @click="retryTrend(item)"><LoaderCircle v-if="moderationActionBusy(item.id, 'retry')" class="spinning" :size="13" aria-hidden="true" />重试 AI</button>
-                        </div>
-                        <small v-if="item.moderationStatus === 'AI_FAILED'" class="moderation-override-note">AI 失败不会自动发布；填写说明后可人工接管。</small>
-                      </div>
-                      <div v-else-if="item.moderationStatus === 'APPROVED'" class="moderation-published-cell">
-                        <strong>{{ item.hidden ? '已通过，当前下架' : '已通过，正在展示' }}</strong>
-                        <button class="status-action" type="button" :disabled="app.state.adminTrendAction" @click="toggleTrendVisibility(item)"><LoaderCircle v-if="moderationActionBusy(item.id, 'visibility')" class="spinning" :size="13" aria-hidden="true" />{{ item.hidden ? '恢复展示' : '下架' }}</button>
-                      </div>
-                      <div v-else-if="item.moderationStatus === 'REJECTED'" class="moderation-published-cell"><span>已驳回，不会展示给普通用户</span></div>
-                      <div v-else class="moderation-published-cell"><span>等待 AI 处理后进入人工队列</span></div>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <footer class="admin-pagination"><span>第 {{ app.state.adminTrendPage + 1 }} 页</span><div><button type="button" :disabled="app.state.adminTrendPage === 0 || app.state.adminTrendLoading" @click="previousModerationPage"><ChevronLeft :size="14" />上一页</button><button type="button" :disabled="!app.state.adminTrendHasNext || app.state.adminTrendLoading" @click="nextModerationPage">下一页<ChevronRight :size="14" /></button></div></footer>
+
+          <p v-if="missingAiEncryptionKey" class="ai-config-warning" role="status">
+            <CircleAlert :size="17" aria-hidden="true" />
+            <span>部署环境尚未设置 AI_SETTINGS_ENCRYPTION_KEY。模型名称仍可保存，但不能从本页面保存 API Key；配置 32 字节 Base64 主密钥并重启服务后即可启用。</span>
+          </p>
+
+          <div v-if="app.state.adminAiModelsLoading && !aiModels.length" class="admin-loading" role="status" aria-live="polite">
+            <LoaderCircle class="spinning" :size="18" aria-hidden="true" />正在读取模型配置…
+          </div>
+          <div v-else-if="!aiModels.length" class="admin-empty">
+            <Settings2 :size="21" aria-hidden="true" />暂时没有可配置的模型能力
+          </div>
+          <section v-else class="admin-ai-model-panel" aria-label="模型能力配置">
+            <article v-for="model in aiModels" :key="model.capability" class="admin-ai-model-row">
+              <header class="admin-ai-model-heading">
+                <div>
+                  <h3>{{ model.label }}</h3>
+                  <p>{{ model.capability === 'WARDROBE_RECOGNITION'
+                    ? '识别衣物图片并提取名称、类别、颜色和风格。'
+                    : model.capability === 'OUTFIT_RECOMMENDATION'
+                      ? '生成个性化穿搭建议；未启用或模型不可用时沿用现有降级逻辑。'
+                      : '生成每日搭配图片；当前仅支持阿里云百炼图像生成服务。' }}</p>
+                </div>
+                <div class="ai-model-badges">
+                  <span class="ai-credential-status" :class="'credential-' + model.credentialSource.toLowerCase()">
+                    <i aria-hidden="true"></i>{{ credentialSourceLabel(model.credentialSource) }}
+                  </span>
+                  <span
+                    class="ai-runtime-status"
+                    :class="model.effectiveEnabled ? 'runtime-enabled' : model.enabled && !model.environmentEnabled ? 'runtime-blocked' : 'runtime-disabled'"
+                  >{{ model.effectiveEnabled ? '调用已启用' : model.enabled && !model.environmentEnabled ? '环境开关阻断' : '调用已关闭' }}</span>
+                </div>
+              </header>
+
+              <p class="ai-credential-description">{{ credentialSourceDescription(model) }}</p>
+              <p v-if="model.enabled && !model.environmentEnabled" class="ai-model-env-note" role="note">
+                此能力的部署环境开关当前为关闭。后台配置不会绕过离线/部署安全开关；修改对应环境变量并重启服务后才会实际调用。
+              </p>
+              <p v-if="providerChangeNeedsKey(model)" class="ai-model-env-note" role="note">
+                切换厂商需要填写新 API Key，或先清除数据库密钥覆盖；旧厂商密钥不会转发给新厂商。
+              </p>
+
+              <form class="admin-ai-model-form" @submit.prevent="saveAiModelConfiguration(model)">
+                <label class="ai-model-field">
+                  <span>模型厂商</span>
+                  <select v-model="aiModelDrafts[model.capability].provider" :disabled="Boolean(app.state.adminAiModelAction)">
+                    <option value="DASHSCOPE">阿里云百炼</option>
+                    <option v-if="model.capability !== 'DAILY_IMAGE_GENERATION'" value="OPENAI">OpenAI</option>
+                  </select>
+                </label>
+                <label class="ai-model-field">
+                  <span>模型名称</span>
+                  <input
+                    v-model="aiModelDrafts[model.capability].model"
+                    type="text"
+                    maxlength="120"
+                    required
+                    autocomplete="off"
+                    :disabled="Boolean(app.state.adminAiModelAction)"
+                    placeholder="例如 qwen-plus"
+                  />
+                </label>
+                <label class="ai-model-field ai-model-key-field">
+                  <span>API Key</span>
+                  <input
+                    v-model="aiModelDrafts[model.capability].apiKey"
+                    type="password"
+                    maxlength="2048"
+                    autocomplete="new-password"
+                    :disabled="!model.encryptionAvailable || Boolean(app.state.adminAiModelAction)"
+                    :placeholder="model.credentialConfigured ? '留空保留当前密钥' : '输入要加密保存的密钥'"
+                  />
+                  <small v-if="model.encryptionAvailable">填写新密钥将替换当前值；留空则保持不变。</small>
+                  <small v-else>配置 AI_SETTINGS_ENCRYPTION_KEY 后才能在此保存密钥。</small>
+                </label>
+                <label class="ai-model-enabled">
+                  <input
+                    v-model="aiModelDrafts[model.capability].enabled"
+                    type="checkbox"
+                    :disabled="Boolean(app.state.adminAiModelAction)"
+                  />
+                  <span><strong>启用此能力</strong><small>关闭后停止调用；环境开关关闭时，即使开启也不会发起调用。</small></span>
+                </label>
+
+                <footer class="ai-model-actions">
+                  <button
+                    class="toolbar-button toolbar-primary"
+                    type="submit"
+                    :disabled="Boolean(app.state.adminAiModelAction) || providerChangeNeedsKey(model) || !aiModelDrafts[model.capability].model.trim()"
+                  >
+                    <LoaderCircle v-if="app.state.adminAiModelAction === model.capability" class="spinning" :size="13" aria-hidden="true" />
+                    保存配置
+                  </button>
+                  <button
+                    v-if="model.credentialSource === 'DATABASE'"
+                    class="toolbar-button ai-model-secondary"
+                    type="button"
+                    :disabled="Boolean(app.state.adminAiModelAction)"
+                    @click="saveAiModelConfiguration(model, true)"
+                  >清除密钥覆盖</button>
+                  <button
+                    v-if="model.managedOverride"
+                    class="toolbar-button ai-model-secondary"
+                    type="button"
+                    :disabled="Boolean(app.state.adminAiModelAction)"
+                    @click="restoreEnvironmentConfiguration(model)"
+                  >恢复环境配置</button>
+                  <span v-if="model.updatedAt" class="ai-model-updated">更新于 {{ formatDate(model.updatedAt) }}</span>
+                </footer>
+              </form>
+            </article>
           </section>
         </section>
 
-        <section v-else class="admin-section" aria-labelledby="audit-title">
+        <section v-else-if="activeSection === 'audit'" class="admin-section" aria-labelledby="audit-title">
           <header class="admin-section-heading">
             <div><span>TRACEABILITY</span><h2 id="audit-title">操作日志</h2></div>
-            <p>记录账号治理和反馈处理，不保存敏感凭据</p>
+            <p>记录账号、审核与模型配置变更，不保存敏感凭据</p>
           </header>
           <section class="admin-table-panel">
             <form class="admin-toolbar" @submit.prevent="applyAuditFilters">
-              <label class="admin-select-field"><span>操作</span><select v-model="app.state.adminAuditAction"><option value="">全部操作</option><option value="USER_STATUS_UPDATE">账号状态调整</option><option value="FEEDBACK_STATUS_UPDATE">反馈状态处理</option></select></label>
+              <label class="admin-select-field"><span>操作</span><select v-model="app.state.adminAuditAction"><option value="">全部操作</option><option value="USER_STATUS_UPDATE">账号状态调整</option><option value="FEEDBACK_STATUS_UPDATE">反馈状态处理</option><option value="AI_MODEL_CONFIG_UPDATE">AI 模型配置调整</option><option value="AI_MODEL_CONFIG_RESET">恢复 AI 环境配置</option></select></label>
               <label class="admin-select-field"><span>结果</span><select v-model="app.state.adminAuditOutcome"><option value="">全部结果</option><option value="SUCCESS">成功</option></select></label>
               <button class="toolbar-button toolbar-primary" type="submit" :disabled="app.state.adminAuditLoading">筛选日志</button>
               <span class="toolbar-total">共 {{ app.state.adminAuditTotal }} 条</span>
@@ -919,6 +984,43 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
 .audit-target { color: var(--muted); font-size: 9px; }
 .audit-outcome { color: var(--accent-strong); font-size: 9px; font-weight: 800; }
 .audit-details { max-width: 250px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.ai-config-warning { display: flex; align-items: flex-start; gap: 9px; margin: 0 0 17px; border: 1px solid rgba(198,160,97,.42); border-radius: 10px; padding: 12px 14px; color: #70551f; background: rgba(198,160,97,.12); font-size: 10px; line-height: 1.65; }
+.ai-config-warning svg { flex: 0 0 auto; margin-top: 1px; }
+.admin-ai-model-panel { border-top: 1px solid var(--line); }
+.admin-ai-model-row { display: grid; gap: 12px; border-bottom: 1px solid var(--line); padding: 20px 0 22px; }
+.admin-ai-model-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.admin-ai-model-heading h3 { margin: 0; color: var(--ink); font-family: var(--font-display); font-size: 22px; font-weight: 400; letter-spacing: -.035em; }
+.admin-ai-model-heading p { margin: 5px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.ai-model-badges { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.ai-credential-status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; border-radius: 999px; padding: 6px 9px; color: var(--muted); background: var(--surface-soft); font-size: 9px; font-weight: 800; }
+.ai-credential-status i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.ai-credential-status.credential-database, .ai-credential-status.credential-environment { color: var(--accent-strong); background: var(--accent-soft); }
+.ai-credential-status.credential-unavailable { color: var(--coral); background: rgba(183,100,80,.1); }
+.ai-runtime-status { display: inline-flex; align-items: center; border-radius: 999px; padding: 6px 9px; color: var(--muted); background: var(--surface-soft); font-size: 9px; font-weight: 800; white-space: nowrap; }
+.ai-runtime-status.runtime-enabled { color: var(--accent-strong); background: var(--accent-soft); }
+.ai-runtime-status.runtime-blocked { color: #70551f; background: rgba(198,160,97,.16); }
+.ai-runtime-status.runtime-disabled { color: var(--muted); }
+.ai-model-env-note { margin: -4px 0 0; color: #70551f; font-size: 9px; line-height: 1.55; }
+.ai-credential-description { margin: -3px 0 1px; color: var(--muted); font-size: 9px; line-height: 1.55; }
+.admin-ai-model-form { display: grid; grid-template-columns: minmax(125px, .8fr) minmax(175px, 1.1fr) minmax(220px, 1.55fr); align-items: start; gap: 13px; }
+.ai-model-field { display: grid; gap: 6px; min-width: 0; color: var(--muted); font-size: 10px; font-weight: 700; }
+.ai-model-field input, .ai-model-field select { width: 100%; min-width: 0; min-height: 38px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 0 10px; outline: 0; color: var(--ink); background: var(--surface); font: inherit; font-size: 11px; font-weight: 500; }
+.ai-model-field input:focus, .ai-model-field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(55,126,111,.12); }
+.ai-model-field input:disabled, .ai-model-field select:disabled { opacity: .62; }
+.ai-model-key-field small { color: var(--muted); font-size: 9px; font-weight: 400; line-height: 1.45; }
+.ai-model-enabled { display: inline-flex; grid-column: 1 / -1; align-items: flex-start; gap: 8px; width: fit-content; color: var(--ink); cursor: pointer; }
+.ai-model-enabled input { width: 15px; height: 15px; margin: 1px 0 0; accent-color: var(--accent-strong); }
+.ai-model-enabled input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ai-model-enabled input:disabled { cursor: not-allowed; }
+.ai-model-enabled span { display: grid; gap: 3px; }
+.ai-model-enabled strong { font-size: 10px; }
+.ai-model-enabled small { color: var(--muted); font-size: 9px; }
+.ai-model-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; grid-column: 1 / -1; }
+.ai-model-actions .toolbar-button { min-height: 33px; }
+.ai-model-actions .ai-model-secondary { border-color: var(--line-strong); color: var(--ink); background: transparent; }
+.ai-model-actions .ai-model-secondary:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
+.ai-model-actions button:disabled { opacity: .58; cursor: not-allowed; }
+.ai-model-updated { margin-left: auto; color: var(--muted); font-size: 9px; }
 .admin-pagination { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-top: 13px; color: var(--muted); font-size: 10px; }
 .admin-pagination > div { display: flex; gap: 6px; }
 .admin-pagination button { display: inline-flex; align-items: center; gap: 4px; min-height: 27px; border: 1px solid var(--line); border-radius: 999px; padding: 0 9px; color: var(--ink); background: transparent; font-size: 9px; }
@@ -934,7 +1036,7 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
   .admin-layout { grid-template-columns: 1fr; gap: 23px; }
   .admin-sidebar { position: static; }
   .admin-privacy-note { display: none; }
-  .admin-side-nav { grid-template-columns: repeat(5, 1fr); }
+  .admin-side-nav { grid-template-columns: repeat(6, minmax(0, 1fr)); }
   .admin-side-nav button { grid-template-columns: 1fr; justify-items: center; gap: 6px; padding: 10px 7px; text-align: center; }
   .admin-side-nav button > span { justify-items: center; }
   .admin-side-nav small { display: none; }
@@ -955,6 +1057,10 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
   .overview-lead-number { margin-top: 27px; font-size: 70px; }
   .admin-section-heading { align-items: start; flex-direction: column; gap: 8px; }
   .admin-section-heading > p { max-width: none; text-align: left; }
+  .admin-ai-model-heading { align-items: flex-start; flex-direction: column; gap: 9px; }
+  .admin-ai-model-form { grid-template-columns: 1fr; gap: 12px; }
+  .ai-model-enabled, .ai-model-actions { grid-column: auto; }
+  .ai-model-updated { width: 100%; margin-left: 0; }
   .admin-table-panel { padding: 0 13px 10px; }
   .admin-toolbar { align-items: stretch; flex-wrap: wrap; }
   .admin-search-field { order: 1; min-width: 100%; }

@@ -29,7 +29,6 @@ const brokenImages = ref(new Set())
 const visualResults = ref({})
 const visualBusyKeys = ref(new Set())
 const dailyOffset = ref(0)
-const selectedLookId = ref(null)
 const assistantRef = ref(null)
 const today = new Date()
 const weekdayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -114,43 +113,13 @@ const planTemplates = [
   }
 ]
 
-const dailyLookModes = [
-  {
-    title: '清爽通勤',
-    subtitle: '轻正式 · 低饱和',
-    palette: '暖白 / 石墨灰',
-    note: '轻薄外层应对全天温差，先把轮廓穿稳。',
-    fitLabel: '首选'
-  },
-  {
-    title: '柔和层次',
-    subtitle: '松弛感 · 有分寸',
-    palette: '雾蓝 / 米白',
-    note: '柔软材质靠近脸部，上下比例保持利落。',
-    fitLabel: '轻正式'
-  },
-  {
-    title: '城市轻叠穿',
-    subtitle: '利落感 · 轻叠穿',
-    palette: '炭灰 / 冷白',
-    note: '用常穿衣物做重点，活动时不显臃肿。',
-    fitLabel: '有层次'
-  },
-  {
-    title: '深色小对比',
-    subtitle: '深色基底 · 小亮点',
-    palette: '墨黑 / 橄榄绿',
-    note: '主色占大部分面积，鞋履或配饰只加一处亮色。',
-    fitLabel: '低负担'
-  },
-  {
-    title: '轻松周末',
-    subtitle: '舒适感 · 易行动',
-    palette: '米白 / 棕灰',
-    note: '少一层、更好活动，最后一套留给舒适感。',
-    fitLabel: '松弛版'
-  }
-]
+const dailyLookMode = {
+  title: '今日穿搭',
+  subtitle: '衣橱预览',
+  palette: '待搭配',
+  note: '先生成搭配推荐，再查看天气、场合和风格适配。',
+  fitLabel: '待生成'
+}
 
 const state = computed(() => props.app.state || {})
 const wardrobe = computed(() => state.value.wardrobe || [])
@@ -212,35 +181,34 @@ function categoryMatches(item, category) {
   return value.includes(category) || (category === '鞋履' && value.includes('鞋'))
 }
 
-function itemsForLook(variantIndex, dayIndex, source) {
-  const sourceItems = wardrobeItemsOnly(source?.items)
-  if (sourceItems.length) return sourceItems.slice(0, 4)
-  if (!availableWardrobe.value.length) return []
+function canonicalWardrobeCategory(category) {
+  const value = String(category || '').trim()
+  for (const canonical of ['外套', '上装', '下装', '鞋履', '配饰']) {
+    if (value.includes(canonical) || (canonical === '鞋履' && value.includes('鞋'))) return canonical
+  }
+  return value
+}
 
-  const categoryOrder = variantIndex % 2
-    ? ['外套', '上装', '下装', '鞋履', '配饰']
-    : ['上装', '下装', '外套', '鞋履', '配饰']
+function hasCombinableOutfit(items) {
+  return items.length >= 2
+    && new Set(items.map((item) => canonicalWardrobeCategory(item.category))).size >= 2
+}
+
+function itemsForLook(dayIndex) {
+  const categoryOrder = ['上装', '下装', '外套', '鞋履', '配饰']
   const picked = []
   const pickedKeys = new Set()
   for (const category of categoryOrder) {
     const candidates = availableWardrobe.value.filter((item) => categoryMatches(item, category) && !pickedKeys.has(itemKey(item)))
     const candidate = candidates.length
-      ? candidates[(variantIndex + dayIndex) % candidates.length]
+      ? candidates[((dayIndex % candidates.length) + candidates.length) % candidates.length]
       : null
     if (candidate) {
       picked.push(candidate)
       pickedKeys.add(itemKey(candidate))
     }
   }
-  for (let offset = 0; offset < availableWardrobe.value.length; offset += 1) {
-    if (picked.length >= 4) break
-    const item = availableWardrobe.value[(variantIndex + dayIndex + offset) % availableWardrobe.value.length]
-    if (!pickedKeys.has(itemKey(item))) {
-      picked.push(item)
-      pickedKeys.add(itemKey(item))
-    }
-  }
-  return picked.slice(0, 4)
+  return hasCombinableOutfit(picked) ? picked.slice(0, 4) : []
 }
 
 function addDays(date, amount) {
@@ -298,18 +266,20 @@ const weatherBriefDetail = computed(() => {
   return dailyOffset.value === 0 ? '填好城市后，这里会显示天气' : '非当天日期使用搭配计划参考，不代表实时预报'
 })
 
-const dailyLooks = computed(() => dailyLookModes.map((mode, lookIndex) => {
-  const source = recommendationPool.value[lookIndex] || null
-  const sourceItems = wardrobeItemsOnly(source?.items)
-  const items = sourceItems.length ? sourceItems.slice(0, 4) : itemsForLook(lookIndex, dailyDayIndex.value, null)
+const dailyLooks = computed(() => {
+  const candidateSource = recommendationPool.value[0] || null
+  const sourceItems = wardrobeItemsOnly(candidateSource?.items)
+  const isGenerated = Boolean(candidateSource?.id && hasCombinableOutfit(sourceItems))
+  const source = isGenerated ? candidateSource : null
+  const items = isGenerated ? sourceItems.slice(0, 4) : itemsForLook(dailyDayIndex.value)
+  const mode = dailyLookMode
   const palette = uniqueColors(items).join(' / ') || mode.palette
   const occasion = dailyTemplate.value.occasion.split('·')[0].trim()
-  const isGenerated = Boolean(source?.id && sourceItems.length)
   const visualKey = isGenerated ? visualKeyForSource(source, modelGender.value, sourceItems) : ''
   const visual = visualKey ? visualResults.value[visualKey] : null
   const generatedImage = visual?.imageUrl || ''
-  return {
-    id: `ootd-${dailyDateKey.value}-${lookIndex + 1}`,
+  return [{
+    id: 'ootd-' + dailyDateKey.value,
     modelImage: generatedImage,
     modelImageKind: generatedImage ? 'generated' : 'missing',
     modelGender: modelGender.value,
@@ -317,9 +287,8 @@ const dailyLooks = computed(() => dailyLookModes.map((mode, lookIndex) => {
     visualKey,
     visualStatus: visual?.status || 'idle',
     visualMessage: visual?.message || '',
-    lookIndex,
-    lookLabel: `LOOK ${String(lookIndex + 1).padStart(2, '0')}`,
-    title: `${occasion} · ${mode.title}`,
+    lookLabel: '今日穿搭',
+    title: occasion + ' · ' + mode.title,
     subtitle: source?.summary || mode.subtitle,
     occasion,
     palette,
@@ -335,18 +304,11 @@ const dailyLooks = computed(() => dailyLookModes.map((mode, lookIndex) => {
     dateLabel: dailyDateLabel.value,
     isToday: dailyOffset.value === 0,
     isGenerated,
-    isWardrobePreview: !isGenerated && items.length > 0,
-    isInspiration: items.length === 0
-  }
-}))
+    isWardrobePreview: !isGenerated && hasCombinableOutfit(items)
+  }]
+})
 
-const selectedLook = computed(() => (
-  dailyLooks.value.find((look) => look.id === selectedLookId.value)
-  || dailyLooks.value.find((look) => look.isGenerated)
-  || dailyLooks.value.find((look) => look.isWardrobePreview)
-  || dailyLooks.value[0]
-  || null
-))
+const selectedLook = computed(() => dailyLooks.value[0] || null)
 const wardrobeLookCount = computed(() => dailyLooks.value.filter((look) => look.items.length).length)
 const generatedLookCount = computed(() => dailyLooks.value.filter((look) => look.isGenerated).length)
 const hasWardrobeLooks = computed(() => wardrobeLookCount.value > 0)
@@ -468,16 +430,6 @@ function openAssistant(plan = null, prompt = '') {
   assistantRef.value?.open(plan, prompt)
 }
 
-watch(dailyLooks, (looks) => {
-  const selected = looks.find((look) => look.id === selectedLookId.value)
-  if (!selected || (selected.isInspiration && looks.some((look) => !look.isInspiration))) {
-    selectedLookId.value = looks.find((look) => look.isGenerated)?.id
-      || looks.find((look) => look.isWardrobePreview)?.id
-      || looks[0]?.id
-      || null
-  }
-}, { immediate: true })
-
 watch(selectedLook, (look) => {
   if (look?.isGenerated && modelGender.value) requestLookVisual(look)
 }, { immediate: true })
@@ -495,10 +447,12 @@ watch(selectedLook, (look) => {
         <div class="hero-grid">
           <div class="hero-copy">
             <div class="hero-index"><span>01</span><span>今天穿哪一套？</span></div>
-            <h1 v-if="hasWardrobeLooks">今天有 {{ wardrobeLookCount }} 套衣橱搭配可选。</h1>
-            <h1 v-else>今天还没想好穿什么？</h1>
-            <p v-if="hasWardrobeLooks" class="hero-lead">天气、场合和衣橱已经放在一起。先看看今天的搭配，不确定时也可以直接问知己。</p>
-            <p v-else class="hero-lead">告诉知己去哪里、做什么，或想要什么感觉。我会结合天气和衣橱，帮你搭出一套可以直接穿的组合。</p>
+            <h1 v-if="selectedLook?.isGenerated">今天的一套搭配已准备好。</h1>
+            <h1 v-else-if="hasWardrobeLooks">衣橱已就绪，生成今日搭配。</h1>
+            <h1 v-else>先确认两类可用衣物，再生成今日搭配。</h1>
+            <p v-if="selectedLook?.isGenerated" class="hero-lead">今天只展示这一套搭配和一张模特图，推荐依据来自天气、场合与当前衣橱。</p>
+            <p v-else-if="hasWardrobeLooks" class="hero-lead">当前展示衣橱预览。告诉知己今天的场合，生成搭配后就会为这一套生成一张模特图。</p>
+            <p v-else class="hero-lead">衣橱需要至少两类已确认衣物。补齐后，告诉知己今天的场合即可生成一套搭配和一张模特图。</p>
             <div class="hero-actions">
               <button class="hero-primary" type="button" @click="openAssistant()">
                 <MessageCircle :size="17" aria-hidden="true" />问问知己<ArrowRight :size="17" aria-hidden="true" />
@@ -594,10 +548,22 @@ watch(selectedLook, (look) => {
                 />
                 <span v-if="selectedVisualBusy" class="ootd-board-model-loading"><LoaderCircle :size="15" class="spinning" />阿里云正在生成今日模特图</span>
               </div>
-              <div v-else class="ootd-model-empty">
+              <div v-else-if="selectedLook.items.length" class="ootd-model-empty">
                 <Shirt :size="30" aria-hidden="true" />
-                <strong>{{ selectedLook.modelGender ? '等待阿里云生图' : '先填写个人档案性别' }}</strong>
-                <span>{{ selectedLook.modelGender ? '当前画面只展示已确认衣橱单品，生成成功后才会出现模特穿搭图。' : '选择男/女后，才会使用对应模特原型。' }}</span>
+                <template v-if="!selectedLook.modelGender">
+                  <strong>先选择每日模特性别</strong>
+                  <span>选择后会使用对应原型生成一张穿搭图。</span>
+                  <button class="ootd-visual-action" type="button" @click="props.app.selectView('profile')">选择模特性别</button>
+                </template>
+                <template v-else-if="!selectedLook.isGenerated">
+                  <strong>先生成今日搭配</strong>
+                  <span>当前是衣橱预览。生成文字搭配后，才会生成一张模特图。</span>
+                  <button class="ootd-visual-action" type="button" @click="openAssistant(selectedLook)">生成今日搭配</button>
+                </template>
+                <template v-else>
+                  <strong>{{ selectedVisualBusy ? '正在生成单张模特图' : '尚未生成模特图' }}</strong>
+                  <span>{{ selectedVisual?.message || '今日搭配只生成一张模特图，完成后会显示在这里。' }}</span>
+                </template>
               </div>
             </div>
 
@@ -625,36 +591,28 @@ watch(selectedLook, (look) => {
               </footer>
             </article>
 
-            <div v-if="!selectedLook.items.length" class="ootd-board-empty">
+            <div v-if="!selectedLook.items.length" class="ootd-board-empty" role="status">
               <Shirt :size="24" aria-hidden="true" />
-              <strong>当前搭配没有可用衣橱单品</strong>
-              <span>添加或确认至少两类衣物后，才会生成每日穿搭。</span>
+              <strong>衣橱里还没有可搭配的衣物</strong>
+              <span>请确认至少两类不同类别的衣物，再生成今日搭配图。</span>
+              <button class="ootd-empty-action" type="button" @click="props.app.selectView('wardrobe')">去衣橱确认衣物</button>
             </div>
           </div>
 
           <div class="ootd-board-caption">
-            <div class="ootd-look-switcher" role="tablist" aria-label="选择每日搭配">
-              <button
-                v-for="look in dailyLooks"
-                :key="look.id"
-                type="button"
-                role="tab"
-                :aria-selected="selectedLook.id === look.id"
-                :class="{ active: selectedLook.id === look.id }"
-                @click="selectedLookId = look.id"
-              >
-                {{ look.lookLabel }}
-              </button>
-            </div>
             <div class="ootd-board-status" aria-live="polite">
               <span>
-                {{ selectedLook.modelGenderLabel === '待补充'
-                  ? '请先在个人档案选择模特性别'
-                  : selectedLook.modelImageKind === 'generated'
-                    ? `已按${selectedLook.modelGenderLabel}性别档案生成今日模特图`
-                    : selectedVisualBusy
-                      ? '阿里云正在生成今日模特图'
-                      : (selectedVisual?.message || '等待阿里云生成今日模特图') }}
+                {{ !selectedLook.items.length
+                  ? '先确认两类不同类别的可用衣物'
+                  : selectedLook.modelGenderLabel === '待补充'
+                    ? '请先在个人档案选择模特性别'
+                    : selectedLook.modelImageKind === 'generated'
+                    ? `已按${selectedLook.modelGenderLabel}性别档案生成 1 张今日模特图`
+                    : !selectedLook.isGenerated
+                      ? '先生成今日搭配，再生成 1 张模特图'
+                      : selectedVisualBusy
+                        ? '阿里云正在生成 1 张今日模特图'
+                        : (selectedVisual?.message || '等待阿里云返回 1 张今日模特图') }}
               </span>
               <button
                 v-if="selectedLook.isGenerated && selectedLook.modelGender"
@@ -665,7 +623,7 @@ watch(selectedLook, (look) => {
               >
                 <LoaderCircle v-if="selectedVisualBusy" :size="14" class="spinning" />
                 <Sparkles v-else :size="14" />
-                {{ selectedVisualBusy ? '生成中' : selectedLook.modelImageKind === 'generated' ? '重新生成' : '生成今日模特图' }}
+                {{ selectedVisualBusy ? '生成中' : selectedLook.modelImageKind === 'generated' ? '重新生成单张图片' : '生成单张图片' }}
               </button>
             </div>
           </div>
@@ -1857,8 +1815,10 @@ watch(selectedLook, (look) => {
 
 .ootd-board-item-image {
   display: grid;
+  width: 100%;
+  aspect-ratio: 1 / 1;
   min-height: 0;
-  flex: 1;
+  flex: 0 0 auto;
   place-items: center;
   overflow: hidden;
   border-radius: 15px;
@@ -1869,7 +1829,7 @@ watch(selectedLook, (look) => {
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 150px;
+  min-height: 0;
   object-fit: contain;
 }
 
@@ -1914,11 +1874,14 @@ watch(selectedLook, (look) => {
 
 .ootd-board-empty {
   position: absolute;
+  z-index: 3;
   top: 50%;
   left: 50%;
   display: grid;
+  max-width: min(360px, calc(100% - 32px));
   justify-items: center;
   gap: 9px;
+  padding: 18px;
   transform: translate(-50%, -50%);
   color: var(--rec-muted);
   text-align: center;
@@ -1935,9 +1898,28 @@ watch(selectedLook, (look) => {
 }
 
 .ootd-board-empty span {
-  max-width: 240px;
+  max-width: 300px;
   font-size: 11px;
   line-height: 1.6;
+}
+
+.ootd-empty-action {
+  min-height: 34px;
+  margin-top: 4px;
+  border: 1px solid var(--rec-line-dark);
+  border-radius: 999px;
+  padding: 0 14px;
+  color: var(--rec-ink);
+  background: var(--rec-paper-strong);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ootd-empty-action:hover,
+.ootd-empty-action:focus-visible {
+  border-color: var(--rec-accent);
+  color: var(--rec-accent);
 }
 
 .ootd-board-empty-page {
@@ -1954,45 +1936,24 @@ watch(selectedLook, (look) => {
 .ootd-board-caption {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 20px;
   margin-top: 15px;
 }
 
-.ootd-look-switcher {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.ootd-look-switcher button {
-  min-height: 31px;
-  border: 1px solid var(--rec-line);
-  border-radius: 999px;
-  padding: 0 11px;
-  color: var(--rec-muted);
-  background: transparent;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: .05em;
-}
-
-.ootd-look-switcher button.active,
-.ootd-look-switcher button:hover,
-.ootd-look-switcher button:focus-visible {
-  border-color: var(--rec-ink);
-  color: var(--rec-paper-strong);
-  background: var(--rec-ink);
-}
-
 .ootd-board-status {
   display: flex;
+  width: 100%;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 12px;
   color: var(--rec-muted);
   font-size: 11px;
-  text-align: right;
+  text-align: left;
+}
+
+.ootd-board-status > span {
+  min-width: 0;
 }
 
 .ootd-visual-action {
@@ -2603,10 +2564,6 @@ watch(selectedLook, (look) => {
   .ootd-board-item.board-item-3 { grid-column: 1; grid-row: 3; }
   .ootd-board-item.board-item-4 { grid-column: 2; grid-row: 3; }
 
-  .ootd-board-item-image img {
-    min-height: 120px;
-  }
-
   .ootd-board-caption {
     align-items: flex-start;
     flex-direction: column;
@@ -2736,10 +2693,6 @@ watch(selectedLook, (look) => {
 
   .ootd-board-item {
     min-height: 240px;
-  }
-
-  .ootd-board-item-image img {
-    min-height: 160px;
   }
 
   .ootd-board-caption,

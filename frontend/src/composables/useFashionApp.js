@@ -88,6 +88,12 @@ function responseError(response, body, fallback = '请求失败，请稍后再�
   return error
 }
 
+function sessionChangedError() {
+  const error = new Error('登录会话已变更，请重新操作。')
+  error.sessionChanged = true
+  return error
+}
+
 export function useFashionApp() {
   const categories = ['上装', '下装', '鞋履', '外套', '配饰']
   let csrf = null
@@ -148,15 +154,6 @@ export function useFashionApp() {
     adminFeedbackAction: null,
     adminFeedbackStatus: 'PENDING',
     adminFeedbackQuery: '',
-    adminTrendContents: [],
-    adminTrendTotal: 0,
-    adminTrendPage: 0,
-    adminTrendHasNext: false,
-    adminTrendLoading: false,
-    adminTrendAction: null,
-    adminTrendStatus: 'PENDING_HUMAN',
-    adminTrendQuery: '',
-    adminTrendRun: null,
     adminAuditLogs: [],
     adminAuditTotal: 0,
     adminAuditPage: 0,
@@ -164,6 +161,9 @@ export function useFashionApp() {
     adminAuditLoading: false,
     adminAuditAction: '',
     adminAuditOutcome: '',
+    adminAiModels: [],
+    adminAiModelsLoading: false,
+    adminAiModelAction: null,
     globalQuery: '',
     searchOpen: false,
     notificationsOpen: false,
@@ -214,15 +214,6 @@ export function useFashionApp() {
     state.adminFeedbackAction = null
     state.adminFeedbackStatus = 'PENDING'
     state.adminFeedbackQuery = ''
-    state.adminTrendContents = []
-    state.adminTrendTotal = 0
-    state.adminTrendPage = 0
-    state.adminTrendHasNext = false
-    state.adminTrendLoading = false
-    state.adminTrendAction = null
-    state.adminTrendStatus = 'PENDING_HUMAN'
-    state.adminTrendQuery = ''
-    state.adminTrendRun = null
     state.adminAuditLogs = []
     state.adminAuditTotal = 0
     state.adminAuditPage = 0
@@ -230,6 +221,9 @@ export function useFashionApp() {
     state.adminAuditLoading = false
     state.adminAuditAction = ''
     state.adminAuditOutcome = ''
+    state.adminAiModels = []
+    state.adminAiModelsLoading = false
+    state.adminAiModelAction = null
     state.globalQuery = ''
     state.searchOpen = false
     state.notificationsOpen = false
@@ -253,12 +247,14 @@ export function useFashionApp() {
     state.authError = '登录已过期，请重新登录。'
   }
 
-  async function refreshCsrf() {
+  async function refreshCsrf(expectedSessionVersion = sessionVersion) {
+    if (expectedSessionVersion !== sessionVersion) throw sessionChangedError()
     const response = await fetch('/api/v1/auth/csrf', {
       credentials: 'same-origin',
       headers: { Accept: 'application/json' }
     })
     const body = await readApiBody(response)
+    if (expectedSessionVersion !== sessionVersion) throw sessionChangedError()
     if (!response.ok || !body || body.code !== 0 || !body.data?.headerName || !body.data?.token) {
       throw responseError(response, body, '无法建立登录会话')
     }
@@ -266,11 +262,12 @@ export function useFashionApp() {
     return csrf
   }
 
-  async function ensureCsrf() {
-    return csrf || refreshCsrf()
+  async function ensureCsrf(expectedSessionVersion = sessionVersion) {
+    if (expectedSessionVersion !== sessionVersion) throw sessionChangedError()
+    return csrf || refreshCsrf(expectedSessionVersion)
   }
 
-  async function request(path, options = {}, policy = {}) {
+  async function request(path, options = {}, policy = {}, requestVersion = sessionVersion) {
     const method = String(options.method || 'GET').toUpperCase()
     const headers = new Headers(options.headers || {})
     headers.set('Accept', 'application/json')
@@ -280,9 +277,10 @@ export function useFashionApp() {
       headers.set('Content-Type', 'application/json')
     }
     if (WRITE_METHODS.has(method)) {
-      const token = await ensureCsrf()
+      const token = await ensureCsrf(requestVersion)
       headers.set(token.headerName, token.token)
     }
+    if (requestVersion !== sessionVersion) throw sessionChangedError()
 
     const response = await fetch(path, {
       ...options,
@@ -292,12 +290,13 @@ export function useFashionApp() {
     })
     const body = await readApiBody(response)
     if (response.status === 403 && WRITE_METHODS.has(method) && policy.retryCsrf !== false) {
+      if (requestVersion !== sessionVersion) throw sessionChangedError()
       csrf = null
-      await refreshCsrf()
-      return request(path, options, { ...policy, retryCsrf: false })
+      await refreshCsrf(requestVersion)
+      return request(path, options, { ...policy, retryCsrf: false }, requestVersion)
     }
     if (response.status === 401) {
-      if (!policy.allowUnauthorized) expireSession()
+      if (!policy.allowUnauthorized && requestVersion === sessionVersion) expireSession()
       throw responseError(response, body, '请先登录账户')
     }
     if (!response.ok || !body || body.code !== 0) {
@@ -314,7 +313,7 @@ export function useFashionApp() {
   }
 
   function showError(cause) {
-    if (cause?.status === 401) return
+    if (cause?.status === 401 || cause?.sessionChanged) return
     state.error = cause instanceof Error ? cause.message : '服务暂时不可用，请稍后再试。'
   }
 
@@ -334,8 +333,8 @@ export function useFashionApp() {
       loadAdminOverview(),
       loadAdminUsers(),
       loadAdminFeedback(),
-      loadAdminTrendContents(),
-      loadAdminAuditLogs())
+      loadAdminAuditLogs(),
+      loadAdminAiModels())
     return Promise.allSettled(requests)
   }
 
@@ -665,128 +664,6 @@ export function useFashionApp() {
     }
   }
 
-  async function loadAdminTrendContents(options = {}) {
-    if (!isAdmin.value || state.adminTrendLoading) return null
-    const page = Number.isInteger(options.page) ? options.page : 0
-    const version = sessionVersion
-    state.adminTrendLoading = true
-    try {
-      const params = new URLSearchParams({ page: String(page), size: String(ADMIN_PAGE_SIZE) })
-      if (state.adminTrendStatus && state.adminTrendStatus !== 'ALL') {
-        params.set('status', state.adminTrendStatus)
-      }
-      const query = state.adminTrendQuery.trim()
-      if (query) params.set('query', query)
-      const result = await request(`/api/v1/admin/trends/contents?${params.toString()}`)
-      if (isCurrentSession(version)) {
-        state.adminTrendContents = result.items || []
-        state.adminTrendTotal = Number(result.totalElements || 0)
-        state.adminTrendPage = Number(result.page || 0)
-        state.adminTrendHasNext = Boolean(result.hasNext)
-      }
-      return result
-    } catch (cause) {
-      showError(cause)
-      return null
-    } finally {
-      if (isCurrentSession(version)) state.adminTrendLoading = false
-    }
-  }
-
-  async function runAdminTrendAiReview(limit = 10) {
-    if (!isAdmin.value || state.adminTrendAction) return null
-    const version = sessionVersion
-    state.adminTrendAction = 'ai-review'
-    clearError()
-    try {
-      const run = await request(`/api/v1/admin/trends/ai-review?limit=${encodeURIComponent(limit)}`, {
-        method: 'POST'
-      })
-      if (isCurrentSession(version)) {
-        state.adminTrendRun = run
-        await loadAdminTrendContents({ page: state.adminTrendPage })
-        await loadAdminAuditLogs({ page: 0 })
-      }
-      return run
-    } catch (cause) {
-      showError(cause)
-      return null
-    } finally {
-      if (isCurrentSession(version)) state.adminTrendAction = null
-    }
-  }
-
-  async function retryAdminTrendAi(id) {
-    if (!isAdmin.value || !id || state.adminTrendAction) return null
-    const version = sessionVersion
-    state.adminTrendAction = `retry:${id}`
-    clearError()
-    try {
-      const updated = await request(`/api/v1/admin/trends/contents/${encodeURIComponent(id)}/retry-ai`, {
-        method: 'POST'
-      })
-      if (isCurrentSession(version)) {
-        await loadAdminTrendContents({ page: state.adminTrendPage })
-        await loadAdminAuditLogs({ page: 0 })
-      }
-      return updated
-    } catch (cause) {
-      showError(cause)
-      return null
-    } finally {
-      if (isCurrentSession(version)) state.adminTrendAction = null
-    }
-  }
-
-  async function finalizeAdminTrendReview(id, status, note = '') {
-    if (!isAdmin.value || !id || !status || state.adminTrendAction) return null
-    const version = sessionVersion
-    state.adminTrendAction = `review:${id}`
-    clearError()
-    try {
-      const updated = await request(`/api/v1/admin/trends/contents/${encodeURIComponent(id)}/review`, {
-        method: 'PUT',
-        body: JSON.stringify({ status, note })
-      })
-      if (isCurrentSession(version)) {
-        await loadAdminTrendContents({ page: state.adminTrendPage })
-        await loadAdminAuditLogs({ page: 0 })
-        await loadTrends()
-      }
-      return updated
-    } catch (cause) {
-      showError(cause)
-      return null
-    } finally {
-      if (isCurrentSession(version)) state.adminTrendAction = null
-    }
-  }
-
-  async function updateAdminTrendVisibility(id, hidden) {
-    if (!isAdmin.value || !id || state.adminTrendAction) return null
-    const version = sessionVersion
-    state.adminTrendAction = `visibility:${id}`
-    clearError()
-    try {
-      const updated = await request(`/api/v1/admin/trends/${encodeURIComponent(id)}/visibility`, {
-        method: 'PUT',
-        body: JSON.stringify({ hidden })
-      })
-      if (isCurrentSession(version)) {
-        const index = state.adminTrendContents.findIndex((item) => item.id === id)
-        if (index >= 0) state.adminTrendContents.splice(index, 1, updated)
-        await loadAdminAuditLogs({ page: 0 })
-        await loadTrends()
-      }
-      return updated
-    } catch (cause) {
-      showError(cause)
-      return null
-    } finally {
-      if (isCurrentSession(version)) state.adminTrendAction = null
-    }
-  }
-
   async function loadAdminAuditLogs(options = {}) {
     if (!isAdmin.value || state.adminAuditLoading) return null
     const page = Number.isInteger(options.page) ? options.page : 0
@@ -809,6 +686,69 @@ export function useFashionApp() {
       return null
     } finally {
       if (isCurrentSession(version)) state.adminAuditLoading = false
+    }
+  }
+
+  async function loadAdminAiModels() {
+    if (!isAdmin.value || state.adminAiModelsLoading) return null
+    const version = sessionVersion
+    state.adminAiModelsLoading = true
+    try {
+      const models = await request('/api/v1/admin/ai-models')
+      if (isCurrentSession(version)) state.adminAiModels = models || []
+      return models
+    } catch (cause) {
+      showError(cause)
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminAiModelsLoading = false
+    }
+  }
+
+  async function saveAdminAiModel(capability, configuration) {
+    if (!isAdmin.value || !capability || state.adminAiModelAction) return null
+    const version = sessionVersion
+    state.adminAiModelAction = capability
+    clearError()
+    try {
+      const updated = await request('/api/v1/admin/ai-models/' + encodeURIComponent(capability), {
+        method: 'PUT',
+        body: JSON.stringify(configuration)
+      })
+      if (isCurrentSession(version)) {
+        const index = state.adminAiModels.findIndex((item) => item.capability === capability)
+        if (index >= 0) state.adminAiModels.splice(index, 1, updated)
+        await loadAdminAuditLogs({ page: 0 })
+      }
+      return updated
+    } catch (cause) {
+      showError(cause)
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminAiModelAction = null
+    }
+  }
+
+  async function resetAdminAiModel(capability) {
+    if (!isAdmin.value || !capability || state.adminAiModelAction) return null
+    const version = sessionVersion
+    state.adminAiModelAction = capability
+    clearError()
+    try {
+      const restored = await request('/api/v1/admin/ai-models/' + encodeURIComponent(capability), {
+        method: 'DELETE'
+      })
+      if (isCurrentSession(version)) {
+        const index = state.adminAiModels.findIndex((item) => item.capability === capability)
+        if (index >= 0) state.adminAiModels.splice(index, 1, restored)
+        await loadAdminAuditLogs({ page: 0 })
+      }
+      return restored
+    } catch (cause) {
+      showError(cause)
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminAiModelAction = null
     }
   }
 
@@ -1253,7 +1193,6 @@ export function useFashionApp() {
       if (!state.adminOverview) await loadAdminOverview()
       if (!state.adminUsers.length && !state.adminUsersTotal) await loadAdminUsers()
       if (!state.adminFeedback.length && !state.adminFeedbackTotal) await loadAdminFeedback()
-      if (!state.adminTrendContents.length && !state.adminTrendTotal) await loadAdminTrendContents()
       if (!state.adminAuditLogs.length && !state.adminAuditTotal) await loadAdminAuditLogs()
     }
   }
@@ -1360,12 +1299,10 @@ export function useFashionApp() {
     updateAdminUserStatus,
     loadAdminFeedback,
     updateAdminFeedbackStatus,
-    loadAdminTrendContents,
-    runAdminTrendAiReview,
-    retryAdminTrendAi,
-    finalizeAdminTrendReview,
-    updateAdminTrendVisibility,
     loadAdminAuditLogs,
+    loadAdminAiModels,
+    saveAdminAiModel,
+    resetAdminAiModel,
     saveProfile,
     loadWeather,
     loadLocalWeather,

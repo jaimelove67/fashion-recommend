@@ -162,7 +162,8 @@ public class ConfiguredWebTrendSourceAdapter implements TrendSourceAdapter {
             List<String> tags = extractTags(candidate, page.tags());
             Instant publishedAt = parsePublishedAt(firstNonBlank(dateValue(candidate), page.publishedAt(), null), fetchedAt);
             String id = stableId(source, title);
-            if (ids.add(id)) {
+            if (!TrendTopics.excludedShowOrCelebrity(String.join(" ", title, summary == null ? "" : summary,
+                    String.join(" ", tags))) && ids.add(id)) {
                 items.add(new TrendItem(id, platform, limitText(title, 200), tags,
                         sourceSignalScore(publishedAt, fetchedAt, image != null, summary != null, tags.size()),
                         publishedAt, fetchedAt, source, false, image, summary));

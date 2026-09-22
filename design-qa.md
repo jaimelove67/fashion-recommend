@@ -76,6 +76,7 @@ The implementation intentionally uses product-specific copy instead of copying r
 
 final result: passed
 
+
 ## 2026-09-11 个人形象页联合分析流程复核
 
 - Source visual truth: `docx/reference_photo/personal_page.png` plus the selected “中心画像仪表盘” direction generated from that reference.
@@ -176,3 +177,38 @@ final result: passed
 - Responsive evidence: at 390px, the stage measured 342.67px × 380px and the document did not exceed its layout width; no browser page errors were emitted.
 
 final result: passed
+
+## 2026-09-21 趋势页趋势拆解改版复核
+
+- Source visual truth: selected direction 2 at `C:/Users/jaime/.codex/generated_images/01a0c18b-eccf-76d3-b8ed-315554b2083a/exec-f8972f5c-74f3-48c2-b44c-426487cb42a9.png` (1235 × 1274 px). The original page screenshot is 1044 × 1076 px.
+- Screenshot evidence (device scale factor 1): desktop full page at `.playwright-cli/trend-desktop-full-20260921.png` (1044 × 1879 px, 1044 × 1076 CSS px); focused desktop panel at `.playwright-cli/trend-desktop-breakdown-20260921.png`; tablet at `.playwright-cli/trend-tablet-full-20260921.png` (768 × 1024 CSS px); mobile full page at `.playwright-cli/trend-mobile-full-20260921.png` (390 × 2763 px, 390 × 844 CSS px) and focused mobile panel at `.playwright-cli/trend-mobile-breakdown-20260921.png`.
+- Test data: local Playwright API fixtures (`demoMode=true`) with existing repository outfit and wardrobe assets. These screenshots verify layout and behavior; the fixture trend entries do not represent live source content or a real user's wardrobe.
+- Responsive checks: document scroll width equals viewport width at 1044, 980, 900, 768, 721, 720, 390, and 360 px. Two-column source/details boxes do not overlap at 980, 900, 768, and 721 px; at 720 px and below they stack. The mobile page title remains on one line at 390 and 360 px.
+- Interaction checks: switching to the 24-hour period updates the selected state; filtering to Weibo selects the matching item; the board-only trend shows the explicit no-image/no-body explanation; unmatched trends explain why no closet substitute is shown; the review-pending garment stays hidden; the “用我的衣橱试搭” action opens recommendations with the chosen trend in its reference banner.
+- Asset and runtime checks: all visible images loaded; browser console, page-error, failed-request, and HTTP error logs were empty.
+- First-pass findings and fixes: at 768 px, a minimum image height combined with the fixed aspect ratio made the hero image overflow its grid track and cover the details. The mobile title also left a two-character orphan. The tablet image now follows its grid track, and the mobile title uses a smaller balanced size. Screenshots and breakpoint checks were repeated after both fixes.
+- Engineering verification: `npm run build` passed after the final CSS changes. No unit or full E2E suite was run; the local Playwright browser pass exercised the trend page interactions above.
+- Preview diagnosis: before the frontend container refresh, `http://localhost:8090` served `index-C5Hdwf3B.js` and rendered the old heading “趋势观察”; `http://127.0.0.1:5173` already rendered the new heading. The Nginx root response had `Cache-Control: no-store`, ruling out a cached entry document.
+- Runtime fix and regression loop: rebuilt/recreated the frontend with `docker compose --profile app up -d --build frontend`; the backend and data containers remained running. The red-capable check at `frontend/.playwright-cli/verify-trend-view.mjs` failed before the refresh and passed after it. Port 8090 now serves `index-C6TqHSD6.js` and the expected heading “拆开看，一种趋势怎么穿”. An already-open browser tab still needs one refresh to load the replaced container page.
+
+### Findings
+
+No unresolved layout, image, interaction, or console findings remain in the checked states.
+
+final result: passed
+
+## 2026-09-21 趋势 3D 画廊与穿搭灵感联动复核
+
+- 实现：在趋势拆解面板上方恢复 3D 透视画廊；点击图片会更新同一条趋势的来源图、标题、主题线索、摘要、衣橱替代项和试搭入口。
+- 稳定性：点击图片只更新下方详情，卡片保持原 3D 卡位和尺寸；上一条/下一条及方向键显式移动画廊焦点，Home 和 End 定位两端；不自动轮播，阅读详情时内容不会自行切换。
+- 图片边界：使用趋势条目已有配图；原文没有配图或图片加载失败时显示来源文字，不生成替代穿搭图。
+- 验证：`npm run build` 通过；Playwright 回归 `clicking a gallery photo updates the detail without moving the photo from its slot` 在 `127.0.0.1:5173` 和 `127.0.0.1:8090` 均通过。点击第 3 张图后，下方详情对应第 3 条，图片卡位和尺寸不变；下一条控制切到第 4 条。容器预览实际请求 `/api/v1/trends` 返回 10 条数据，`demoMode=false`。
+- 响应式：1044 px 桌面、768 px 平板和 390 px 手机视口检查通过；平板与手机页面宽度分别等于视口宽度，没有横向溢出。浏览器控制台错误、页面错误及失败请求均为 0。
+- 截图：`C:/other/新建文件夹/毕设/基于大模型（LLM）的智能穿搭推荐/frontend/.playwright-cli/trend-gallery-desktop-20260921.png`（桌面全页）；`C:/other/新建文件夹/毕设/基于大模型（LLM）的智能穿搭推荐/frontend/.playwright-cli/trend-gallery-mobile-20260921.png`（手机全页）。
+- 验证数据使用本地 10 条测试趋势及生成的 SVG 图片，仅用于检查状态联动和布局，不代表真实趋势源内容。
+
+### 发现
+
+没有发现未解决的画廊交互问题。Docker Desktop 的陈旧 AF_UNIX 套接字重解析点已通过 `docker-desktop` WSL 发行版改名保留；Engine API 返回版本 `29.8.0`，Postgres、MinIO 和后端健康，前端运行在 `localhost:8090`。
+
+final result: interaction regression and container preview passed

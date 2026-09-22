@@ -107,7 +107,7 @@ public class EditorialTrendSourceAdapter implements TrendSourceAdapter {
                 // A repeated link is the same article; counting it twice would inflate source totals.
                 items.putIfAbsent(id, new TrendItem(
                         id, PLATFORM, truncate(title, MAX_TITLE_CHARS),
-                        TrendTopics.classify(title), 0, published, now, link, false, image,
+                        TrendTopics.classify(title + " " + description), 0, published, now, link, false, image,
                         truncate(description, MAX_SUMMARY_CHARS),
                         new TrendEvidence(creator.isBlank() ? "编辑精选" : creator, "article",
                                 image == null ? List.of() : List.of(image), null, null, null, null,

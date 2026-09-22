@@ -6,6 +6,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fashion.recommendation.ai.AiModelCapability;
+import com.fashion.recommendation.ai.AiModelConfigurationService;
+import com.fashion.recommendation.ai.AiModelRuntimeConfig;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -49,48 +52,59 @@ public class BailianRecommendationClient implements LlmRecommendationClient {
     private final String apiKey;
     private final String model;
     private final boolean enabled;
+    private final AiModelConfigurationService modelConfigurationService;
 
     @Autowired
     public BailianRecommendationClient(
             ObjectMapper objectMapper,
+            AiModelConfigurationService modelConfigurationService,
             @Value("${app.bailian.endpoint:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}") String endpoint,
             @Value("${app.bailian.api-key:}") String apiKey,
             @Value("${app.bailian.model:qwen-plus}") String model,
             @Value("${app.bailian.enabled:true}") boolean enabled,
             @Value("${app.bailian.connect-timeout:3s}") Duration connectTimeout,
             @Value("${app.bailian.read-timeout:8s}") Duration readTimeout) {
-        this(createRestClient(connectTimeout, readTimeout), objectMapper, endpoint, apiKey, model, enabled);
+        this(createRestClient(connectTimeout, readTimeout), objectMapper, endpoint, apiKey, model, enabled,
+                modelConfigurationService);
     }
 
     BailianRecommendationClient(
             RestClient restClient, ObjectMapper objectMapper, String endpoint, String apiKey, String model,
             boolean enabled) {
+        this(restClient, objectMapper, endpoint, apiKey, model, enabled, null);
+    }
+
+    private BailianRecommendationClient(
+            RestClient restClient, ObjectMapper objectMapper, String endpoint, String apiKey, String model,
+            boolean enabled, AiModelConfigurationService modelConfigurationService) {
         this.restClient = restClient;
         this.objectMapper = objectMapper;
         this.endpoint = endpoint;
         this.apiKey = apiKey;
         this.model = model;
         this.enabled = enabled;
+        this.modelConfigurationService = modelConfigurationService;
     }
 
     @Override
     public Optional<LlmRecommendationResult> recommend(LlmRecommendationContext context) {
+        AiModelRuntimeConfig config = runtimeConfig();
         // Explicit enable/disable boundary. The recommendation LLM is the primary engine in normal
         // runs; offline tests can explicitly disable it to avoid paid provider calls.
-        if (!enabled) {
+        if (!isEffectivelyEnabled(config)) {
             throw new LlmRecommendationException(
                     RecommendationFallbackReason.LLM_DISABLED, "推荐大模型未启用");
         }
-        if (!StringUtils.hasText(apiKey)) {
+        if (!StringUtils.hasText(config.apiKey())) {
             return Optional.empty();
         }
 
         try {
             String responseBody = restClient.post()
-                    .uri(endpoint)
+                    .uri(config.endpoint())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .headers(headers -> headers.setBearerAuth(apiKey.trim()))
-                    .body(buildRequest(context))
+                    .headers(headers -> headers.setBearerAuth(config.apiKey().trim()))
+                    .body(buildRequest(context, config.model()))
                     .retrieve()
                     .body(String.class);
             return Optional.of(parseResponse(responseBody));
@@ -107,8 +121,12 @@ public class BailianRecommendationClient implements LlmRecommendationClient {
     }
 
     ObjectNode buildRequest(LlmRecommendationContext context) {
+        return buildRequest(context, model);
+    }
+
+    private ObjectNode buildRequest(LlmRecommendationContext context, String selectedModel) {
         ObjectNode request = objectMapper.createObjectNode();
-        request.put("model", model);
+        request.put("model", selectedModel);
         request.put("temperature", 0.2);
         request.put("max_tokens", 600);
         ArrayNode messages = request.putArray("messages");
@@ -116,6 +134,31 @@ public class BailianRecommendationClient implements LlmRecommendationClient {
         messages.addObject().put("role", "user").put("content", buildUserPrompt(context));
         request.putObject("response_format").put("type", "json_object");
         return request;
+    }
+
+    private AiModelRuntimeConfig runtimeConfig() {
+        if (modelConfigurationService != null) {
+            return modelConfigurationService.resolve(AiModelCapability.OUTFIT_RECOMMENDATION);
+        }
+        return new AiModelRuntimeConfig(
+                AiModelCapability.OUTFIT_RECOMMENDATION,
+                com.fashion.recommendation.ai.AiModelProvider.DASHSCOPE,
+                model,
+                apiKey,
+                enabled,
+                endpoint,
+                null,
+                StringUtils.hasText(apiKey) ? "ENVIRONMENT" : "MISSING",
+                StringUtils.hasText(apiKey),
+                false,
+                false,
+                null);
+    }
+
+    private boolean isEffectivelyEnabled(AiModelRuntimeConfig config) {
+        return modelConfigurationService == null
+                ? config.enabled()
+                : modelConfigurationService.isEffectivelyEnabled(config);
     }
 
     String buildUserPrompt(LlmRecommendationContext context) {

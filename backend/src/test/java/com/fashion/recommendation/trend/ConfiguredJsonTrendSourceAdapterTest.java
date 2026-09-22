@@ -81,6 +81,42 @@ class ConfiguredJsonTrendSourceAdapterTest {
     }
 
     @Test
+    void preservesRoundedFollowerLabelsWithoutTurningThemIntoExactCounts() {
+        var result = adapter.parseFeed("""
+                {"items":[{
+                  "id":"rounded-followers",
+                  "platform":"licensed-feed",
+                  "title":"秋季穿搭",
+                  "topicTags":["秋季穿搭"],
+                  "heatScore":0,
+                  "publishedAt":"2026-07-21T08:00:00Z",
+                  "sourceUrl":"https://source.example/trends/rounded-followers",
+                  "imageUrl":null,
+                  "evidence":{"author":"creator","authorFollowersLabel":"1.2万"}
+                }]}
+                """);
+
+        assertEquals(null, result.get(0).evidence().authorFollowers());
+        assertEquals("1.2万", result.get(0).evidence().authorFollowersLabel());
+    }
+
+    @Test
+    void dropsExcludedCelebrityEditorialItemsFromAConfiguredFeed() {
+        var result = adapter.parseFeed("""
+                {"items":[
+                {"id":"creator-look","platform":"licensed-feed","title":"秋冬通勤穿搭分享",
+                 "topicTags":["通勤","叠穿"],"heatScore":80,"publishedAt":"2026-07-21T08:00:00Z",
+                 "sourceUrl":"https://source.example/trends/creator-look","imageUrl":"https://source.example/creator.jpg"},
+                {"id":"red-carpet","platform":"licensed-feed","title":"明星红毯礼服造型",
+                 "topicTags":["红毯造型","礼服"],"heatScore":99,"publishedAt":"2026-07-21T08:00:00Z",
+                 "sourceUrl":"https://source.example/trends/red-carpet","imageUrl":"https://source.example/red.jpg"}
+                ]}
+                """);
+
+        assertEquals(List.of("creator-look"), result.stream().map(TrendItem::id).toList());
+    }
+
+    @Test
     void cachesAValidatedFeedForTheConfiguredTtl() {
         server.expect(once(), requestTo(equalTo(ENDPOINT)))
                 .andRespond(withSuccess(VALID_FEED, MediaType.APPLICATION_JSON));
