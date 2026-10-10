@@ -35,8 +35,8 @@ class FlywayMigrationTest {
 
         MigrateResult firstMigration = flyway.migrate();
 
-        assertEquals(8, firstMigration.migrationsExecuted);
-        assertEquals("8", flyway.info().current().getVersion().getVersion());
+        assertEquals(12, firstMigration.migrationsExecuted);
+        assertEquals("12", flyway.info().current().getVersion().getVersion());
         assertEquals("旧衣物", jdbcTemplate.queryForObject(
                 "SELECT name FROM wardrobe_items WHERE id = 41", String.class));
         assertEquals("MANUAL", jdbcTemplate.queryForObject(
@@ -49,7 +49,15 @@ class FlywayMigrationTest {
         assertColumnExists(jdbcTemplate, "trend_contents", "ai_decision");
         assertIndexExists(jdbcTemplate, "idx_trend_moderation_queue");
         assertColumnExists(jdbcTemplate, "style_profiles", "gender");
+        assertColumnExists(jdbcTemplate, "style_profiles", "personal_analysis");
+        assertColumnExists(jdbcTemplate, "style_profiles", "photo_object_key");
+        assertColumnExists(jdbcTemplate, "style_profiles", "height_cm");
+        assertColumnExists(jdbcTemplate, "style_profiles", "profile_revision");
+        assertColumnExists(jdbcTemplate, "style_profiles", "use_personal_photo_for_outfit");
+        assertColumnExists(jdbcTemplate, "style_profiles", "avoid_preferences");
+        assertColumnExists(jdbcTemplate, "style_profiles", "preferences_confirmed");
         assertTableExists(jdbcTemplate, "admin_ai_model_settings");
+        assertTableExists(jdbcTemplate, "try_on_favorites");
 
         int appliedBeforeRestart = flyway.info().applied().length;
         MigrateResult secondMigration = flyway.migrate();
@@ -75,7 +83,7 @@ class FlywayMigrationTest {
 
         MigrateResult migration = flyway.migrate();
 
-        assertEquals("8", flyway.info().current().getVersion().getVersion());
+        assertEquals("12", flyway.info().current().getVersion().getVersion());
         assertEquals("旧场合推荐", jdbcTemplate.queryForObject(
                 "SELECT summary FROM recommendations WHERE id = 91", String.class));
         assertEquals("development-rule-v1", jdbcTemplate.queryForObject(
@@ -96,6 +104,25 @@ class FlywayMigrationTest {
                 "SELECT fallback_reason FROM recommendations WHERE id = 91", String.class));
         assertTableExists(jdbcTemplate, "admin_audit_logs");
         assertTableExists(jdbcTemplate, "admin_ai_model_settings");
+    }
+
+    @Test
+    void preferenceMigrationPreservesOldChoicesAndMarksTheirOriginAsUnconfirmed() {
+        JdbcDataSource source = legacyDataSource();
+        Flyway.configure().dataSource(source).locations("classpath:db/migration")
+                .target(MigrationVersion.fromVersion("10")).load().migrate();
+        JdbcTemplate jdbc = new JdbcTemplate(source);
+        jdbc.update("""
+                INSERT INTO style_profiles (user_id, display_name, style_preferences, color_preferences,
+                  occasion_preferences, style_tags, try_style_tags, color_suggestions, item_suggestions,
+                  reason_summary, model_name, updated_at)
+                VALUES ('old-preference-user', '旧称呼', '["极简","通勤"]', '["低饱和"]', '["通勤"]',
+                  '[]', '[]', '[]', '[]', '旧说明', 'old-model', CURRENT_TIMESTAMP)
+                """);
+        Flyway.configure().dataSource(source).locations("classpath:db/migration").load().migrate();
+        assertEquals("[\"极简\",\"通勤\"]", jdbc.queryForObject("SELECT style_preferences FROM style_profiles WHERE user_id = 'old-preference-user'", String.class));
+        assertEquals("[]", jdbc.queryForObject("SELECT avoid_preferences FROM style_profiles WHERE user_id = 'old-preference-user'", String.class));
+        assertEquals(false, jdbc.queryForObject("SELECT preferences_confirmed FROM style_profiles WHERE user_id = 'old-preference-user'", Boolean.class));
     }
 
     private static JdbcDataSource legacyDataSource() {

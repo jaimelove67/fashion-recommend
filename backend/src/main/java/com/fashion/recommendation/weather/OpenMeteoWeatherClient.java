@@ -28,8 +28,8 @@ class OpenMeteoWeatherClient {
             @Value("${app.weather.fallback-geocoding-base-url:https://geocoding-api.open-meteo.com}")
                     String geocodingBaseUrl,
             @Value("${app.weather.fallback-forecast-base-url:https://api.open-meteo.com}") String forecastBaseUrl,
-            @Value("${app.weather.connect-timeout:3s}") Duration connectTimeout,
-            @Value("${app.weather.read-timeout:3s}") Duration readTimeout) {
+            @Value("${app.weather.connect-timeout:5s}") Duration connectTimeout,
+            @Value("${app.weather.read-timeout:15s}") Duration readTimeout) {
         this(
                 createRestClient(geocodingBaseUrl, connectTimeout, readTimeout),
                 createRestClient(forecastBaseUrl, connectTimeout, readTimeout),

@@ -5,10 +5,10 @@ import java.time.Instant;
 public record WeatherSnapshot(
         String city,
         double temperatureC,
-        double apparentTemperatureC,
-        double precipitationMm,
-        int weatherCode,
-        double windSpeedKmh,
+        Double apparentTemperatureC,
+        Double precipitationMm,
+        Integer weatherCode,
+        Double windSpeedKmh,
         Instant observedAt,
         String source) {
 }

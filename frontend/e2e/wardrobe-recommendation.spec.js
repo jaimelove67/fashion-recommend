@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { formatRecommendationTitle } from '../src/utils/recommendationReason.js'
 
 const password = 'e2e-password-2026'
 const transparentPng = Buffer.from(
@@ -20,8 +21,8 @@ async function expectCurrentAuthCopy(page) {
     await page.getByRole('button', { name: '直接登录', exact: true }).click()
   }
 
-  await expect(heading).toHaveText(/^(欢迎回来|创建你的风格档案)$/)
-  await expect(page.getByText('双鱼登录 · 知己认证', { exact: true })).toBeVisible()
+  await expect(heading).toHaveText(/^(登录知己|创建知己账户)$/)
+  await expect(page.getByText('知己 · 账户服务', { exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: '登录', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: '注册', exact: true })).toBeVisible()
   await expect(page.locator('.fish-auth-submit')).toBeVisible()
@@ -38,16 +39,16 @@ async function registerThroughUi(page, username, onLoginReady) {
   await page.locator('input[name="confirmPassword"]').fill(password)
   await page.getByRole('button', { name: '注册账户', exact: true }).click()
   await expect(page.getByRole('button', { name: '退出登录' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '今天穿什么，从衣橱开始。' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '基于个人衣橱的穿搭推荐。' })).toBeVisible()
 }
 
 test('uses the double-fish login experience', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/')
-  await expect(page.getByRole('button', { name: '轻触双鱼，走近知己', exact: true })).toBeVisible()
-  await expect(page.getByText('双鱼登录 · 知己认证', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '点击图标，进入知己', exact: true })).toBeVisible()
+  await expect(page.getByText('知己 · 账户服务', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '直接登录', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '欢迎回来', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '登录知己', exact: true })).toBeVisible()
 
   const layout = await page.evaluate(() => {
     const view = document.querySelector('.fish-auth')
@@ -103,7 +104,7 @@ test('logs in through the double-fish form and restores the session', async ({ p
   await page.getByRole('button', { name: '登录知己', exact: true }).click()
 
   await expect(page.getByRole('button', { name: '退出登录' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '今天穿什么，从衣橱开始。' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '基于个人衣橱的穿搭推荐。' })).toBeVisible()
   const authenticated = await context.request.get('/api/v1/auth/me')
   await expect(await authenticated.json()).toMatchObject({ code: 0, data: { username } })
 })
@@ -124,13 +125,13 @@ test('routes a restored admin session to the admin workspace', async ({ page }) 
 
   await page.getByRole('button', { name: /模型配置/ }).click()
   await expect(page.getByRole('heading', { name: 'AI 模型配置', exact: true })).toBeVisible()
-  await expect(page.locator('.admin-ai-model-row')).toHaveCount(4)
-  const dailyImageConfig = page.locator('.admin-ai-model-row').filter({ hasText: '每日搭配图生成' })
+  await expect(page.locator('.admin-ai-model-row')).toHaveCount(3)
+  const dailyImageConfig = page.locator('.admin-ai-model-row').filter({ hasText: '穿搭效果图生成' })
   await expect(dailyImageConfig.locator('select option')).toHaveCount(1)
   const keyInputs = await page.locator('.admin-ai-model-row input[type=\"password\"]').evaluateAll((inputs) => (
     inputs.map((input) => ({ type: input.type, value: input.value }))
   ))
-  expect(keyInputs).toHaveLength(4)
+  expect(keyInputs).toHaveLength(3)
   expect(keyInputs.every((input) => input.type === 'password' && input.value === '')).toBe(true)
 
   await page.setViewportSize({ width: 390, height: 844 })
@@ -192,12 +193,12 @@ test('adds a garment, generates an outfit, saves it, and persists feedback', asy
       createdItemIds.push(created.id)
     }
 
-    await page.getByRole('button', { name: '衣橱', exact: true }).click()
+    await page.getByRole('button', { name: '我的衣橱', exact: true }).click()
     await expect(page.getByRole('heading', { name: '我的衣橱' })).toBeVisible()
     await expect(page.getByRole('heading', { name: supportingItems[0].name })).toBeVisible()
     await page.getByRole('button', { name: '添加衣物', exact: true }).click()
 
-    const dialog = page.getByRole('dialog', { name: '添加一件衣物' })
+    const dialog = page.getByRole('dialog', { name: '添加衣物' })
     await expect(dialog).toBeVisible()
     await dialog.getByLabel('衣物名称').fill('E2E 雾蓝牛津纺衬衫')
     await dialog.getByLabel('类别').selectOption('上装')
@@ -216,21 +217,21 @@ test('adds a garment, generates an outfit, saves it, and persists feedback', asy
     createdItemIds.push(createBody.data.id)
     await expect(page.getByRole('heading', { name: 'E2E 雾蓝牛津纺衬衫' })).toBeVisible()
 
-    await page.getByRole('button', { name: '推荐', exact: true }).click()
-    await expect(page.getByRole('heading', { name: '今天还没想好穿什么？' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: '今天的搭配', exact: true })).toBeVisible()
-    await expect(page.locator('.ootd-stack-card')).toHaveCount(5)
+    await page.getByRole('button', { name: '穿搭推荐', exact: true }).click()
+    await expect(page.getByRole('heading', { name: '衣橱已就绪，创建穿搭方案。' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '搭配方案', exact: true })).toBeVisible()
+    await expect(page.locator('.ootd-board-item')).toHaveCount(3)
 
-    await page.getByRole('button', { name: '问问知己', exact: true }).first().click()
+    await page.getByRole('button', { name: '打开知己 AI 助手', exact: true }).click()
     const assistant = page.getByRole('dialog')
     await expect(assistant).toBeVisible()
-    await assistant.getByRole('textbox', { name: '告诉知己你的穿搭需求' }).fill(`杭州 E2E 答辩通勤，正式、简洁、适合室内汇报`)
+    await assistant.getByRole('textbox', { name: '穿搭需求' }).fill(`杭州 E2E 答辩通勤，正式、简洁、适合室内汇报`)
 
     const recommendationResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url())
       return url.pathname === '/api/v1/recommendations' && response.request().method() === 'POST'
     })
-    await assistant.getByRole('button', { name: '发送给知己' }).click()
+    await assistant.getByRole('button', { name: '生成穿搭推荐' }).click()
     const recommendationResponse = await recommendationResponsePromise
     expect(recommendationResponse.ok()).toBeTruthy()
     const recommendationBody = await recommendationResponse.json()
@@ -249,20 +250,20 @@ test('adds a garment, generates an outfit, saves it, and persists feedback', asy
 
     await assistant.getByRole('button', { name: '关闭知己助手' }).click()
     await expect(page.getByText(`搭配 #${recommendationId}`, { exact: true })).toBeVisible()
-    await expect(page.getByText(recommendationBody.data.summary, { exact: true })).toBeVisible()
+    await expect(page.getByText(formatRecommendationTitle(recommendationBody.data), { exact: true })).toBeVisible()
 
     const saveResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url())
       return url.pathname === `/api/v1/me/recommendations/${recommendationId}/save`
         && response.request().method() === 'POST'
     })
-    await page.getByRole('button', { name: '收藏这套搭配' }).click()
+    await page.getByRole('button', { name: '收藏搭配' }).click()
     const saveResponse = await saveResponsePromise
     expect(saveResponse.ok()).toBeTruthy()
     const saveBody = await saveResponse.json()
     expect(saveBody.code).toBe(0)
     expect(saveBody.data.saved).toBe(true)
-    await expect(page.getByRole('button', { name: '已保存' })).toBeDisabled()
+    await expect(page.getByRole('button', { name: '已收藏' })).toBeDisabled()
 
     const feedbackResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url())
@@ -275,8 +276,8 @@ test('adds a garment, generates an outfit, saves it, and persists feedback', asy
     const feedbackBody = await feedbackResponse.json()
     expect(feedbackBody).toMatchObject({ code: 0, data: { id: recommendationId, feedback: { rating: 5 } } })
 
-    await page.getByRole('button', { name: '历史', exact: true }).click()
-    await expect(page.getByRole('heading', { name: '你生成过的每一套搭配' })).toBeVisible()
+    await page.getByRole('button', { name: '搭配记录', exact: true }).click()
+    await expect(page.getByRole('heading', { name: '搭配记录' })).toBeVisible()
     await expect(page.getByText('已评 5 星', { exact: true })).toBeVisible()
 
     const historyResponse = await context.request.get('/api/v1/me/recommendations')
@@ -311,12 +312,12 @@ test('rejects private APIs without authentication and preserves then clears the 
   await page.reload()
 
   await expect(page.getByRole('button', { name: '退出登录' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '今天穿什么，从衣橱开始。' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '基于个人衣橱的穿搭推荐。' })).toBeVisible()
   const authenticated = await context.request.get('/api/v1/auth/me')
   expect(authenticated.ok()).toBeTruthy()
   await expect(await authenticated.json()).toMatchObject({ code: 0, data: { username } })
 
-  await page.getByRole('button', { name: '衣橱', exact: true }).click()
+  await page.getByRole('button', { name: '我的衣橱', exact: true }).click()
   await expect(page.getByRole('heading', { name: '我的衣橱' })).toBeVisible()
   await page.getByRole('button', { name: '退出登录' }).click()
 
@@ -335,11 +336,11 @@ test('uploads an image without AI consent and requires complete manual fields', 
   try {
     await registerThroughUi(page, username)
     writeHeaders = await csrfHeaders(context.request)
-    await page.getByRole('button', { name: '衣橱', exact: true }).click()
+    await page.getByRole('button', { name: '我的衣橱', exact: true }).click()
     await expect(page.getByRole('heading', { name: '我的衣橱' })).toBeVisible()
     await page.getByRole('button', { name: '上传衣物', exact: true }).click()
 
-    const dialog = page.getByRole('dialog', { name: '添加一件衣物' })
+    const dialog = page.getByRole('dialog', { name: '添加衣物' })
     const nameField = dialog.getByLabel('衣物名称')
     const categoryField = dialog.getByLabel('类别')
     const colorField = dialog.getByLabel('颜色')
@@ -349,7 +350,7 @@ test('uploads an image without AI consent and requires complete manual fields', 
       buffer: transparentPng
     })
 
-    const consent = dialog.getByRole('checkbox', { name: '使用 AI 识别照片' })
+    const consent = dialog.getByRole('checkbox', { name: '授权 AI 识别衣物' })
     await expect(consent).not.toBeChecked()
     await expect(nameField).toHaveJSProperty('required', true)
     await expect(categoryField).toHaveJSProperty('required', true)
@@ -405,13 +406,13 @@ test.describe('mobile viewport', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
 
     await page.getByRole('button', { name: '打开页面菜单' }).click()
-    const mobileWardrobeLink = page.getByRole('menuitem', { name: '衣橱', exact: true })
+    const mobileWardrobeLink = page.getByRole('menuitem', { name: '我的衣橱', exact: true })
     await expect(mobileWardrobeLink).toBeVisible()
     await mobileWardrobeLink.click()
     await expect(page.getByRole('heading', { name: '我的衣橱' })).toBeVisible()
     await page.getByRole('button', { name: '上传衣物', exact: true }).click()
 
-    const dialog = page.getByRole('dialog', { name: '添加一件衣物' })
+    const dialog = page.getByRole('dialog', { name: '添加衣物' })
     await expect(dialog).toBeVisible()
     await expect(dialog.getByLabel('衣物照片', { exact: true })).toBeVisible()
     await dialog.getByRole('button', { name: '添加到衣橱' }).scrollIntoViewIfNeeded()

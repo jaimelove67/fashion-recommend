@@ -2,6 +2,7 @@ package com.fashion.recommendation.recommendation;
 
 import com.fashion.recommendation.style.PersonalStyleProfileService;
 import com.fashion.recommendation.style.StyleProfile;
+import com.fashion.recommendation.storage.StoredImageData;
 import com.fashion.recommendation.wardrobe.WardrobeItem;
 import com.fashion.recommendation.wardrobe.WardrobeRepository;
 import java.util.LinkedHashMap;
@@ -36,7 +37,7 @@ public class RecommendationVisualService {
         StyleProfile profile = profileService.current(userId);
         String gender = normalizeGender(profile.gender());
         if (gender == null) {
-            return unavailable(null, null, gender, 0, "请先在个人档案中选择每日模特性别");
+            return unavailable(null, null, gender, 0, "请在个人形象档案中设置模特性别。");
         }
 
         Map<Long, WardrobeItem> currentWardrobe = new LinkedHashMap<>();
@@ -53,10 +54,19 @@ public class RecommendationVisualService {
             return unavailable(null, null, gender, items.size(), "当前搭配中没有足够的已确认衣橱单品");
         }
 
-        OutfitImageGenerationResult result = imageGenerationClient.generate(
-                gender, recommendation.occasion(), recommendation.city(), recommendation.temperatureC(), items);
+        StoredImageData personalPhoto = null;
+        if (profile.usePersonalPhotoForOutfit()) {
+            if (profile.photoObjectKey() == null) {
+                return unavailable(null, null, gender, items.size(), "请上传个人照片，或切换为默认模特。");
+            }
+            personalPhoto = profileService.readOutfitPhoto(userId, profile.photoObjectKey());
+        }
+        OutfitImageGenerationResult result = personalPhoto == null
+                ? imageGenerationClient.generate(gender, recommendation.occasion(), recommendation.city(), recommendation.temperatureC(), items)
+                : imageGenerationClient.generate(gender, recommendation.occasion(), recommendation.city(), recommendation.temperatureC(), items, personalPhoto);
         return new RecommendationVisualResponse(
-                result.status(), result.imageUrl(), result.model(), gender, items.size(), result.message());
+                result.status(), result.imageUrl(), result.model(), gender, items.size(), result.message(),
+                profile.usePersonalPhotoForOutfit() ? "PERSONAL" : "DEFAULT");
     }
 
     private static boolean isUsable(WardrobeItem item) {
@@ -73,6 +83,6 @@ public class RecommendationVisualService {
 
     private static RecommendationVisualResponse unavailable(
             String imageUrl, String model, String gender, int itemCount, String message) {
-        return new RecommendationVisualResponse("UNAVAILABLE", imageUrl, model, gender, itemCount, message);
+        return new RecommendationVisualResponse("UNAVAILABLE", imageUrl, model, gender, itemCount, message, null);
     }
 }

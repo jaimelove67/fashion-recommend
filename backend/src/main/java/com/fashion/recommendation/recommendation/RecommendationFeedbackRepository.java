@@ -25,6 +25,7 @@ public class RecommendationFeedbackRepository {
                         + "FROM recommendation_items ri "
                         + "JOIN recommendation_feedback f ON f.recommendation_id = ri.recommendation_id "
                         + "WHERE f.user_id = ? AND ri.wardrobe_item_id IS NOT NULL "
+                        + "AND (f.feedback_type IS NULL OR f.feedback_type NOT IN ('too_hot', 'too_cold', 'occasion_mismatch')) "
                         + "GROUP BY ri.wardrobe_item_id",
                 rs -> {
                     ratings.put(rs.getLong("item_id"), rs.getDouble("avg_rating"));

@@ -18,18 +18,27 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class TrendService {
-    private static final List<String> SOCIAL_SOURCES = List.of("douyin", "weibo");
-    private static final String EXCLUDED_PLATFORM = "xiaohongshu";
+    private static final List<String> SOCIAL_SOURCES = List.of("douyin", "weibo", "xiaohongshu");
+    private static final String CONFIGURED_DEMO_SOURCE = "configured-demo";
     private static final int SOCIAL_ITEMS_PER_SUPPLEMENTAL = 4;
+    /**
+     * The configured trend demo is intentionally anchored to a capture time.  It must never
+     * rewrite old samples to {@code Instant.now()}, otherwise a presentation fallback would look
+     * like a live platform import and would also create fake interaction growth.
+     */
+    private static final Instant CONFIGURED_DEMO_CAPTURED_AT = Instant.parse("2026-09-28T08:00:00Z");
+    private static final List<TrendItem> CONFIGURED_DEMO_ITEMS = configuredDemoItems();
     private final List<TrendSourceAdapter> sources;
     private final TrendRepository repository;
     private final boolean hotBoardsEnabled;
+    private final boolean configuredDemoEnabled;
 
     @Autowired
     public TrendService(List<TrendSourceAdapter> sources, TrendRepository repository,
             @Value("${app.trends.mainstream-followers:100000}") long mainstreamFollowers,
             @Value("${app.trends.niche-share:0.25}") double nicheShare,
-            @Value("${app.trends.hot-boards-enabled:false}") boolean hotBoardsEnabled) {
+            @Value("${app.trends.hot-boards-enabled:false}") boolean hotBoardsEnabled,
+            @Value("${app.trends.configured-demo-enabled:false}") boolean configuredDemoEnabled) {
         if (mainstreamFollowers < 1) throw new IllegalArgumentException("mainstream followers must be positive");
         if (!Double.isFinite(nicheShare) || nicheShare < 0 || nicheShare > 1)
             throw new IllegalArgumentException("niche share must be between 0 and 1");
@@ -38,24 +47,52 @@ public class TrendService {
         this.mainstreamFollowers = mainstreamFollowers;
         this.nicheShare = nicheShare;
         this.hotBoardsEnabled = hotBoardsEnabled;
+        this.configuredDemoEnabled = configuredDemoEnabled;
+    }
+
+    /** Compatibility overload for tests and embedders that supplied the pre-demo tuning knobs. */
+    public TrendService(List<TrendSourceAdapter> sources, TrendRepository repository,
+            long mainstreamFollowers, double nicheShare, boolean hotBoardsEnabled) {
+        this(sources, repository, mainstreamFollowers, nicheShare, hotBoardsEnabled, false);
     }
 
     public TrendService(List<TrendSourceAdapter> sources, TrendRepository repository) {
-        this(sources, repository, 100_000, 0.25, false);
+        this(sources, repository, 100_000, 0.25, false, false);
+    }
+
+    /** Test/embedding constructor that keeps the two-argument constructor's safe default. */
+    public TrendService(List<TrendSourceAdapter> sources, TrendRepository repository,
+            boolean configuredDemoEnabled) {
+        this(sources, repository, 100_000, 0.25, false, configuredDemoEnabled);
+    }
+
+    private static boolean isImagePost(TrendItem item) {
+        TrendEvidence evidence = item.evidence();
+        String mediaType = evidence == null ? null : evidence.mediaType();
+        if (mediaType != null && !mediaType.isBlank()
+                && !List.of("image", "post", "photo").contains(mediaType.toLowerCase(java.util.Locale.ROOT))) return false;
+        return (item.imageUrl() != null && !item.imageUrl().isBlank())
+                || (evidence != null && evidence.images() != null && evidence.images().stream()
+                        .anyMatch(url -> url != null && !url.isBlank()));
     }
 
     private final long mainstreamFollowers;
     private final double nicheShare;
 
-    @Scheduled(initialDelayString = "${app.trends.initial-delay:10000}", fixedDelayString = "${app.trends.refresh-interval:21600000}")
+    @Scheduled(initialDelayString = "${app.trends.initial-delay:10000}")
+    public void refreshOnStartup() {
+        refresh();
+    }
+
+    @Scheduled(cron = "${app.trends.refresh-cron:0 0 12 * * *}", zone = "Asia/Shanghai")
     public synchronized void refresh() {
         for (TrendSourceAdapter source : sources) {
-            if (EXCLUDED_PLATFORM.equalsIgnoreCase(source.platform())) continue;
+            if ("editorial".equalsIgnoreCase(source.platform())) continue;
             Instant now = Instant.now();
             try {
                 List<TrendItem> items = source.fetchPublicSnapshots();
                 List<TrendItem> visibleItems = items.stream()
-                        .filter(item -> !EXCLUDED_PLATFORM.equalsIgnoreCase(item.platform()))
+                        .filter(TrendService::isImagePost)
                         .filter(item -> !TrendTopics.excludedShowOrCelebrity(item)).toList();
                 for (TrendItem item : visibleItems) repository.save(source.platform(), normalize(item, source.scoreLabel()));
                 if (visibleItems.isEmpty() && SOCIAL_SOURCES.contains(source.platform()) && !source.emptyResultIsHealthy()) {
@@ -90,14 +127,39 @@ public class TrendService {
         List<TrendItem> stored = hotBoardsEnabled
                 ? repository.sinceIncludingHotBoards(cutoff)
                 : repository.since(cutoff);
+        Map<String, Integer> observedCounts = new HashMap<>();
+        Map<String, Integer> eligibleCounts = new HashMap<>();
+        Map<String, List<String>> exclusionReasons = new HashMap<>();
         for (TrendItem item : stored) {
-            if (EXCLUDED_PLATFORM.equalsIgnoreCase(item.platform())) continue;
-            if (TrendTopics.excludedShowOrCelebrity(item)) continue;
-            if (item.publishedAt().isAfter(now) || item.fetchedAt().isAfter(now.plusSeconds(60))) continue;
+            String sourceId = item.platform();
+            observedCounts.merge(sourceId, 1, Integer::sum);
+            if (!isImagePost(item)) {
+                noteExclusion(exclusionReasons, sourceId, "不符合展示规则（仅收录图文帖子，不含视频和纯文字）");
+                continue;
+            }
+            if (TrendTopics.excludedShowOrCelebrity(item)) {
+                noteExclusion(exclusionReasons, sourceId, "不符合展示规则（红毯、秀场或明星内容）");
+                continue;
+            }
+            if (item.publishedAt() == null || item.fetchedAt() == null) {
+                noteExclusion(exclusionReasons, sourceId, "时间字段不完整");
+                continue;
+            }
+            if (item.publishedAt().isAfter(now) || item.fetchedAt().isAfter(now.plusSeconds(60))) {
+                noteExclusion(exclusionReasons, sourceId, "时间字段超出当前时间");
+                continue;
+            }
             TrendEvidence e = item.evidence();
-            if (!hotBoardsEnabled && e != null && "board".equalsIgnoreCase(e.mediaType())) continue;
+            if (!hotBoardsEnabled && e != null && "board".equalsIgnoreCase(e.mediaType())) {
+                noteExclusion(exclusionReasons, sourceId, "不符合展示规则（匿名热榜默认只作为补充）");
+                continue;
+            }
             Long growth = repository.growth(item, cutoff);
-            if (item.publishedAt().isBefore(cutoff) && (growth == null || growth <= 0)) continue;
+            if (item.publishedAt().isBefore(cutoff) && (growth == null || growth <= 0)) {
+                noteExclusion(exclusionReasons, sourceId, "超过当前时间窗口或没有可验证的互动增长");
+                continue;
+            }
+            eligibleCounts.merge(sourceId, 1, Integer::sum);
             int score = item.heatScore();
             String label = e == null ? "来源评分" : e.scoreLabel();
             if (e != null && e.hasCounters()) {
@@ -106,7 +168,7 @@ public class TrendService {
                 score = (int) Math.min(100, Math.round(12 * Math.log1p(engagement) / (1 + hours / 168)));
                 label = "平台内互动评分";
             }
-            boolean stale = item.stale() || item.fetchedAt().isBefore(now.minus(12, ChronoUnit.HOURS));
+            boolean stale = item.stale() || item.fetchedAt().isBefore(now.minus(24, ChronoUnit.HOURS));
             TrendEvidence rankedEvidence = e == null
                     ? (SOCIAL_SOURCES.contains(item.platform())
                             ? new TrendEvidence("", "image", item.imageUrl() == null ? List.of() : List.of(item.imageUrl()),
@@ -121,7 +183,7 @@ public class TrendService {
                     item.publishedAt(), item.fetchedAt(), item.sourceUrl(), stale, item.imageUrl(), item.summary(),
                     rankedEvidence));
         }
-        // Rank within platforms, then prioritize creator posts while retaining a small editorial supplement.
+        // Rank within platforms, then prioritize creator posts and other approved non-publisher sources.
         Map<String, List<TrendItem>> groups = new LinkedHashMap<>();
         for (TrendItem item : scored) groups.computeIfAbsent(item.platform(), ignored -> new ArrayList<>()).add(item);
         groups.values().forEach(items -> items.sort(Comparator
@@ -148,29 +210,141 @@ public class TrendService {
                 ordered.add(socialItems.get(socialIndex++));
             if (supplementalIndex < supplementalLimit) ordered.add(supplementalItems.get(supplementalIndex++));
         }
-        var filtered = ordered.stream()
+        List<TrendItem> filtered = ordered.stream()
                 .filter(i -> platform == null || platform.isBlank() || platform.equals(i.platform()))
                 .filter(i -> topic == null || topic.isBlank() || i.title().contains(topic) || i.topicTags().stream().anyMatch(t -> t.contains(topic)))
                 .limit(50).toList();
         // Only sources the application actually has are reported: a stored id that no longer maps to
         // an adapter (a renamed or removed feed) must not linger in the user-visible source list.
         Map<String, TrendSourceStatus> statusById = new HashMap<>();
-        for (TrendSourceStatus status : repository.statuses()) statusById.put(status.id(), status);
-        List<TrendSourceStatus> statuses = new ArrayList<>();
-        for (TrendSourceAdapter source : sources) {
-            TrendSourceStatus known = statusById.get(source.platform());
-            statuses.add(known == null ? placeholder(source.platform()) : known);
+        List<TrendSourceStatus> storedStatuses = repository.statuses();
+        if (storedStatuses != null) {
+            for (TrendSourceStatus status : storedStatuses) statusById.put(status.id(), status);
         }
-        statuses.sort(Comparator.comparing(TrendSourceStatus::id));
+        List<TrendSourceStatus> statuses = sourceStatuses(statusById, observedCounts, eligibleCounts,
+                exclusionReasons);
+
+        // A configured demo is deliberately a last resort for the unfiltered, all-source view.
+        // A real item that survives the same period rules always wins, and selecting a real source
+        // must never make the local demo look like that platform.
+        if (filtered.isEmpty() && configuredDemoEnabled && isAllSourcesQuery(platform, topic)) {
+            return configuredDemoFeed(period, statuses);
+        }
+
         Instant fetched = filtered.stream().map(TrendItem::fetchedAt).max(Instant::compareTo).orElse(null);
         return new TrendFeed("multi-source", fetched, false, filtered, "来源内评分", period, styles(filtered), statuses,
                 "统计采集范围内最近" + (period.equals("day") ? "24 小时" : "7 天")
-                        + "发布或有已验证互动增长的内容；抖音/微博按粉丝数划分主流与小众博主，小众目标占已分层博主内容 "
+                        + "发布或有已验证互动增长的内容；抖音/微博/小红书按粉丝数划分主流与小众博主，小众目标占已分层博主内容 "
                         + Math.round(nicheShare * 100) + "%，粉丝数缺失或显示精度不足的条目列为未分类补充。"
                         + (hotBoardsEnabled ? "匿名热榜只作为补充来源。" : "匿名热榜默认关闭。")
-                        + "优先展示有图的博主穿搭分享与搭配思路，排除红毯、时装周、秀场和明星时装大片。"
-                        + "博主内容充足时，编辑文章与其他授权来源每 4 条最多补充 1 条；博主内容不足时按现有来源补齐。");
+                        + "仅展示图文穿搭帖子与搭配思路，不收录视频与纯文字，排除杂志、红毯、时装周、秀场和明星时装大片。"
+                        + "其他授权来源每 4 条博主内容最多补充 1 条；博主内容不足时按现有来源补齐。");
     }
+
+    private List<TrendSourceStatus> sourceStatuses(Map<String, TrendSourceStatus> knownById,
+            Map<String, Integer> observedCounts, Map<String, Integer> eligibleCounts,
+            Map<String, List<String>> exclusionReasons) {
+        List<TrendSourceStatus> statuses = new ArrayList<>();
+        for (TrendSourceAdapter source : sources) {
+            if ("editorial".equalsIgnoreCase(source.platform())) continue;
+            String id = source.platform();
+            TrendSourceStatus known = knownById.get(id);
+            int observed = observedCounts.getOrDefault(id, 0);
+            int collected = known == null ? observed : Math.max(known.itemCount(), observed);
+            int eligible = eligibleCounts.getOrDefault(id, 0);
+            List<String> reasons = exclusionReasons.get(id);
+            String exclusionReason = reasons != null && !reasons.isEmpty()
+                    ? mostCommonReason(reasons, collected)
+                    : (eligible == 0 ? mostCommonReason(null, collected) : null);
+
+            if (known == null) {
+                if (collected == 0) {
+                    statuses.add(placeholder(id));
+                } else {
+                    String message = exclusionReason == null ? "采集完成" : exclusionReason;
+                    statuses.add(new TrendSourceStatus(id, null, null,
+                            eligible == 0 ? "stale" : "ready", message, collected, eligible, exclusionReason));
+                }
+                continue;
+            }
+
+            String state = known.state();
+            String message = known.message();
+            if ("ready".equalsIgnoreCase(state) && collected > 0 && eligible == 0) {
+                state = "stale";
+                message = "已采集 " + collected + " 条，但当前时间范围内没有可展示内容";
+            } else if (eligible > 0 && "stale".equalsIgnoreCase(state)) {
+                state = "ready";
+                message = "采集完成，当前窗口可展示 " + eligible + " 条";
+            }
+            statuses.add(new TrendSourceStatus(id, known.lastAttemptAt(), known.lastSuccessAt(),
+                    state, message, collected, eligible, exclusionReason));
+        }
+        statuses.sort(Comparator.comparing(TrendSourceStatus::id));
+        return statuses;
+    }
+
+    private static void noteExclusion(Map<String, List<String>> reasons, String sourceId, String reason) {
+        if (sourceId == null || reason == null) return;
+        reasons.computeIfAbsent(sourceId, ignored -> new ArrayList<>()).add(reason);
+    }
+
+    private static String mostCommonReason(List<String> reasons, int collected) {
+        if (reasons == null || reasons.isEmpty()) {
+            return collected > 0
+                    ? "当前窗口内无可展示内容（可能已超过时间窗口或没有可验证的互动增长）"
+                    : null;
+        }
+        return reasons.stream().collect(java.util.stream.Collectors.groupingBy(
+                        reason -> reason, LinkedHashMap::new, java.util.stream.Collectors.counting()))
+                .entrySet().stream()
+                .max(Map.Entry.<String, Long>comparingByValue().thenComparing(Map.Entry.comparingByKey()))
+                .map(Map.Entry::getKey).orElse(null);
+    }
+
+    private static boolean isAllSourcesQuery(String platform, String topic) {
+        return (platform == null || platform.isBlank()) && (topic == null || topic.isBlank());
+    }
+
+    private TrendFeed configuredDemoFeed(String period, List<TrendSourceStatus> statuses) {
+        // Keep the five fixed samples available in both period views.  The period is still echoed
+        // by TrendFeed and in the notice; unlike real data, the static sample is not re-dated to
+        // the request time merely to satisfy a rolling cutoff.
+        String window = period.equals("day") ? "最近24小时" : "最近7天";
+        return new TrendFeed(CONFIGURED_DEMO_SOURCE, CONFIGURED_DEMO_CAPTURED_AT, true,
+                CONFIGURED_DEMO_ITEMS, "配置演示固定热度", period, styles(CONFIGURED_DEMO_ITEMS), statuses,
+                "当前为配置演示内容，非实时趋势；样本固定捕获于 " + CONFIGURED_DEMO_CAPTURED_AT
+                        + "，不会写入趋势库，也不会计算或伪造互动增长。当前查询范围为" + window + "（演示样本按固定捕获时间展示）。");
+    }
+
+    private static List<TrendItem> configuredDemoItems() {
+        Instant capture = CONFIGURED_DEMO_CAPTURED_AT;
+        return List.of(
+                configuredDemoItem("urban", "城市层次穿搭", List.of("通勤", "叠穿"), 92,
+                        capture.minus(2, ChronoUnit.HOURS), "/assets/look-urban.jpg",
+                        "城市日常层次搭配参考。"),
+                configuredDemoItem("tailoring", "利落通勤剪裁", List.of("通勤", "简约"), 88,
+                        capture.minus(5, ChronoUnit.HOURS), "/assets/look-tailoring.jpg",
+                        "适合工作日的利落轮廓参考。"),
+                configuredDemoItem("color", "低饱和配色", List.of("配色", "日常"), 84,
+                        capture.minus(9, ChronoUnit.HOURS), "/assets/look-color.jpg",
+                        "用克制配色组织日常穿搭。"),
+                configuredDemoItem("commute-flatlay", "通勤衣橱组合", List.of("通勤", "衣橱"), 80,
+                        capture.minus(1, ChronoUnit.DAYS), "/assets/look-commute-flatlay.png",
+                        "通勤单品组合示意。"),
+                configuredDemoItem("everyday-flatlay", "日常轻松搭配", List.of("日常", "轻松"), 76,
+                        capture.minus(2, ChronoUnit.DAYS), "/assets/look-everyday-flatlay.png",
+                        "日常出门的轻松搭配示意。"));
+    }
+
+    private static TrendItem configuredDemoItem(String suffix, String title, List<String> tags,
+            int heatScore, Instant publishedAt, String imageUrl, String summary) {
+        return new TrendItem("configured-demo:" + suffix, CONFIGURED_DEMO_SOURCE, title, tags, heatScore,
+                publishedAt, CONFIGURED_DEMO_CAPTURED_AT, "/", true, imageUrl, summary,
+                new TrendEvidence("配置演示", "image", List.of(imageUrl), null, null, null, null,
+                        "配置演示固定热度", null, null, null, null, imageUrl));
+    }
+
     private static long value(Long value) { return value == null ? 0 : value; }
 
     private static boolean hasVisualShare(TrendItem item) {

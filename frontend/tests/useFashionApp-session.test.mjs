@@ -21,7 +21,7 @@ function deferred() {
   return { promise, resolve }
 }
 
-function createApiMock({ onCsrf, onWardrobeGet, onWardrobePost } = {}) {
+function createApiMock({ onCsrf, onWardrobeGet, onWardrobePost, onFavoriteGet, onFavoritePost } = {}) {
   let identity = null
   let csrfCalls = 0
   const calls = []
@@ -73,6 +73,12 @@ function createApiMock({ onCsrf, onWardrobeGet, onWardrobePost } = {}) {
     if (call.path === '/api/v1/me/style-profile' && method === 'GET') {
       return apiResponse(200, null)
     }
+    if (call.path === '/api/v1/me/try-on-favorites' && method === 'GET') {
+      return onFavoriteGet ? onFavoriteGet(call) : apiResponse(200, [])
+    }
+    if (call.path === '/api/v1/me/try-on-favorites' && method === 'POST') {
+      return onFavoritePost ? onFavoritePost(call) : apiResponse(201, { id: 1, name: '试穿衬衫', category: '上装' })
+    }
     throw new Error(`Unexpected mock request: ${method} ${call.path}`)
   }
 
@@ -93,6 +99,43 @@ function setGarmentForm(app, name) {
     imageUrl: ''
   }
 }
+
+test('a favorite list completing after an account change never restores the previous account items', async t => {
+  const response = deferred(), started = deferred()
+  const api = createApiMock({ onFavoriteGet(call) {
+    if (call.actor === 'alice') { started.resolve(); return response.promise }
+    return apiResponse(200, [{ id: 2, name: 'Bob favorite' }])
+  } })
+  t.mock.method(globalThis, 'fetch', api.fetch)
+  const app = useFashionApp()
+  await login(app, 'alice')
+  const pending = app.loadTryOnFavorites()
+  await started.promise
+  await app.logout(); await login(app, 'bob')
+  await app.loadTryOnFavorites()
+  response.resolve(apiResponse(200, [{ id: 1, name: 'Alice favorite' }]))
+  await pending
+  assert.deepEqual(app.state.tryOnFavorites.map(item => item.name), ['Bob favorite'])
+  assert.equal(app.state.authUser.username, 'bob')
+})
+
+test('an older favorite list cannot overwrite a favorite saved while the list is loading', async t => {
+  const response = deferred(), started = deferred()
+  const api = createApiMock({ onFavoriteGet() { started.resolve(); return response.promise } })
+  t.mock.method(globalThis, 'fetch', api.fetch)
+  const app = useFashionApp()
+  await login(app, 'alice')
+  const pending = app.loadTryOnFavorites()
+  await started.promise
+  await app.saveTryOnFavorite({ name: '试穿衬衫', category: '上装', sourceKind: 'SHOPPING' }, 'data:image/png;base64,aW1hZ2U=')
+  response.resolve(apiResponse(200, []))
+  await pending
+  assert.equal(app.state.tryOnFavorites[0].name, '试穿衬衫')
+  assert.equal(app.state.tryOnFavoritesLoading, false)
+  const write = api.calls.find(call => call.path.endsWith('/try-on-favorites') && call.method === 'POST')
+  assert.equal(write.body.get('expectedUser'), 'alice')
+  assert.equal(write.csrfHeader, 'csrf-alice')
+})
 
 async function login(app, username) {
   assert.equal(await app.login({ username, password: 'mock-password' }), true)

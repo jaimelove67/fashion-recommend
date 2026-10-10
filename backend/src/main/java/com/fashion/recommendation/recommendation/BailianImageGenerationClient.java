@@ -11,6 +11,12 @@ import com.fashion.recommendation.ai.AiModelRuntimeConfig;
 import com.fashion.recommendation.storage.ImageStorage;
 import com.fashion.recommendation.storage.StoredImageData;
 import com.fashion.recommendation.wardrobe.WardrobeItem;
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
@@ -18,6 +24,9 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.MemoryCacheImageInputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,6 +47,9 @@ public class BailianImageGenerationClient {
     private static final String FAILED = "FAILED";
     private static final String CANCELED = "CANCELED";
     private static final int MAX_REFERENCE_IMAGES = 3;
+    private static final int MIN_IMAGE_DIMENSION = 240;
+    private static final int MAX_IMAGE_DIMENSION = 8_000;
+    private static final int MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
@@ -70,7 +82,7 @@ public class BailianImageGenerationClient {
             @Value("${app.bailian.image.prototype-female:classpath:reference_photo/model-female.png}") String prototypeFemale,
             @Value("${app.bailian.image.reference-base-url:}") String referenceBaseUrl,
             @Value("${app.bailian.image.connect-timeout:5s}") Duration connectTimeout,
-            @Value("${app.bailian.image.read-timeout:15s}") Duration readTimeout,
+            @Value("${app.bailian.image.read-timeout:120s}") Duration readTimeout,
             @Value("${app.bailian.image.task-timeout:90s}") Duration taskTimeout,
             @Value("${app.bailian.image.poll-interval:2s}") Duration pollInterval) {
         this(createRestClient(connectTimeout, readTimeout), objectMapper, resourceLoader, imageStorage,
@@ -136,30 +148,39 @@ public class BailianImageGenerationClient {
             String city,
             Double temperatureC,
             List<WardrobeItem> items) {
+        return generate(gender, occasion, city, temperatureC, items, null);
+    }
+
+    public OutfitImageGenerationResult generate(
+            String gender,
+            String occasion,
+            String city,
+            Double temperatureC,
+            List<WardrobeItem> items,
+            StoredImageData personalPhoto) {
         AiModelRuntimeConfig config = runtimeConfig();
         String normalizedGender = normalizeGender(gender);
         if (!isEffectivelyEnabled(config)) {
-            return unavailable("阿里云人物生图未启用");
+            return unavailable("穿搭效果图生成功能尚未启用，请联系管理员。", config.model());
         }
         if (!StringUtils.hasText(config.apiKey())) {
-            return unavailable("尚未配置图像生成 API Key");
+            return unavailable("穿搭效果图生成服务尚未配置，请联系管理员。", config.model());
         }
         if (normalizedGender == null) {
-            return unavailable("个人档案中尚未选择模特性别");
+            return unavailable("请在个人形象档案中设置模特性别。", config.model());
         }
 
         try {
-            String prototype = prototypeDataUri(normalizedGender);
+            String prototype = personalPhoto == null ? prototypeDataUri(normalizedGender) : referenceDataUri(personalPhoto.content());
             if (!StringUtils.hasText(prototype)) {
-                return unavailable("缺少对应性别的模特原型图");
+                return unavailable("当前模特的效果图生成配置不完整，请联系管理员。", config.model());
             }
             String responseBody = restClient.post()
                     .uri(config.endpoint())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .headers(headers -> {
-                        headers.setBearerAuth(config.apiKey().trim());
-                        headers.set("X-DashScope-Async", "enable");
-                    })
+                    // Wan 2.6 image generation returns the image synchronously. Forcing
+                    // DashScope async mode can reject an otherwise valid model/API key.
+                    .headers(headers -> headers.setBearerAuth(config.apiKey().trim()))
                     .body(buildRequest(normalizedGender, occasion, city, temperatureC, items, prototype, config.model()))
                     .retrieve()
                     .body(String.class);
@@ -172,17 +193,17 @@ public class BailianImageGenerationClient {
             }
             String imageUrl = findImageUrl(response);
             return imageUrl == null
-                    ? failed(requestId, providerMessage(response, "阿里云没有返回图片结果"))
-                    : succeeded(imageUrl, requestId);
+                    ? failed(requestId, providerMessage(response, "未获得有效的穿搭效果图，请重新生成。"), config.model())
+                    : succeeded(imageUrl, requestId, config.model());
         } catch (RestClientResponseException exception) {
             log.warn("Bailian image request failed with status {}", exception.getStatusCode().value());
-            return failed(null, providerMessage(exception.getResponseBodyAsString(), "阿里云人物生图请求失败"));
+            return failed(null, providerMessage(exception.getResponseBodyAsString(), "穿搭效果图生成失败，请稍后重试。"), config.model());
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            return failed(null, "阿里云人物生图等待被中断");
+            return failed(null, "穿搭效果图生成已中断，请重新生成。", config.model());
         } catch (Exception exception) {
             log.warn("Bailian image generation failed: {}", exception.getMessage());
-            return failed(null, "阿里云人物生图暂时失败，请稍后重试");
+            return failed(null, "穿搭效果图生成失败，请稍后重试。", config.model());
         }
     }
 
@@ -215,7 +236,8 @@ public class BailianImageGenerationClient {
         referenceDataUris(items).forEach(uri -> content.addObject().put("image", uri));
 
         ObjectNode parameters = request.putObject("parameters");
-        parameters.put("prompt_extend", true);
+        // Keep the explicit background constraint instead of expanding it into a scene.
+        parameters.put("prompt_extend", false);
         parameters.put("watermark", false);
         parameters.put("n", 1);
         parameters.put("enable_interleave", false);
@@ -239,14 +261,14 @@ public class BailianImageGenerationClient {
             String status = text(output, "task_status");
             String imageUrl = findImageUrl(response);
             if (SUCCEEDED.equals(status) && imageUrl != null) {
-                return succeeded(imageUrl, requestId == null ? text(response, "request_id") : requestId);
+                return succeeded(imageUrl, requestId == null ? text(response, "request_id") : requestId, config.model());
             }
             if (FAILED.equals(status) || CANCELED.equals(status)) {
-                return failed(requestId, providerMessage(response, "阿里云人物生图任务未完成"));
+                return failed(requestId, providerMessage(response, "穿搭效果图生成未完成，请稍后重试。"), config.model());
             }
             Thread.sleep(Math.max(100L, pollInterval.toMillis()));
         }
-        return failed(requestId, "阿里云人物生图超时，请稍后重试");
+        return failed(requestId, "穿搭效果图生成超时，请稍后重试。", config.model());
     }
 
     private String prototypeDataUri(String gender) throws IOException {
@@ -256,7 +278,7 @@ public class BailianImageGenerationClient {
             return null;
         }
         try (InputStream input = resource.getInputStream()) {
-            return dataUri(input.readAllBytes(), "image/png");
+            return referenceDataUri(input.readAllBytes());
         }
     }
 
@@ -281,8 +303,8 @@ public class BailianImageGenerationClient {
         if (StringUtils.hasText(item.imageObjectKey())) {
             try {
                 StoredImageData data = imageStorage.read(item.imageObjectKey());
-                return dataUri(data.content(), StringUtils.hasText(data.contentType()) ? data.contentType() : "image/png");
-            } catch (RuntimeException exception) {
+                return referenceDataUri(data.content());
+            } catch (IOException | RuntimeException exception) {
                 log.debug("Unable to read wardrobe reference image {}", item.id(), exception);
                 return null;
             }
@@ -292,7 +314,16 @@ public class BailianImageGenerationClient {
             return null;
         }
         if (imageUrl.startsWith("data:image/")) {
-            return imageUrl;
+            try {
+                int separator = imageUrl.indexOf(',');
+                if (separator < 0 || !imageUrl.substring(0, separator).endsWith(";base64")) {
+                    return null;
+                }
+                return referenceDataUri(Base64.getDecoder().decode(imageUrl.substring(separator + 1)));
+            } catch (IOException | IllegalArgumentException exception) {
+                log.debug("Unable to decode wardrobe reference image {}", item.id());
+                return null;
+            }
         }
         if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
             return imageUrl;
@@ -301,6 +332,55 @@ public class BailianImageGenerationClient {
             return null;
         }
         return joinUrl(referenceBaseUrl, imageUrl);
+    }
+
+    // Wan 2.6 rejects alpha channels and images with either dimension below 240.
+    // Normalize only the provider input; keep the user's stored photo unchanged.
+    private static String referenceDataUri(byte[] content) throws IOException {
+        if (content == null || content.length == 0 || content.length > MAX_IMAGE_BYTES) {
+            throw new IOException("Reference image is empty or exceeds the size limit");
+        }
+        BufferedImage source;
+        try (var input = new MemoryCacheImageInputStream(new ByteArrayInputStream(content))) {
+            var readers = ImageIO.getImageReaders(input);
+            if (!readers.hasNext()) {
+                throw new IOException("Reference image cannot be decoded");
+            }
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(input);
+                int width = reader.getWidth(0);
+                int height = reader.getHeight(0);
+                // Check the header before decoding to avoid allocating an oversized image.
+                if (width < 1 || height < 1 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+                    throw new IOException("Reference image dimensions exceed the limit");
+                }
+                source = reader.read(0);
+            } finally {
+                reader.dispose();
+            }
+        }
+        double scale = Math.max(1.0, (double) MIN_IMAGE_DIMENSION / Math.min(source.getWidth(), source.getHeight()));
+        int width = (int) Math.ceil(source.getWidth() * scale);
+        int height = (int) Math.ceil(source.getHeight() * scale);
+        if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+            throw new IOException("Reference image aspect ratio prevents safe resizing");
+        }
+        BufferedImage rgb = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = rgb.createGraphics();
+        try {
+            graphics.setColor(Color.WHITE);
+            graphics.fillRect(0, 0, width, height);
+            graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            graphics.drawImage(source, 0, 0, width, height, null);
+        } finally {
+            graphics.dispose();
+        }
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        if (!ImageIO.write(rgb, "jpeg", output) || output.size() > MAX_IMAGE_BYTES) {
+            throw new IOException("Reference image cannot be encoded within the size limit");
+        }
+        return dataUri(output.toByteArray(), "image/jpeg");
     }
 
     private String buildPrompt(
@@ -318,9 +398,13 @@ public class BailianImageGenerationClient {
         String temperature = temperatureC == null ? "未提供" : String.format(Locale.ROOT, "%.0f°C", temperatureC);
         return String.format(Locale.ROOT,
                 "请以参考图中的人物作为模特原型，保持其性别、面部特征、体态和全身比例；生成一张%s模特的全身穿搭照片。"
-                        + "场景为%s的%s，天气温度约%s。模特必须只穿着以下已确认的衣橱单品：%s。"
+                        + "第一张图片是人物参考，之后的图片仅是衣物参考。面部与发型以第一张人物参考为准，不得用衣物图片中的人物替换模特。"
+                        + "保持自然的头身比例和统一的写实摄影风格；人物参考未显示的身体部位应自然补全，不要将头像放大或拼接到另一具身体上。"
+                        + "穿搭适用场合为%s，所在城市为%s，天气温度约%s；这些信息只用于穿搭表达，不用于生成环境。模特必须只穿着以下已确认的衣橱单品：%s。"
                         + "不得添加、替换或虚构任何未列出的衣物、鞋履或配饰；保持单品颜色、类别和材质特征。"
-                        + "画面为参考截图同类的干净浅灰背景、正面站立、完整显示头部到鞋子、自然棚拍光线，衣物边界清晰，不能出现文字、水印、商品卡片或拼贴布局。",
+                        + "模特正面站立，完整显示头部到鞋子，人物使用均匀柔和的补光，衣物边界清晰，不能出现文字、水印、商品卡片或拼贴布局。"
+                        + "背景必须为纯色浅灰背景（#F2F2F2），整张背景使用均匀的单一浅色。禁止背景渐变、纹理、图案、明显阴影、地平线、室内陈设、街景、风景或其他物件。"
+                        + "此背景要求优先于参考图和穿搭场合中的场景信息，不得复制参考图的原有背景或环境。",
                 "MALE".equals(gender) ? "男" : "女", safe(occasion, "日常出行"), safe(city, "当前城市"), temperature,
                 itemDescription);
     }
@@ -413,16 +497,16 @@ public class BailianImageGenerationClient {
                 : null;
     }
 
-    private OutfitImageGenerationResult succeeded(String imageUrl, String requestId) {
-        return new OutfitImageGenerationResult(SUCCEEDED, imageUrl, model, requestId, null);
+    private static OutfitImageGenerationResult succeeded(String imageUrl, String requestId, String selectedModel) {
+        return new OutfitImageGenerationResult(SUCCEEDED, imageUrl, selectedModel, requestId, null);
     }
 
-    private OutfitImageGenerationResult failed(String requestId, String message) {
-        return new OutfitImageGenerationResult(FAILED, null, model, requestId, message);
+    private static OutfitImageGenerationResult failed(String requestId, String message, String selectedModel) {
+        return new OutfitImageGenerationResult(FAILED, null, selectedModel, requestId, message);
     }
 
-    private OutfitImageGenerationResult unavailable(String message) {
-        return new OutfitImageGenerationResult("UNAVAILABLE", null, model, null, message);
+    private static OutfitImageGenerationResult unavailable(String message, String selectedModel) {
+        return new OutfitImageGenerationResult("UNAVAILABLE", null, selectedModel, null, message);
     }
 
     private static String normalizeGender(String gender) {

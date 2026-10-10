@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
-import { ArrowRight, ArrowUpRight, Bookmark, Shirt, Sparkles, TrendingUp } from '@lucide/vue'
+import { ArrowRight, ArrowUpRight, Bookmark, Clock3, CloudSun, Shirt, Sparkles, TrendingUp, UserRound } from '@lucide/vue'
+import { trendPlatformName } from '../utils/trendSources.js'
 
 const props = defineProps({
   app: { type: Object, required: true }
@@ -17,6 +18,61 @@ const wardrobeStats = computed(() => props.app.wardrobeStats || {})
 const recommendationStats = computed(() => props.app.recommendationStats || {})
 const heroTrend = computed(() => props.app.topTrend || trends.value[0] || null)
 const trendPreviews = computed(() => trends.value.slice(0, 3))
+const recentRecommendation = computed(() => state.value.history?.[0] || null)
+const weatherSummary = computed(() => {
+  const weather = state.value.weather
+  if (!weather) return state.value.weatherLoading ? '正在获取天气…' : '设置城市以获取天气'
+  const temperature = Number(weather.temperatureC)
+  const temperatureLabel = Number.isFinite(temperature) ? `${temperature.toFixed(0)}°` : ''
+  const condition = typeof props.app.weatherConditionLabel === 'function'
+    ? props.app.weatherConditionLabel(weather.weatherCode)
+    : '今日天气'
+  return [temperatureLabel, condition].filter(Boolean).join(' · ') || '今日天气'
+})
+const homeGuide = computed(() => [
+  {
+    id: 'recommend',
+    view: 'recommend',
+    label: '穿搭推荐',
+    note: wardrobeStats.value.ready ? `${wardrobeStats.value.ready} 件衣物已就绪` : '需上装与下装，或连体装与配套单品',
+    icon: Sparkles,
+    action: '查看推荐'
+  },
+  {
+    id: 'weather',
+    view: 'recommend',
+    label: '今日天气',
+    note: weatherSummary.value,
+    icon: CloudSun,
+    action: '查看推荐'
+  },
+  {
+    id: 'wardrobe',
+    view: 'wardrobe',
+    label: '我的衣橱',
+    note: wardrobeStats.value.total ? `${wardrobeStats.value.total} 件衣物` : '暂无衣物，请添加单品',
+    icon: Shirt,
+    action: '查看衣橱'
+  },
+  {
+    id: 'recent',
+    view: 'history',
+    label: '最近搭配',
+    note: recentRecommendation.value
+      ? [recentRecommendation.value.occasion, recentRecommendation.value.city, `${recentRecommendation.value.items?.length || 0} 件单品`].filter(Boolean).join(' · ')
+      : (recommendationStats.value.total ? `${recommendationStats.value.total} 条记录` : '暂无搭配记录'),
+    icon: Clock3,
+    action: '查看记录'
+  },
+  {
+    id: 'profile',
+    view: 'profile',
+    label: '个人形象档案',
+    note: profile.value ? '档案资料已保存' : '完善资料与个人偏好',
+    icon: UserRound,
+    action: '完善档案'
+  }
+])
 
 const heroFrames = computed(() => {
   const ordered = []
@@ -89,24 +145,24 @@ function goToTrend(item) {
     <section class="editorial-hero" aria-labelledby="home-title">
       <div class="hero-copy">
         <div v-if="trendMeta.demoMode" class="sample-note" role="status">
-          趋势数据使用开发样本
+          演示数据 · 非实时
         </div>
-        <h1 id="home-title">今天穿什么，从衣橱开始。</h1>
+        <h1 id="home-title">基于个人衣橱的穿搭推荐。</h1>
         <p class="hero-lead">
-          记下你的衣物，再填场合和城市。系统会结合天气与风格偏好，从衣橱里挑出几套搭配，并说明选择理由。
+          根据衣橱单品、天气、场合与个人偏好，生成个性化穿搭方案。
         </p>
         <div class="hero-actions">
           <button type="button" class="primary-action" @click="app.selectView('recommend')">
-            <Sparkles :size="18" />生成今日搭配<ArrowRight :size="18" />
+            <Sparkles :size="18" />创建穿搭方案<ArrowRight :size="18" />
           </button>
           <button type="button" class="secondary-action" @click="app.selectView('trend')">
-            看看趋势<TrendingUp :size="18" />
+            浏览穿搭趋势<TrendingUp :size="18" />
           </button>
         </div>
         <div class="hero-context">
-          <span>{{ profile?.displayName ? `${profile.displayName}的风格档案` : '我的风格档案' }}</span>
+          <span>{{ profile?.displayName ? `${profile.displayName}的个人形象档案` : '我的个人形象档案' }}</span>
           <span v-if="heroTrend">当前趋势：{{ heroTrend.title }}</span>
-          <span v-else>趋势数据还没准备好</span>
+          <span v-else>暂无可展示的趋势内容</span>
         </div>
       </div>
 
@@ -124,8 +180,8 @@ function goToTrend(item) {
           />
         </div>
         <figcaption>
-          <span>ZIJI / LOOK NOTES</span>
-          <strong>{{ heroTrend?.title || '先从今天这一套开始' }}</strong>
+          <span>今日参考</span>
+          <strong>{{ heroTrend?.title || '日常穿搭参考' }}</strong>
         </figcaption>
       </figure>
     </section>
@@ -140,16 +196,36 @@ function goToTrend(item) {
         </div>
       </article>
       <p class="rail-source">
-        <span>{{ trendMeta.demoMode ? '开发样本' : '服务端数据' }}</span>
-        最后更新 {{ formatUpdateTime(trendMeta.fetchedAt) }}
+        <span>{{ trendMeta.demoMode ? '演示数据 · 非实时' : '已收录趋势' }}</span>
+        {{ trendMeta.fetchedAt ? `最近更新 ${formatUpdateTime(trendMeta.fetchedAt)}` : '暂无更新时间' }}
       </p>
+    </section>
+
+    <section class="home-guide" aria-labelledby="home-guide-title">
+      <header class="section-heading home-guide-heading">
+        <div>
+          <p>功能入口</p>
+          <h2 id="home-guide-title">个人穿搭管理</h2>
+        </div>
+        <span>{{ profile?.displayName ? `${profile.displayName}的衣橱` : '管理衣橱、搭配与形象资料' }}</span>
+      </header>
+      <div class="home-guide-grid">
+        <button v-for="item in homeGuide" :key="item.id" type="button" class="home-guide-card" @click="app.selectView(item.view || item.id)">
+          <span class="home-guide-icon"><component :is="item.icon" :size="18" aria-hidden="true" /></span>
+          <span class="home-guide-copy">
+            <strong>{{ item.label }}</strong>
+            <small>{{ item.note }}</small>
+          </span>
+          <span class="home-guide-action">{{ item.action }}<ArrowRight :size="15" aria-hidden="true" /></span>
+        </button>
+      </div>
     </section>
 
     <section class="trend-section" aria-labelledby="home-trend-title">
       <header class="section-heading">
         <div>
           <p>趋势速览</p>
-          <h2 id="home-trend-title">先看看最近有哪些趋势</h2>
+          <h2 id="home-trend-title">近期穿搭趋势</h2>
         </div>
         <button type="button" class="section-link" @click="app.selectView('trend')">
           查看全部趋势<ArrowRight :size="17" />
@@ -179,11 +255,11 @@ function goToTrend(item) {
           </span>
           <span class="preview-copy">
             <span class="preview-meta">
-              <span>{{ item.platform || '未标注来源' }}</span>
+              <span>{{ trendPlatformName(item.platform) }}</span>
               <span>{{ item.evidence?.scoreLabel || scoreLabel }} {{ item.platform === 'editorial' ? '' : item.heatScore ?? '—' }}</span>
             </span>
             <strong>{{ item.title }}</strong>
-            <span class="preview-tags">{{ (item.topicTags || []).join(' / ') || '未设置标签' }}</span>
+            <span class="preview-tags">{{ (item.topicTags || []).join(' / ') || '暂无主题标签' }}</span>
             <span class="preview-open">查看详情<ArrowUpRight :size="16" /></span>
           </span>
         </button>
@@ -478,6 +554,92 @@ function goToTrend(item) {
   font-weight: 700;
 }
 
+.home-guide {
+  padding: 64px 0 0;
+}
+
+.home-guide-heading {
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.home-guide-heading > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.home-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.home-guide-card {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 13px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px;
+  color: var(--ink);
+  background: var(--surface);
+  text-align: left;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.home-guide-card:hover,
+.home-guide-card:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-soft);
+  outline: 0;
+  transform: translateY(-2px);
+}
+
+.home-guide-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.home-guide-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.home-guide-copy strong {
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-guide-copy small,
+.home-guide-action {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.home-guide-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.home-guide-card:hover .home-guide-action,
+.home-guide-card:focus-visible .home-guide-action {
+  color: var(--accent-strong);
+}
+
 .trend-section {
   padding: 84px 0 92px;
 }
@@ -667,6 +829,10 @@ function goToTrend(item) {
     justify-content: space-between;
     border-top: 1px solid var(--line);
   }
+
+  .home-guide-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 780px) {
@@ -702,6 +868,10 @@ function goToTrend(item) {
   .rail-source {
     grid-column: auto;
     border-top: 0;
+  }
+
+  .home-guide {
+    padding-top: 52px;
   }
 
   .trend-grid {

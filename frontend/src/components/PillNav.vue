@@ -5,6 +5,7 @@ import { gsap } from 'gsap'
 const props = defineProps({
   logo: { type: String, required: true },
   logoAlt: { type: String, default: 'Logo' },
+  logoExpanded: { type: Boolean, default: false },
   items: { type: Array, default: () => [] },
   activeHref: { type: String, default: undefined },
   className: { type: String, default: '' },
@@ -18,6 +19,7 @@ const props = defineProps({
   initialLoadAnimation: { type: Boolean, default: true }
 })
 
+const emit = defineEmits(['logo-click'])
 const resolvedPillTextColor = computed(() => props.pillTextColor ?? props.baseColor)
 const isMobileMenuOpen = ref(false)
 
@@ -228,22 +230,31 @@ const toggleMobileMenu = () => {
   setMobileMenuOpen(!isMobileMenuOpen.value)
   props.onMobileMenuClick?.()
 }
+
+const handleLogoClick = () => {
+  if (isMobileMenuOpen.value) setMobileMenuOpen(false)
+  emit('logo-click')
+}
 </script>
 
 <template>
   <div :class="['pill-nav-shell', className]" :style="cssVars">
     <nav class="pill-nav" aria-label="页面导航">
-      <component
-        :is="shouldUseButton(items?.[0]) ? 'button' : 'a'"
-        :type="shouldUseButton(items?.[0]) ? 'button' : undefined"
-        :href="!shouldUseButton(items?.[0]) ? items?.[0]?.href || '#' : undefined"
+      <button
+        ref="logoRef"
+        type="button"
         class="pill-nav-logo"
-        aria-label="返回首页"
-        @click="handleItemClick(items?.[0], $event)"
+        :class="{ 'is-active': logoExpanded }"
+        aria-label="打开知己 AI 助手"
+        title="知己 AI 助手"
+        aria-haspopup="dialog"
+        aria-controls="zhiji-assistant"
+        :aria-expanded="logoExpanded"
+        @click="handleLogoClick"
         @mouseenter="handleLogoEnter"
       >
         <img ref="logoImgRef" :src="logo" :alt="logoAlt" />
-      </component>
+      </button>
 
       <div ref="navItemsRef" class="pill-nav-desktop">
         <ul class="pill-nav-list" role="menubar">
@@ -346,6 +357,17 @@ const toggleMobileMenu = () => {
   height: var(--logo-size);
   border-color: var(--line-strong);
   background: var(--surface);
+  cursor: pointer;
+}
+
+.pill-nav-logo:hover,
+.pill-nav-logo.is-active {
+  border-color: var(--gold);
+}
+
+.pill-nav-logo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .pill-nav-logo img {

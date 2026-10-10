@@ -91,7 +91,7 @@ public class ConfiguredJsonTrendSourceAdapter implements TrendSourceAdapter {
                 }
                 items.add(item);
             }
-            if (items.isEmpty() || items.size() > 50) {
+            if ((items.isEmpty() && !Set.of("douyin", "weibo", "xiaohongshu").contains(platform)) || items.size() > 50) {
                 throw new TrendSourceException("趋势源条目数量必须在 1 到 50 之间");
             }
             return List.copyOf(items);
@@ -136,10 +136,14 @@ public class ConfiguredJsonTrendSourceAdapter implements TrendSourceAdapter {
                     images.add(requiredHttpUrl(holder, "url"));
                 }
             }
+            String fullBodyImageUrl = detail.has("fullBodyImageUrl")
+                    ? optionalHttpUrl(detail, "fullBodyImageUrl") : null;
+            if (fullBodyImageUrl != null && !fullBodyImageUrl.equals(imageUrl) && !images.contains(fullBodyImageUrl))
+                throw new TrendSourceException("全身穿搭照必须来自条目图片列表");
             evidence = new TrendEvidence(optionalText(detail, "author", 120), optionalText(detail, "mediaType", 20), images,
                     counter(detail, "likes"), counter(detail, "favorites"), counter(detail, "comments"), counter(detail, "reposts"),
                     "来源内评分", null, counter(detail, "authorFollowers"),
-                    optionalText(detail, "authorFollowersLabel", 40), null);
+                    optionalText(detail, "authorFollowersLabel", 40), null, fullBodyImageUrl);
         }
         return new TrendItem(id, itemPlatform, title, tags, heatScore, publishedAt, observedAt,
                 sourceUrl, false, imageUrl, optionalText(node, "summary", 600), evidence);

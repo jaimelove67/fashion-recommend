@@ -1,19 +1,30 @@
 <script setup>
 import { computed, ref } from 'vue'
+import { trendImageCandidates, trendDisplayImageUrl } from '../utils/trendImage.js'
 import { ArrowUpRight, RefreshCw, Shirt, ImageOff } from '@lucide/vue'
-const props = defineProps({ app: { type: Object, required: true }, controlsOnly: Boolean })
+import {
+  externalTrendSourceUrl,
+  isConfiguredDemoTrend,
+  shouldShowStaleTrend,
+  trendPlatformName,
+  trendSourceCounts,
+  trendSourceExclusionReason,
+  trendSourceMessage
+} from '../utils/trendSources.js'
+const props = defineProps({ app: { type: Object, required: true }, controlsOnly: Boolean, postsOnly: Boolean, limit: { type: Number, default: 3 } })
 const emit = defineEmits(['filter-style'])
 const state = computed(() => props.app.state)
+const demoMode = computed(() => Boolean(state.value.trendMeta?.demoMode))
 const tag = ref('')
 const broken = ref(new Set())
-const names = { douyin: '抖音', weibo: '微博', editorial: '时尚编辑', 'configured-feed': '配置来源', 'web-scrape': '公开网页' }
-const creatorTierNames = { mainstream: '主流博主', niche: '小众博主', unclassified: '粉丝量未标注' }
-const states = { ready: '已连接', unavailable: '采集失败', unconfigured: '未接通', pending: '等待采集' }
+const names = { douyin: '抖音', weibo: '微博', xiaohongshu: '小红书', editorial: '时尚编辑', 'configured-demo': '穿搭参考', 'configured-feed': '已连接数据源', 'web-scrape': '公开网页' }
+const creatorTierNames = { mainstream: '主流博主', niche: '小众博主', unclassified: '粉丝数量未提供' }
+const states = { ready: '已连接', unavailable: '采集失败', unconfigured: '未配置', pending: '等待采集' }
 const matches = item => (item.topicTags || []).filter(t => (state.value.profile?.stylePreferences || []).some(p => p.includes(t) || t.includes(p)))
-const items = computed(() => [...state.value.trends.filter(i => !tag.value || i.topicTags?.includes(tag.value))].sort((a, b) => matches(b).length - matches(a).length).slice(0, 3))
+const items = computed(() => [...state.value.trends.filter(i => !tag.value || i.topicTags?.includes(tag.value))].sort((a, b) => matches(b).length - matches(a).length).slice(0, props.limit || undefined))
 const date = v => v ? new Date(v).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '尚未更新'
 function selectTag(value) { tag.value = tag.value === value ? '' : value; emit('filter-style', tag.value || '全部') }
-function formatFollowers(value) { return `${Number(value).toLocaleString('zh-CN')} 粉` }
+function formatFollowers(value) { return `${Number(value).toLocaleString('zh-CN')} 位粉丝` }
 function formatFollowerEvidence(evidence) {
   if (evidence?.authorFollowersLabel) return `粉丝约 ${evidence.authorFollowersLabel}`
   return evidence?.authorFollowers != null ? formatFollowers(evidence.authorFollowers) : ''
@@ -21,6 +32,14 @@ function formatFollowerEvidence(evidence) {
 function isOutfitReviewVideo(item) {
   return item.evidence?.mediaType === 'video'
     && /(测评|评测|评价|点评|试穿|横评|对比|上身|review|try[\s-]?on)/i.test(`${item.title || ''} ${item.summary || ''} ${(item.topicTags || []).join(' ')}`)
+}
+function imageFor(item) {
+  return trendImageCandidates(item.imageUrl).map(trendDisplayImageUrl).find(url => !broken.value.has(url)) || ''
+}
+function imageUnavailableLabel(item) {
+  if (item.imageUrl) return externalTrendSourceUrl(item) ? '图片加载失败，可查看原文' : '图片加载失败'
+  if (item.evidence?.mediaType === 'board') return '当前来源仅提供榜单话题，未提供配图'
+  return isConfiguredDemoTrend(item) ? '穿搭参考未提供配图' : '来源未提供配图，请查看来源内容'
 }
 async function filter(key, value) {
   state.value[key] = value
@@ -34,44 +53,51 @@ async function filter(key, value) {
 </script>
 <template>
   <section class="trend-discovery" :class="{ 'controls-only': controlsOnly }" aria-label="热门穿搭与流行风格">
-    <header v-if="!controlsOnly" class="discovery-heading">
-      <div><h2>{{ controlsOnly ? '发现最近的穿搭方向' : '把流行，穿成自己的风格' }}</h2><p v-if="!controlsOnly">先看真实来源，再从你的衣橱里找灵感。</p></div>
+    <header v-if="!controlsOnly && !postsOnly" class="discovery-heading">
+      <div><h2>{{ controlsOnly ? '趋势筛选' : '穿搭内容精选' }}</h2><p v-if="!controlsOnly">浏览已收录内容，按时间、来源与风格筛选。</p></div>
       <button type="button" class="text-action" :disabled="state.trendsLoading" @click="app.loadTrends()"><RefreshCw :size="16" />重新加载</button>
     </header>
-    <div class="discovery-filters">
+    <div v-if="!postsOnly" class="discovery-filters">
       <div class="period-switch" role="group" aria-label="趋势时间范围">
-        <button v-for="option in [{ value: 'day', label: '近 24 小时' }, { value: 'week', label: '近 7 天' }]" :key="option.value" type="button" :aria-pressed="state.trendPeriod === option.value" @click="filter('trendPeriod', option.value)">{{ option.label }}</button>
+        <button type="button" aria-pressed="true" @click="filter('trendPeriod', 'day')">近 24 小时</button>
       </div>
-      <label>内容来源<select :value="state.trendPlatform" @change="filter('trendPlatform', $event.target.value)"><option value="">全部来源</option><option value="douyin">抖音</option><option value="weibo">微博</option><option value="editorial">时尚编辑精选</option></select></label>
-      <span class="updated">更新于 {{ date(state.trendMeta.fetchedAt) }}</span>
+      <label>内容来源<select :value="state.trendPlatform" :disabled="demoMode" @change="filter('trendPlatform', $event.target.value)"><option value="">全部来源</option><option value="douyin">抖音</option><option value="weibo">微博</option><option value="xiaohongshu">小红书</option></select></label>
+      <span class="updated">每日 12:00 更新（北京时间）<template v-if="!demoMode && state.trendMeta.fetchedAt"> · 最近采集 {{ date(state.trendMeta.fetchedAt) }}</template><template v-else-if="demoMode"> · 穿搭参考</template></span>
       <button v-if="controlsOnly" type="button" class="text-action control-refresh" :disabled="state.trendsLoading" @click="app.loadTrends()"><RefreshCw :size="16" />重新加载</button>
     </div>
     <div v-if="!controlsOnly && state.trendStyles?.length" class="style-strip" aria-label="当前内容中的流行风格">
       <button v-for="style in state.trendStyles" :key="style.name" type="button" :aria-pressed="tag === style.name" @click="selectTag(style.name)"><strong>{{ style.name }}</strong><span>{{ style.contentCount }} 篇提及</span></button>
     </div>
     <p v-if="!controlsOnly && state.trendError" class="discovery-message" role="alert">{{ state.trendError }}<button type="button" @click="app.loadTrends()">重试</button></p>
-    <p v-else-if="!controlsOnly && state.trendsLoading" class="discovery-message" role="status">正在读取趋势内容…</p>
-    <div v-else-if="!controlsOnly && !state.trends.length" class="discovery-empty" role="status"><h3>这个范围还没有可用的穿搭内容</h3><p>试试近 7 天或其他来源。平台连接状态可在下方查看。</p></div>
+    <p v-else-if="!controlsOnly && state.trendsLoading" class="discovery-message" role="status">正在加载穿搭趋势…</p>
+    <div v-else-if="!controlsOnly && !state.trends.length" class="discovery-empty" role="status"><h3>当前筛选范围暂无穿搭内容</h3><p>可更换来源或稍后重新加载，并在下方查看数据源状态。</p></div>
     <div v-if="!controlsOnly && !state.trendsLoading && !state.trendError" class="discovery-looks">
       <article v-for="item in items" :key="item.id" class="discovery-look">
-        <a class="look-picture" :href="item.sourceUrl" target="_blank" rel="noopener noreferrer" :aria-label="`在来源平台查看：${item.title}`">
-          <img v-if="item.imageUrl && !broken.has(item.imageUrl)" :src="item.imageUrl" :alt="item.title" loading="lazy" referrerpolicy="no-referrer" @error="broken = new Set([...broken, item.imageUrl])" />
-          <span v-else class="image-unavailable"><ImageOff :size="26" />{{ item.imageUrl ? '图片加载失败，前往来源' : item.evidence?.mediaType === 'board' ? '该来源只提供榜单词，无配图' : '来源未提供配图，请查看来源内容' }}</span><span class="source-mark">{{ names[item.platform] || item.platform }}</span>
-        </a>
+        <component
+          :is="externalTrendSourceUrl(item) ? 'a' : 'div'"
+          class="look-picture"
+          :href="externalTrendSourceUrl(item) || undefined"
+          :target="externalTrendSourceUrl(item) ? '_blank' : undefined"
+          :rel="externalTrendSourceUrl(item) ? 'noopener noreferrer' : undefined"
+          :aria-label="externalTrendSourceUrl(item) ? `在来源平台查看：${item.title}` : undefined"
+        >
+          <img v-if="imageFor(item)" :src="imageFor(item)" :alt="item.title" loading="lazy" referrerpolicy="no-referrer" @error="broken = new Set([...broken, imageFor(item)])" />
+          <span v-else class="image-unavailable"><ImageOff :size="26" />{{ imageUnavailableLabel(item) }}</span><span class="source-mark">{{ names[item.platform] || item.platform }}</span>
+        </component>
         <div class="look-details">
           <p class="look-meta">{{ item.evidence?.author || names[item.platform] || item.platform }} · {{ date(item.publishedAt) }}</p><h3>{{ item.title }}</h3><p class="look-tags">{{ (item.topicTags || []).join(' / ') }}</p>
           <p v-if="item.evidence?.creatorTier || item.evidence?.authorFollowers != null || item.evidence?.authorFollowersLabel || isOutfitReviewVideo(item)" class="look-badges"><span v-if="item.evidence?.creatorTier">{{ creatorTierNames[item.evidence.creatorTier] || item.evidence.creatorTier }}</span><span v-if="formatFollowerEvidence(item.evidence)">{{ formatFollowerEvidence(item.evidence) }}</span><span v-if="isOutfitReviewVideo(item)">穿搭测评视频</span></p>
           <p v-if="matches(item).length" class="match-reason">与你偏好的 {{ matches(item).join('、') }} 相关</p>
-          <p v-if="item.stale" class="look-meta">上次收录于 {{ date(item.fetchedAt) }}，等待更新</p>
+          <p v-if="shouldShowStaleTrend(item)" class="look-meta">上次收录于 {{ date(item.fetchedAt) }}，等待更新</p>
           <p class="look-meta">{{ item.evidence?.scoreLabel || '来源内评分' }}<template v-if="item.platform !== 'editorial'"> {{ item.heatScore }}</template></p>
-          <div class="look-actions"><button type="button" @click="app.useTrend(item)"><Shirt :size="16" />用我的衣橱搭一套</button><a :href="item.sourceUrl" target="_blank" rel="noopener noreferrer" aria-label="在来源平台查看"><ArrowUpRight :size="20" /></a></div>
+          <div class="look-actions"><button type="button" @click="app.useTrend(item)"><Shirt :size="16" />参考风格生成搭配</button><a v-if="externalTrendSourceUrl(item)" :href="externalTrendSourceUrl(item)" target="_blank" rel="noopener noreferrer" aria-label="在来源平台查看"><ArrowUpRight :size="20" /></a></div>
         </div>
       </article>
     </div>
-    <button v-if="!controlsOnly && state.trends.length" class="text-action more-trends" type="button" @click="app.selectView('trend')">查看全部 {{ state.trends.length }} 条内容 <ArrowUpRight :size="16" /></button>
-    <details v-if="!controlsOnly" class="source-details"><summary>来源与统计说明</summary><p>{{ state.trendMeta.notice }}</p>
-      <ul><li v-for="source in state.trendMeta.sources || []" :key="source.id"><strong>{{ names[source.id] || source.id }}</strong><span>{{ states[source.state] || '状态未知' }} · {{ source.message }}</span><span v-if="source.itemCount">收录 {{ source.itemCount }} 篇</span><time v-if="source.lastSuccessAt">最后成功 {{ date(source.lastSuccessAt) }}</time></li></ul>
-      <button v-if="app.isAdmin" class="text-action" type="button" :disabled="state.trendsLoading" @click="app.refreshTrendSources()">更新已连接来源</button>
+    <button v-if="!controlsOnly && !postsOnly && state.trends.length" class="text-action more-trends" type="button" @click="app.selectView('trend')">查看全部 {{ state.trends.length }} 条内容 <ArrowUpRight :size="16" /></button>
+    <details v-if="!controlsOnly && !postsOnly" class="source-details"><summary>来源与统计说明</summary><p>{{ state.trendMeta.notice }}</p>
+      <ul><li v-for="source in state.trendMeta.sources || []" :key="source.id"><strong>{{ trendPlatformName(source.id) }}</strong><span>{{ trendSourceMessage(source) }}</span><span v-if="trendSourceCounts(source)">{{ trendSourceCounts(source) }}</span><span v-if="trendSourceExclusionReason(source)">原因：{{ trendSourceExclusionReason(source) }}</span><time v-if="source.lastSuccessAt">最近成功更新 {{ date(source.lastSuccessAt) }}</time></li></ul>
+      <button v-if="app.isAdmin" class="text-action" type="button" :disabled="state.trendsLoading" @click="app.refreshTrendSources()">刷新已连接数据源</button>
     </details>
   </section>
 </template>

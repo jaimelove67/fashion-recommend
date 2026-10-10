@@ -211,6 +211,7 @@
     var published = parseDisplayDate(fields.publishedText, observed);
     if (!published) throw new Error('发布日期无法确定，请手工填写');
     var images = (fields.images || []).map(canonicalImage).filter(Boolean).slice(0, MAX_IMAGES);
+    var reviewedImage = canonicalImage(fields.fullBodyImageUrl);
     var row = {
       title: clean(fields.title).slice(0, 200),
       desc: clean(fields.content).slice(0, 600),
@@ -218,6 +219,8 @@
       last_modify_ts: Math.floor((observed instanceof Date ? observed : new Date()).getTime() / 1000),
       image_list: images,
       cover_url: images[0] || '',
+      full_body_image_url: fields.fullBodyImageVerified === true && images.includes(reviewedImage) ? reviewedImage : '',
+      full_body_image_verified: fields.fullBodyImageVerified === true && images.includes(reviewedImage),
       nickname: clean(fields.author).slice(0, 60),
       liked_count: normalizeCounter(fields.likes),
       collected_count: normalizeCounter(fields.favorites),
@@ -396,6 +399,7 @@
     var root = host.attachShadow({ mode: 'open' });
     var existing = readStore(storeKey).length;
     var record = draft || {};
+    var imageCandidates = (raw.images || []).map(canonicalImage).filter(Boolean).slice(0, MAX_IMAGES);
     var fields = [
       ['title', '标题', 'text'],
       ['content', '正文摘要', 'textarea'],
@@ -434,8 +438,9 @@
       '.panel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(560px,92vw);max-height:88vh;overflow:auto;background:#fff;color:#1f1f1f;border-radius:14px;padding:20px}',
       'h2{font-size:16px;margin:0 0 4px;font-weight:600}.sub{font-size:12px;color:#666;margin:0 0 14px}',
       '.msg{font-size:12px;background:#FAEEDA;color:#633806;border-radius:8px;padding:8px 10px;margin:0 0 12px}',
-      'label{display:block;margin:0 0 10px}label>span{display:block;font-size:12px;color:#333;margin:0 0 4px}',
+      'label,.image-picker{display:block;margin:0 0 10px}label>span,.image-picker>span{display:block;font-size:12px;color:#333;margin:0 0 4px}',
       'input,textarea{width:100%;font-size:13px;padding:7px 9px;border:1px solid #ccc;border-radius:8px;background:#fff;color:#1f1f1f;font-family:inherit}',
+      '.image-choices{display:flex;gap:10px;overflow-x:auto;padding:4px 0 10px}.image-choice{flex:0 0 112px;cursor:pointer}.image-choice input{width:auto}.image-choice img{display:block;width:100%;height:142px;object-fit:contain;background:#f4f4f4;border-radius:6px}.verify{display:flex;align-items:flex-start;gap:8px;font-size:12px}.verify input{width:auto;margin-top:3px}',
       'em{display:block;font-size:11px;color:#888;font-style:normal;margin:3px 0 0}',
       '.meta{font-size:11px;color:#777;word-break:break-all;margin:0 0 12px}',
       '.bar{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}',
@@ -448,6 +453,8 @@
       '<p class="sub">已采集 ' + existing + ' 条。下面的值是从当前页面猜出来的，请核对后再保存。</p>',
       message ? '<p class="msg">' + message + '</p>' : '',
       rows,
+      '<div class="image-picker"><span>画廊全身穿搭照（可不选）</span><div class="image-choices" data-image-choices></div><em>请选择从头到脚完整入镜、能看清整套搭配的真人照片；杂志、画报、秀场、半身照及单品图不能选。</em></div>',
+      '<label class="verify"><input type="checkbox" data-full-body-verified /><span>我已查看所选图片，并确认它符合全身穿搭照要求</span></label>',
       '<p class="meta">内容 ID：' + (raw.id || '未识别') + '<br>原文链接：' + api.canonicalUrl(raw.sourceUrl) + '<br>图片 ' + (raw.images || []).length + ' 张</p>',
       '<div class="bar"><button data-act="cancel">取消</button><button class="go" data-act="save">保存这条</button></div>',
       '</div>'
@@ -456,6 +463,21 @@
     Object.keys(values).forEach(function (key) {
       var control = root.querySelector('[data-k="' + key + '"]');
       if (control) control.value = values[key];
+    });
+    var choices = root.querySelector('[data-image-choices]');
+    imageCandidates.forEach(function (url, index) {
+      var label = document.createElement('label');
+      label.className = 'image-choice';
+      var input = document.createElement('input');
+      input.type = 'radio';
+      input.name = 'full-body-image';
+      input.value = url;
+      var image = document.createElement('img');
+      image.src = url;
+      image.alt = '候选图片 ' + (index + 1);
+      label.appendChild(input);
+      label.appendChild(image);
+      choices.appendChild(label);
     });
     root.querySelector('[data-act="cancel"]').addEventListener('click', function () { host.remove(); });
     root.querySelector('[data-act="save"]').addEventListener('click', function () {
@@ -468,6 +490,8 @@
       try {
         row = api.buildRecord(entry.platform, {
           id: raw.id, sourceUrl: raw.sourceUrl, images: raw.images,
+          fullBodyImageUrl: root.querySelector('input[name="full-body-image"]:checked')?.value || '',
+          fullBodyImageVerified: root.querySelector('[data-full-body-verified]').checked,
           title: edited.title, content: edited.content, author: edited.author,
           publishedText: edited.publishedText, likes: edited.likes,
           favorites: edited.favorites, comments: edited.comments, reposts: edited.reposts

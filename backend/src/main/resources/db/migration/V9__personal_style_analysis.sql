@@ -1,0 +1,12 @@
+ALTER TABLE style_profiles ADD COLUMN height_cm DECIMAL(5, 1);
+ALTER TABLE style_profiles ADD COLUMN weight_kg DECIMAL(5, 1);
+ALTER TABLE style_profiles ADD COLUMN photo_object_key VARCHAR(300);
+ALTER TABLE style_profiles ADD COLUMN personal_analysis TEXT;
+ALTER TABLE style_profiles ADD COLUMN analysis_source VARCHAR(16);
+ALTER TABLE style_profiles ADD COLUMN analysis_model_name VARCHAR(160);
+ALTER TABLE style_profiles ADD COLUMN analysis_updated_at TIMESTAMP;
+ALTER TABLE style_profiles ADD COLUMN analysis_stale BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE style_profiles ADD COLUMN profile_revision BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE style_profiles ADD CONSTRAINT chk_profile_height CHECK (height_cm IS NULL OR height_cm BETWEEN 80 AND 250);
+ALTER TABLE style_profiles ADD CONSTRAINT chk_profile_weight CHECK (weight_kg IS NULL OR weight_kg BETWEEN 20 AND 300);
+ALTER TABLE style_profiles ADD CONSTRAINT chk_analysis_source CHECK (analysis_source IS NULL OR analysis_source IN ('MODEL', 'MANUAL'));

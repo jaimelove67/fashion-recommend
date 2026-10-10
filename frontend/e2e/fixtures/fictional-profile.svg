@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="768" height="1024" viewBox="0 0 768 1024" aria-label="Program-drawn fictional avatar for integration testing">
+  <rect width="768" height="1024" fill="#e9eee9"/>
+  <text x="384" y="42" text-anchor="middle" fill="#31504b" font-size="24" font-family="sans-serif">FICTIONAL TEST AVATAR</text>
+  <ellipse cx="384" cy="974" rx="136" ry="19" fill="#d1dbd4"/>
+  <path d="M302 160 Q305 80 385 80 Q464 83 468 160 L478 259 Q385 287 290 259Z" fill="#302b32"/>
+  <ellipse cx="384" cy="180" rx="76" ry="98" fill="#f0cdb0" stroke="#b99881" stroke-width="3"/>
+  <path d="M309 164 Q315 88 385 87 Q448 91 459 145 Q402 130 363 113 Q345 146 309 164Z" fill="#302b32"/>
+  <path d="M337 167 Q352 157 367 167 M402 167 Q417 157 432 167" stroke="#493b38" stroke-width="5" fill="none"/>
+  <ellipse cx="352" cy="181" rx="8" ry="10" fill="#342f34"/>
+  <ellipse cx="417" cy="181" rx="8" ry="10" fill="#342f34"/>
+  <path d="M383 188 L375 212 L389 212" stroke="#b48774" stroke-width="3" fill="none"/>
+  <path d="M362 231 Q383 242 405 231" stroke="#a66863" stroke-width="4" fill="none"/>
+  <path d="M359 264 L359 308 L409 308 L409 264" fill="#f0cdb0"/>
+  <path d="M306 318 Q278 327 267 376 L230 622 Q228 650 245 652 Q263 653 269 627 L313 429 M462 318 Q490 327 501 376 L537 622 Q540 649 523 652 Q505 653 500 627 L455 429" fill="#f0cdb0" stroke="#b99881" stroke-width="3"/>
+  <path d="M306 315 L352 296 Q384 343 415 296 L462 315 L445 566 L323 566Z" fill="#faf9f4" stroke="#a4afa8" stroke-width="3"/>
+  <path d="M323 566 L445 566 L459 695 L414 935 L387 935 L384 698 L379 935 L349 935 L309 695Z" fill="#555d67" stroke="#39444d" stroke-width="3"/>
+  <path d="M349 932 L379 932 L379 964 L331 964 Q326 949 349 932 M387 932 L414 932 Q437 949 433 964 L387 964Z" fill="#f0cdb0" stroke="#b99881" stroke-width="3"/>
+</svg>

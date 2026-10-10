@@ -15,6 +15,8 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -352,6 +354,37 @@ class AdminControllerTest {
         org.junit.jupiter.api.Assertions.assertTrue(stillEnabled);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"ROLE_USER", "ROLE_ADMIN"})
+    void disablingAnAccountRevokesItsExistingSession(String authority) throws Exception {
+        String admin = createUser("adm", true, "ROLE_ADMIN");
+        String member = createUser("member", true, authority);
+        var login = mockMvc.perform(post("/api/v1/auth/login").with(csrf())
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("username", member).param("password", PASSWORD))
+                .andExpect(status().isOk()).andReturn();
+        var session = (MockHttpSession) login.getRequest().getSession(false);
+        mockMvc.perform(get("/api/v1/auth/me").session(session)).andExpect(status().isOk());
+        mockMvc.perform(put("/api/v1/admin/users/{username}/status", member)
+                        .with(user(admin).roles("ADMIN")).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
+                .andExpect(status().isOk());
+        try {
+            String protectedPath = "ROLE_ADMIN".equals(authority) ? "/api/v1/admin/overview" : "/api/v1/me/wardrobe";
+            mockMvc.perform(get(protectedPath).session(session))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value(401));
+            assertTrue(session.isInvalid());
+        } finally {
+            jdbcTemplate.update("UPDATE app_users SET enabled = TRUE WHERE username = ?", member);
+        }
+        mockMvc.perform(get("/api/v1/me/wardrobe")).andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/auth/login").with(csrf())
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("username", member).param("password", PASSWORD))
+                .andExpect(status().isOk());
+    }
+
     @Test
     void returnsNotFoundForUnknownAccount() throws Exception {
         String admin = createUser("adm", true, "ROLE_ADMIN");
@@ -470,11 +503,11 @@ class AdminControllerTest {
                 trendId,
                 "weibo",
                 "test-source",
-                "{\"id\":\"" + trendId + "\",\"platform\":\"weibo\",\"title\":\"后台审核测试\","
+                "{\"id\":\"" + trendId + "\",\"platform\":\"weibo\",\"title\":\"白衬衫通勤穿搭\","
                         + "\"topicTags\":[\"通勤\"],\"heatScore\":72,\"publishedAt\":\""
                         + fetchedAt.toString() + "\",\"fetchedAt\":\"" + fetchedAt.toString()
                         + "\",\"sourceUrl\":\"https://example.com/trend\",\"stale\":false,"
-                        + "\"imageUrl\":null,\"summary\":\"摘要\",\"evidence\":null}",
+                        + "\"imageUrl\":\"https://example.com/outfit.jpg\",\"summary\":\"摘要\",\"evidence\":null}",
                 Timestamp.from(fetchedAt),
                 Timestamp.from(fetchedAt));
 

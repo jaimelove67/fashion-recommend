@@ -26,10 +26,10 @@ const props = defineProps({
 
 const sections = [
   { id: 'overview', label: '运营总览', description: '平台数据', icon: Activity },
-  { id: 'users', label: '账号与权限', description: '状态治理', icon: UsersRound },
-  { id: 'feedback', label: '反馈审核', description: '处理用户声音', icon: MessageSquareText },
+  { id: 'users', label: '账号与权限', description: '账户状态管理', icon: UsersRound },
+  { id: 'feedback', label: '反馈审核', description: '用户反馈处理', icon: MessageSquareText },
   { id: 'aiModels', label: '模型配置', description: 'AI 能力与密钥', icon: Settings2 },
-  { id: 'audit', label: '操作日志', description: '追踪管理动作', icon: FileClock }
+  { id: 'audit', label: '操作日志', description: '管理操作审计', icon: FileClock }
 ]
 
 const feedbackStatuses = [
@@ -126,10 +126,10 @@ const accountTicks = computed(() => {
 
 const accountHeadline = computed(() => {
   const total = countValue(overview.value?.totalUsers)
-  if (!total) return '还没有账号数据'
-  if (accountEnabledPercent.value >= 90) return '可用账号保持稳定'
-  if (accountEnabledPercent.value >= 60) return '大多数账号仍可使用'
-  return '停用账号需要关注'
+  if (!total) return '暂无账户数据'
+  if (accountEnabledPercent.value >= 90) return '账户启用比例较高'
+  if (accountEnabledPercent.value >= 60) return '多数账户处于启用状态'
+  return '账户停用比例较高'
 })
 
 const runtimeBars = computed(() => {
@@ -137,7 +137,7 @@ const runtimeBars = computed(() => {
   const llm = countValue(overview.value?.llmRecommendations)
   const fallback = countValue(overview.value?.fallbackRecommendations)
   return [
-    { label: '实际 LLM', value: llm, color: monoInk },
+    { label: '模型推荐', value: llm, color: monoInk },
     { label: '规则降级', value: fallback, color: monoMid },
     { label: '未标记', value: Math.max(total - llm - fallback, 0), color: monoMuted }
   ]
@@ -145,12 +145,12 @@ const runtimeBars = computed(() => {
 
 const runtimeHeadline = computed(() => {
   const total = countValue(overview.value?.totalRecommendations)
-  if (!total) return '还没有生成记录'
+  if (!total) return '暂无推荐记录'
   const llm = countValue(overview.value?.llmRecommendations)
   const fallback = countValue(overview.value?.fallbackRecommendations)
-  if (fallback > llm) return '规则降级仍是主要来源'
-  if (llm > fallback) return '模型结果占据主要来源'
-  return '模型与规则结果接近'
+  if (fallback > llm) return '规则推荐占比较高'
+  if (llm > fallback) return '模型推荐占比较高'
+  return '模型与规则推荐数量相当'
 })
 
 const runtimeBarTicks = computed(() => {
@@ -324,7 +324,7 @@ async function saveAiModelConfiguration(model, clearApiKey = false) {
 }
 
 async function restoreEnvironmentConfiguration(model) {
-  if (!window.confirm('恢复后将移除此能力的自定义厂商、模型与数据库密钥覆盖，改用部署环境默认值。继续吗？')) {
+  if (!window.confirm('恢复后将移除此能力的自定义厂商、模型与数据库密钥覆盖，改用部署环境默认值。确认恢复默认配置？')) {
     return
   }
   const restored = await props.app.resetAdminAiModel(model.capability)
@@ -452,8 +452,8 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
   <section v-if="!app.isAdmin" class="admin-forbidden" role="alert">
     <CircleAlert :size="20" aria-hidden="true" />
     <div>
-      <strong>没有管理权限</strong>
-      <span>当前账号只能访问个人衣橱和推荐数据。</span>
+      <strong>当前账户无管理权限</strong>
+      <span>请使用具备管理员权限的账户访问管理后台。</span>
     </div>
   </section>
 
@@ -463,9 +463,9 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
         <button class="admin-back-button" type="button" @click="app.selectView('home')">
           <ArrowLeft :size="15" aria-hidden="true" />返回用户端
         </button>
-        <p class="admin-kicker"><ShieldCheck :size="14" aria-hidden="true" />WEAVESELF / ADMIN OPERATIONS</p>
+        <p class="admin-kicker"><ShieldCheck :size="14" aria-hidden="true" />管理工作台</p>
         <h1 id="admin-title">管理工作台</h1>
-        <p class="admin-title-copy">从平台运行、账号治理和用户反馈出发，维护一个可信的穿搭推荐服务。</p>
+        <p class="admin-title-copy">查看平台运行数据，管理账户状态、用户反馈与 AI 模型配置。</p>
       </div>
       <div class="admin-identity-block">
         <span>当前管理员</span>
@@ -480,7 +480,7 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
 
     <div class="admin-layout">
       <aside class="admin-sidebar" aria-label="管理工作台导航">
-        <div class="admin-sidebar-label">运营中心</div>
+        <div class="admin-sidebar-label">管理模块</div>
         <nav class="admin-side-nav">
           <button
             v-for="section in sections"
@@ -503,13 +503,13 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
       <div class="admin-content">
         <section v-if="activeSection === 'overview'" class="admin-section" aria-labelledby="overview-title">
           <header class="admin-section-heading">
-            <div><span>PLATFORM PULSE</span><h2 id="overview-title">运营总览</h2></div>
-            <p>聚合当前数据库中的真实业务数据</p>
+            <div><span>总览</span><h2 id="overview-title">运营总览</h2></div>
+            <p>汇总平台账户、推荐与反馈数据</p>
           </header>
 
           <div v-if="overview" class="overview-grid">
             <article class="overview-lead">
-              <div class="overview-lead-top"><span>可继续提供服务的账号</span><CheckCircle2 :size="18" aria-hidden="true" /></div>
+              <div class="overview-lead-top"><span>已启用账户</span><CheckCircle2 :size="18" aria-hidden="true" /></div>
               <strong class="overview-lead-number">{{ overview.enabledUsers }}</strong>
               <p>当前共有 {{ overview.totalUsers }} 个账号，{{ overview.disabledUsers }} 个账号处于停用状态。</p>
               <div class="overview-lead-stats">
@@ -519,11 +519,11 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
             </article>
 
             <section class="admin-signal-panel" aria-labelledby="signal-title">
-              <div class="admin-panel-title"><div><span>DATA SIGNALS</span><h3 id="signal-title">需要留意的信号</h3></div><Activity :size="17" aria-hidden="true" /></div>
+              <div class="admin-panel-title"><div><span>提醒</span><h3 id="signal-title">待处理事项</h3></div><Activity :size="17" aria-hidden="true" /></div>
               <div class="admin-signal-list">
                 <button type="button" @click="selectSection('feedback')"><span><MessageSquareText :size="16" aria-hidden="true" />待处理反馈</span><strong>{{ overview.pendingFeedback }}</strong></button>
                 <button type="button" @click="selectSection('users')"><span><CircleOff :size="16" aria-hidden="true" />停用账号</span><strong>{{ overview.disabledUsers }}</strong></button>
-                <div><span><CircleAlert :size="16" aria-hidden="true" />待人工识别衣物</span><strong>{{ overview.manualReviewItems }}</strong></div>
+                <div><span><CircleAlert :size="16" aria-hidden="true" />待确认衣物</span><strong>{{ overview.manualReviewItems }}</strong></div>
                 <div><span><Database :size="16" aria-hidden="true" />图片清理队列</span><strong>{{ overview.pendingImageCleanupTasks }}</strong></div>
               </div>
             </section>
@@ -533,27 +533,27 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
 
           <div v-if="overview" ref="overviewChartsRef" class="overview-lower-grid">
             <section class="admin-operation-panel mono-chart-card" aria-labelledby="recommendation-health-title">
-              <div class="admin-panel-title"><div><span>RECOMMENDATION RUNTIME</span><h3 id="recommendation-health-title">{{ runtimeHeadline }}</h3></div><Bot :size="17" aria-hidden="true" /></div>
-              <p class="mono-chart-sub">已落库生成记录 · 一档代表一条记录</p>
+              <div class="admin-panel-title"><div><span>推荐</span><h3 id="recommendation-health-title">{{ runtimeHeadline }}</h3></div><Bot :size="17" aria-hidden="true" /></div>
+              <p class="mono-chart-sub">已生成记录 · 一格一条</p>
               <div class="mono-chart-stage" role="button" tabindex="0" aria-label="点击重播推荐运行图表" @click="replayOverviewCharts" @keydown.enter.prevent="replayOverviewCharts">
                 <svg :key="overviewChartsKey" class="mono-chart-svg" :class="{ 'is-visible': overviewChartsVisible }" viewBox="0 0 400 230" role="img" aria-labelledby="runtime-chart-title runtime-chart-desc">
                   <title id="runtime-chart-title">推荐运行结果构成</title>
-                  <desc id="runtime-chart-desc">每一档代表一条已落库的推荐生成记录，按实际 LLM、规则降级和未标记分类。</desc>
+                  <desc id="runtime-chart-desc">每格表示一条推荐记录，按模型推荐、规则降级与未标记分类。</desc>
                   <line class="mono-chart-element" x1="28" y1="196" x2="372" y2="196" :stroke="monoGrid" stroke-width="0.8" style="--chart-delay: 0ms; --chart-opacity: .9" />
                   <g v-for="bar in runtimeBarTicks" :key="bar.label">
                     <line v-for="tick in bar.ticks" :key="`${bar.label}-${tick.index}`" class="mono-chart-element" :x1="tick.x1" :y1="tick.y" :x2="tick.x2" :y2="tick.y" :stroke="bar.color" stroke-width="1.2" :style="{ '--chart-delay': `${tick.index * 12}ms`, '--chart-opacity': tick.opacity }"><title>{{ bar.label }} · 第 {{ tick.index + 1 }} 条记录</title></line>
                     <text class="mono-chart-element mono-chart-value" :x="bar.x" :y="bar.topY - 10" :fill="bar.color" text-anchor="middle" :style="{ '--chart-delay': `${350 + bar.x}ms`, '--chart-opacity': 1 }">{{ bar.value }}</text>
                     <text class="mono-chart-element mono-chart-axis" :x="bar.x" y="214" :fill="monoMuted" text-anchor="middle" :style="{ '--chart-delay': `${650 + bar.x}ms`, '--chart-opacity': 1 }">{{ bar.label }}</text>
                   </g>
-                  <text class="mono-chart-element mono-chart-footnote" x="200" y="229" :fill="monoFaint" text-anchor="middle" style="--chart-delay: 1050ms; --chart-opacity: 1">ONE TICK = ONE RECORD · DATABASE</text>
+                  <text class="mono-chart-element mono-chart-footnote" x="200" y="229" :fill="monoFaint" text-anchor="middle" style="--chart-delay: 1050ms; --chart-opacity: 1">一格 = 一条记录</text>
                 </svg>
               </div>
-              <p class="admin-caption">总量 {{ overview.totalRecommendations }} 条；模型调用与规则降级分开统计，未标记记录不会被误称为模型成功。</p>
-              <p class="mono-chart-source">F1 RUNG BARS · RECOMMENDATION ENGINE · DATABASE</p>
+              <p class="admin-caption">共 {{ overview.totalRecommendations }} 条推荐记录，按实际生成方式分类统计。</p>
+              <p class="mono-chart-source">推荐记录</p>
             </section>
 
             <section class="admin-operation-panel boundary-panel mono-chart-card" aria-labelledby="account-composition-title">
-              <div class="admin-panel-title"><div><span>ACCOUNT COMPOSITION</span><h3 id="account-composition-title">{{ accountHeadline }}</h3></div><UsersRound :size="17" aria-hidden="true" /></div>
+              <div class="admin-panel-title"><div><span>账号</span><h3 id="account-composition-title">{{ accountHeadline }}</h3></div><UsersRound :size="17" aria-hidden="true" /></div>
               <p class="mono-chart-sub">当前账号状态 · 一格代表 1%</p>
               <div class="mono-chart-stage" role="button" tabindex="0" aria-label="点击重播账号状态图表" @click="replayOverviewCharts" @keydown.enter.prevent="replayOverviewCharts">
                 <svg :key="overviewChartsKey" class="mono-chart-svg" :class="{ 'is-visible': overviewChartsVisible }" viewBox="0 0 400 230" role="img" aria-labelledby="account-chart-title account-chart-desc">
@@ -565,29 +565,29 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
                   <circle v-else class="mono-chart-element" cx="200" cy="108" r="69" fill="none" :stroke="monoGrid" stroke-width="1" stroke-dasharray="2 5" style="--chart-delay: 100ms; --chart-opacity: 1" />
                   <text class="mono-chart-element mono-chart-center-value" x="200" y="106" :fill="monoInk" text-anchor="middle" style="--chart-delay: 900ms; --chart-opacity: 1">{{ overview.totalUsers ? `${accountEnabledPercent}%` : '—' }}</text>
                   <text class="mono-chart-element mono-chart-center-label" x="200" y="124" :fill="monoMuted" text-anchor="middle" style="--chart-delay: 980ms; --chart-opacity: 1">可用账号</text>
-                  <text class="mono-chart-element mono-chart-footnote" x="200" y="214" :fill="monoFaint" text-anchor="middle" style="--chart-delay: 1080ms; --chart-opacity: 1">{{ overview.totalUsers ? `TOTAL · ${overview.totalUsers} ACCOUNTS` : 'NO ACCOUNT DATA' }}</text>
+                  <text class="mono-chart-element mono-chart-footnote" x="200" y="214" :fill="monoFaint" text-anchor="middle" style="--chart-delay: 1080ms; --chart-opacity: 1">{{ overview.totalUsers ? `共 ${overview.totalUsers} 个账号` : '暂无账号数据' }}</text>
                 </svg>
               </div>
               <div class="mono-chart-legend" aria-label="账号状态图例"><span v-for="segment in accountComposition" :key="segment.label"><i :style="{ backgroundColor: segment.color }"></i>{{ segment.label }} {{ segment.value }}（{{ segment.percent }}%）</span></div>
               <div class="boundary-note"><ShieldCheck :size="15" aria-hidden="true" /><span>衣物识别待人工确认：{{ overview.manualReviewItems }} 件</span></div>
-              <p class="admin-caption">后台只管理账号、反馈、AI 配置与操作记录；趋势内容在风潮页直接展示。</p>
-              <p class="mono-chart-source">F4 TICK DONUT · ACCOUNT STATUS · DATABASE</p>
+              <p class="admin-caption">后台提供账户、反馈、AI 配置与操作记录管理；穿搭内容可在趋势页面查看。</p>
+              <p class="mono-chart-source">账号状态</p>
             </section>
 
             <section class="admin-operation-panel recent-panel" aria-labelledby="recent-actions-title">
-              <div class="admin-panel-title"><div><span>RECENT ACTIONS</span><h3 id="recent-actions-title">最近管理动作</h3></div><button type="button" class="text-button" @click="selectSection('audit')">查看全部</button></div>
+              <div class="admin-panel-title"><div><span>最近</span><h3 id="recent-actions-title">近期管理操作</h3></div><button type="button" class="text-button" @click="selectSection('audit')">查看全部</button></div>
               <div v-if="auditLogs.length" class="recent-action-list">
                 <div v-for="log in auditLogs.slice(0, 4)" :key="log.id"><span class="recent-action-mark"></span><div><strong>{{ auditActionLabel(log.action) }}</strong><small>{{ log.targetId || '—' }} · {{ formatDate(log.createdAt) }}</small></div><em>{{ log.outcome === 'SUCCESS' ? '成功' : log.outcome }}</em></div>
               </div>
-              <p v-else class="admin-empty-inline">还没有管理操作记录。</p>
+              <p v-else class="admin-empty-inline">暂无管理操作记录。</p>
             </section>
           </div>
         </section>
 
         <section v-else-if="activeSection === 'users'" class="admin-section" aria-labelledby="users-title">
           <header class="admin-section-heading">
-            <div><span>ACCOUNT GOVERNANCE</span><h2 id="users-title">账号与权限</h2></div>
-            <p>停用只影响后续登录，不触碰个人业务数据</p>
+            <div><span>账号</span><h2 id="users-title">账号与权限</h2></div>
+            <p>停用后限制账户登录，个人业务数据继续保留</p>
           </header>
           <section class="admin-table-panel">
             <form class="admin-toolbar" role="search" @submit.prevent="searchUsers">
@@ -617,8 +617,8 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
 
         <section v-else-if="activeSection === 'feedback'" class="admin-section" aria-labelledby="feedback-title">
           <header class="admin-section-heading">
-            <div><span>USER VOICE</span><h2 id="feedback-title">反馈审核</h2></div>
-            <p>保留原始评分，只维护处理状态和处理人</p>
+            <div><span>反馈</span><h2 id="feedback-title">反馈审核</h2></div>
+            <p>保留用户原始评分，记录反馈处理状态与处理人</p>
           </header>
           <section class="admin-table-panel">
             <form class="admin-toolbar feedback-toolbar" role="search" @submit.prevent="applyFeedbackFilters">
@@ -636,7 +636,7 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
                 <thead><tr><th scope="col">反馈</th><th scope="col">推荐上下文</th><th scope="col">状态</th><th scope="col">更新时间</th><th scope="col">处理</th></tr></thead>
                 <tbody>
                   <tr v-for="item in feedback" :key="item.recommendationId">
-                    <th scope="row"><div class="feedback-user"><strong>{{ item.username }}</strong><span><b v-for="star in 5" :key="star" :class="{ filled: star <= item.rating }">★</b></span></div><p>{{ item.comment || '未留下文字说明' }}</p><small>{{ item.feedbackType || '未分类反馈' }}</small></th>
+                    <th scope="row"><div class="feedback-user"><strong>{{ item.username }}</strong><span><b v-for="star in 5" :key="star" :class="{ filled: star <= item.rating }">★</b></span></div><p>{{ item.comment || '未填写文字反馈' }}</p><small>{{ item.feedbackType || '未分类反馈' }}</small></th>
                     <td><div class="feedback-context"><strong>{{ item.occasion }} · {{ item.city }}</strong><span>{{ engineLabel(item.engine) }}</span><small v-if="item.fallbackReason">{{ app.fallbackReasonLabel(item.fallbackReason) }}</small></div></td>
                     <td><span class="review-status" :class="item.moderationStatus.toLowerCase()"><i></i>{{ feedbackStatusLabel(item.moderationStatus) }}</span></td>
                     <td class="muted-cell">{{ formatDate(item.updatedAt) }}</td>
@@ -664,7 +664,7 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
             <LoaderCircle class="spinning" :size="18" aria-hidden="true" />正在读取模型配置…
           </div>
           <div v-else-if="!aiModels.length" class="admin-empty">
-            <Settings2 :size="21" aria-hidden="true" />暂时没有可配置的模型能力
+            <Settings2 :size="21" aria-hidden="true" />暂无可配置的模型能力
           </div>
           <section v-else class="admin-ai-model-panel" aria-label="模型能力配置">
             <article v-for="model in aiModels" :key="model.capability" class="admin-ai-model-row">
@@ -672,10 +672,10 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
                 <div>
                   <h3>{{ model.label }}</h3>
                   <p>{{ model.capability === 'WARDROBE_RECOGNITION'
-                    ? '识别衣物图片并提取名称、类别、颜色和风格。'
+                    ? '识别衣物属性，并分析已授权的个人照片，提供形象特征与穿搭建议。'
                     : model.capability === 'OUTFIT_RECOMMENDATION'
-                      ? '生成个性化穿搭建议；未启用或模型不可用时沿用现有降级逻辑。'
-                      : '生成每日搭配图片；当前仅支持阿里云百炼图像生成服务。' }}</p>
+                      ? '生成个性化穿搭建议；模型未启用或不可用时，使用规则推荐。'
+                      : '生成穿搭效果图；当前支持阿里云百炼图像生成服务。' }}</p>
                 </div>
                 <div class="ai-model-badges">
                   <span class="ai-credential-status" :class="'credential-' + model.credentialSource.toLowerCase()">
@@ -770,7 +770,7 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
 
         <section v-else-if="activeSection === 'audit'" class="admin-section" aria-labelledby="audit-title">
           <header class="admin-section-heading">
-            <div><span>TRACEABILITY</span><h2 id="audit-title">操作日志</h2></div>
+            <div><span>日志</span><h2 id="audit-title">操作日志</h2></div>
             <p>记录账号、审核与模型配置变更，不保存敏感凭据</p>
           </header>
           <section class="admin-table-panel">
@@ -781,11 +781,11 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
               <span class="toolbar-total">共 {{ app.state.adminAuditTotal }} 条</span>
             </form>
             <div v-if="app.state.adminAuditLoading && !auditLogs.length" class="admin-loading" role="status" aria-live="polite"><LoaderCircle class="spinning" :size="18" />正在读取操作日志…</div>
-            <div v-else-if="!auditLogs.length" class="admin-empty"><FileClock :size="21" aria-hidden="true" />还没有符合条件的操作日志</div>
+            <div v-else-if="!auditLogs.length" class="admin-empty"><FileClock :size="21" aria-hidden="true" />暂无符合条件的操作日志</div>
             <div v-else class="admin-table-wrap">
               <table class="admin-table audit-table">
                 <caption class="sr-only">管理员操作审计日志</caption>
-                <thead><tr><th scope="col">时间</th><th scope="col">操作者</th><th scope="col">动作</th><th scope="col">对象</th><th scope="col">结果</th><th scope="col">说明</th></tr></thead>
+                <thead><tr><th scope="col">时间</th><th scope="col">操作者</th><th scope="col">操作类型</th><th scope="col">对象</th><th scope="col">结果</th><th scope="col">说明</th></tr></thead>
                 <tbody><tr v-for="log in auditLogs" :key="log.id"><td class="muted-cell">{{ formatDate(log.createdAt) }}</td><td><strong>{{ log.actorUsername }}</strong></td><td><span class="audit-action">{{ auditActionLabel(log.action) }}</span></td><td><span class="audit-target">{{ log.targetType }} · {{ log.targetId || '—' }}</span></td><td><span class="audit-outcome">{{ log.outcome === 'SUCCESS' ? '成功' : log.outcome }}</span></td><td class="audit-details">{{ log.details || '—' }}</td></tr></tbody>
               </table>
             </div>
@@ -803,7 +803,7 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
 .admin-title-block { min-width: 0; }
 .admin-back-button { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 25px; border: 0; padding: 0; color: var(--muted); background: transparent; font-size: 11px; }
 .admin-back-button:hover { color: var(--accent-strong); }
-.admin-kicker { display: flex; align-items: center; gap: 7px; margin: 0 0 10px; color: var(--accent-strong); font-size: 9px; font-weight: 800; letter-spacing: .15em; }
+.admin-kicker { display: flex; align-items: center; gap: 7px; margin: 0 0 10px; color: var(--accent-strong); font-size: 11px; font-weight: 600; letter-spacing: .02em; }
 .admin-title-block h1 { margin: 0; color: var(--ink); font-family: var(--font-display); font-size: clamp(34px, 4.5vw, 58px); font-weight: 400; letter-spacing: -.06em; line-height: 1; }
 .admin-title-copy { max-width: 560px; margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
 .admin-identity-block { display: grid; min-width: 170px; gap: 4px; justify-items: end; padding-bottom: 2px; }
@@ -826,7 +826,7 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
 .admin-privacy-note p { margin: 0; font-size: 10px; line-height: 1.65; }
 .admin-content { min-width: 0; }
 .admin-section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 19px; }
-.admin-section-heading > div > span, .admin-panel-title > div > span { color: var(--accent-strong); font-size: 9px; font-weight: 800; letter-spacing: .14em; }
+.admin-section-heading > div > span, .admin-panel-title > div > span { color: var(--accent-strong); font-size: 11px; font-weight: 600; letter-spacing: .02em; }
 .admin-section-heading h2 { margin: 6px 0 0; color: var(--ink); font-family: var(--font-display); font-size: 30px; font-weight: 400; letter-spacing: -.045em; }
 .admin-section-heading > p { max-width: 260px; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.6; text-align: right; }
 .overview-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(290px, .92fr); gap: 13px; }
@@ -864,11 +864,11 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
 .mono-chart-value, .mono-chart-center-value { font-family: var(--font-display); font-size: 12px; font-weight: 800; }
 .mono-chart-center-value { font-size: 27px; }
 .mono-chart-center-label, .mono-chart-axis { font-family: var(--font-sans); font-size: 9px; font-weight: 700; }
-.mono-chart-footnote { font-family: var(--font-sans); font-size: 7px; font-weight: 600; letter-spacing: .12em; }
+.mono-chart-footnote { font-family: var(--font-sans); font-size: 9px; font-weight: 500; letter-spacing: 0; }
 .mono-chart-legend { display: flex; flex-wrap: wrap; gap: 7px 14px; margin-top: -2px; color: var(--muted); font-size: 9px; }
 .mono-chart-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .mono-chart-legend i { display: block; width: 7px; height: 7px; border-radius: 50%; }
-.mono-chart-source { margin: 10px 0 0; color: #C6C5BF; font-size: 8px; font-weight: 600; letter-spacing: .08em; }
+.mono-chart-source { margin: 10px 0 0; color: #C6C5BF; font-size: 10px; font-weight: 500; letter-spacing: 0; }
 .mono-chart-card .boundary-note { margin-top: 11px; }
 @media (prefers-reduced-motion: reduce) {
   .mono-chart-svg .mono-chart-element { opacity: var(--chart-opacity, 1); animation: none; }

@@ -1,6 +1,8 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { ArrowUpRight, ImageOff, LoaderCircle, Shirt } from '@lucide/vue'
+import { ArrowUpRight, LoaderCircle } from '@lucide/vue'
+import { trendImageCandidates, trendDisplayImageUrl } from '../utils/trendImage.js'
+import { externalTrendSourceUrl } from '../utils/trendSources.js'
 
 const props = defineProps({
   trend: { type: Object, required: true },
@@ -10,35 +12,36 @@ const props = defineProps({
 
 const emit = defineEmits(['use-trend', 'open-wardrobe'])
 const unavailableSourceImages = ref(new Set())
-const unavailableWardrobeImages = ref(new Set())
 
 const platformNames = {
   douyin: '抖音',
-  weibo: '微博',
+  weibo: '微博', xiaohongshu: '小红书',
   editorial: '时尚编辑精选',
-  'configured-feed': '配置来源',
+  'configured-demo': '穿搭参考',
+  'configured-feed': '已连接数据源',
   'web-scrape': '公开网页'
 }
 const topicTags = computed(() => (props.trend?.topicTags || []).filter(Boolean))
 const summary = computed(() => String(props.trend?.summary || '').trim())
-const sourceImageUrl = computed(() =>
+const sourceImageCandidates = computed(() => trendImageCandidates(
   props.trend?.imageUrl || props.trend?.evidence?.images?.find(Boolean) || ''
-)
-const hasSourceImage = computed(() =>
-  Boolean(sourceImageUrl.value) && !unavailableSourceImages.value.has(sourceImageUrl.value)
-)
+).map(trendDisplayImageUrl))
+const sourceImageUrl = computed(() => sourceImageCandidates.value
+  .find((url) => !unavailableSourceImages.value.has(url)) || '')
+const hasSourceImage = computed(() => Boolean(sourceImageUrl.value))
 const sourceIsBoardOnly = computed(() => props.trend?.evidence?.mediaType === 'board')
 const summaryText = computed(() => {
   if (summary.value) return summary.value
-  if (sourceIsBoardOnly.value) return '这个来源只提供榜单话题，没有穿搭图片或正文。'
-  return '来源未提供摘要；这里只展示已收录的标题与标签，不推断具体穿法。'
+  if (sourceIsBoardOnly.value) return '当前来源仅提供榜单话题，未提供穿搭图片与正文。'
+  return '来源未提供摘要，当前展示已收录的标题与主题标签。'
 })
 const sourceImageNote = computed(() => {
-  if (sourceImageUrl.value) return '原文配图暂时无法显示，以下保留来源文字信息。'
+  if (sourceImageCandidates.value.length) return '原文配图暂不可用，可查看已收录的文字信息。'
   if (sourceIsBoardOnly.value) return '来源只提供榜单话题，不包含穿搭配图。'
   return '来源没有提供可用配图。'
 })
-const platformName = computed(() => platformNames[props.trend?.platform] || '授权来源')
+const platformName = computed(() => platformNames[props.trend?.platform] || '内容来源')
+const sourceUrl = computed(() => externalTrendSourceUrl(props.trend))
 const sourceAuthor = computed(() => String(props.trend?.evidence?.author || '').trim())
 const publishedAt = computed(() => formatDateTime(props.trend?.publishedAt))
 const usableWardrobe = computed(() =>
@@ -83,14 +86,6 @@ function markSourceImageUnavailable(event) {
   unavailableSourceImages.value = new Set([...unavailableSourceImages.value, url])
 }
 
-function hasWardrobeImage(item) {
-  return Boolean(item.imageUrl) && !unavailableWardrobeImages.value.has(String(item.id))
-}
-
-function markWardrobeImageUnavailable(item) {
-  unavailableWardrobeImages.value = new Set([...unavailableWardrobeImages.value, String(item.id)])
-}
-
 function itemDescription(item) {
   return [item.category, item.color, item.style].filter(Boolean).join(' · ') || '衣物信息待补充'
 }
@@ -106,26 +101,22 @@ function itemDescription(item) {
           referrerpolicy="no-referrer"
           @error="markSourceImageUnavailable"
         />
-        <figcaption>
-          <span>{{ platformName }} · 来源穿搭灵感</span>
-          <span>不属于你的衣橱</span>
-        </figcaption>
       </figure>
       <article v-else class="trend-source-copy">
-        <p class="eyebrow">{{ platformName }} · 来源信息</p>
+        <p class="eyebrow">来源</p>
         <h2>{{ sourceIsBoardOnly ? '榜单话题' : (sourceImageUrl ? '原文配图暂不可用' : '来源文字') }}</h2>
         <p>{{ sourceImageNote }}</p>
         <span>标题、主题标签与摘要会在右侧按来源原样呈现。</span>
       </article>
 
       <div class="trend-breakdown-copy">
-        <p class="eyebrow">拆解这条灵感</p>
+        <p class="eyebrow">穿搭内容解析</p>
         <h2 id="trend-breakdown-title">{{ trend.title }}</h2>
-        <p class="breakdown-intro">从来源内容中提取可核对的信息，作为穿搭参考。</p>
+        <p class="breakdown-intro">依据来源提供的标题、标签与摘要整理。</p>
 
         <div class="breakdown-points">
           <article class="breakdown-point">
-            <span>主题线索</span>
+            <span>主题标签</span>
             <div v-if="topicTags.length" class="topic-tags">
               <span v-for="tag in topicTags" :key="tag">{{ tag }}</span>
             </div>
@@ -147,11 +138,11 @@ function itemDescription(item) {
           </article>
         </div>
 
-        <p class="evidence-note">具体穿法以原文为准；此处只呈现来源明确提供的信息。</p>
+        <p class="evidence-note">具体搭配细节请参阅原文。</p>
         <a
-          v-if="trend.sourceUrl"
+          v-if="sourceUrl"
           class="source-link"
-          :href="trend.sourceUrl"
+          :href="sourceUrl"
           target="_blank"
           rel="noopener noreferrer"
         >查看原文<ArrowUpRight :size="16" aria-hidden="true" /></a>
@@ -161,50 +152,37 @@ function itemDescription(item) {
     <section class="wardrobe-substitutes" aria-labelledby="wardrobe-substitutes-title">
       <header class="wardrobe-heading">
         <div>
-          <p class="eyebrow">把灵感带回衣橱</p>
-          <h3 id="wardrobe-substitutes-title">衣橱里的替代</h3>
-          <span>显示衣物名称、类别或风格与趋势标签相符的已确认单品。</span>
+          <p class="eyebrow">我的衣橱</p>
+          <h3 id="wardrobe-substitutes-title">衣橱匹配单品</h3>
+          <span>展示已确认且与内容标签匹配的衣物。</span>
         </div>
         <button type="button" class="wardrobe-link" @click="emit('open-wardrobe')">查看我的衣橱<ArrowUpRight :size="15" aria-hidden="true" /></button>
       </header>
 
       <div v-if="wardrobeLoading" class="wardrobe-state" role="status" aria-live="polite">
         <LoaderCircle class="spinning" :size="19" aria-hidden="true" />
-        正在读取你的衣橱…
+        正在加载衣橱单品…
       </div>
       <div v-else-if="wardrobeMatches.length" class="wardrobe-match-list">
         <article v-for="match in wardrobeMatches" :key="match.item.id" class="wardrobe-match">
-          <div v-if="hasWardrobeImage(match.item)" class="wardrobe-match-image">
-            <img
-              :src="match.item.imageUrl"
-              :alt="match.item.name || '衣橱单品'"
-              loading="lazy"
-              @error="markWardrobeImageUnavailable(match.item)"
-            />
-          </div>
-          <div v-else class="wardrobe-match-image wardrobe-match-no-image">
-            <ImageOff :size="18" aria-hidden="true" />
-            <span>暂无照片</span>
-          </div>
           <div class="wardrobe-match-copy">
             <strong>{{ match.item.name || '未命名衣物' }}</strong>
             <span>{{ itemDescription(match.item) }}</span>
-            <small>对应线索：{{ match.matchingTags.join('、') }}</small>
+            <small>匹配标签：{{ match.matchingTags.join('、') }}</small>
           </div>
         </article>
       </div>
       <div v-else class="wardrobe-state wardrobe-empty">
-        <Shirt :size="21" aria-hidden="true" />
-        <p v-if="!wardrobe.length">衣橱还没有已确认的单品。添加衣物后，可以用这条灵感试搭。</p>
-        <p v-else-if="!usableWardrobe.length">衣橱里的衣物仍需确认，确认后才能参与搭配。</p>
-        <p v-else>目前没有衣物信息与这条内容的标签直接相符；继续试搭时，推荐仍只会使用已确认的衣物。</p>
-        <button type="button" class="wardrobe-link" @click="emit('open-wardrobe')">打开我的衣橱<ArrowUpRight :size="15" aria-hidden="true" /></button>
+        <p v-if="!wardrobe.length">暂无已确认的衣橱单品，请添加并完善衣物信息。</p>
+        <p v-else-if="!usableWardrobe.length">衣物信息待确认，完善后可参与穿搭推荐。</p>
+        <p v-else>暂无与当前标签直接匹配的衣物。生成推荐时仍将从已确认的衣橱单品中选择。</p>
+        <button type="button" class="wardrobe-link" @click="emit('open-wardrobe')">查看我的衣橱<ArrowUpRight :size="15" aria-hidden="true" /></button>
       </div>
     </section>
 
     <footer class="trend-breakdown-action">
-      <p>参考内容提供灵感，搭配单品仍来自你的衣橱。</p>
-      <button type="button" @click="emit('use-trend', trend)">按这个方向用我的衣橱试搭<ArrowUpRight :size="17" aria-hidden="true" /></button>
+      <p>参考当前风格，使用个人衣橱单品生成搭配。</p>
+      <button type="button" @click="emit('use-trend', trend)">参考风格生成搭配<ArrowUpRight :size="17" aria-hidden="true" /></button>
     </footer>
   </section>
 </template>
@@ -247,21 +225,6 @@ function itemDescription(item) {
   object-position: center 35%;
 }
 
-.trend-source-figure figcaption {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 8px 16px;
-  padding: 16px 18px;
-  color: var(--surface);
-  background: rgba(18, 36, 30, .82);
-  font-size: 11px;
-}
-
 .trend-source-copy {
   display: flex;
   flex-direction: column;
@@ -272,9 +235,9 @@ function itemDescription(item) {
 .eyebrow {
   margin: 0 0 11px;
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .08em;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 .trend-source-copy h2,
@@ -440,37 +403,9 @@ function itemDescription(item) {
 .wardrobe-match {
   display: grid;
   min-width: 0;
-  grid-template-columns: 92px minmax(0, 1fr);
-  gap: 14px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
   padding: 12px;
   background: var(--surface);
-}
-
-.wardrobe-match-image {
-  width: 92px;
-  height: 108px;
-  overflow: hidden;
-  background: var(--surface-soft);
-}
-
-.wardrobe-match-image img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.wardrobe-match-no-image {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  color: var(--muted);
-}
-
-.wardrobe-match-no-image span {
-  font-size: 10px;
 }
 
 .wardrobe-match-copy {
@@ -505,7 +440,7 @@ function itemDescription(item) {
 
 .wardrobe-state {
   display: flex;
-  min-height: 104px;
+  min-height: 0;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
@@ -518,11 +453,6 @@ function itemDescription(item) {
 .wardrobe-state p {
   flex: 1 1 360px;
   margin: 0;
-}
-
-.wardrobe-empty > svg {
-  flex: 0 0 auto;
-  color: var(--accent);
 }
 
 .wardrobe-empty .wardrobe-link {
@@ -664,14 +594,7 @@ function itemDescription(item) {
   }
 
   .wardrobe-match {
-    grid-template-columns: 76px minmax(0, 1fr);
-    gap: 10px;
     padding: 10px;
-  }
-
-  .wardrobe-match-image {
-    width: 76px;
-    height: 92px;
   }
 }
 

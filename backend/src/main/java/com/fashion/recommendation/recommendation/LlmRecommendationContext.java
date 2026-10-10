@@ -13,7 +13,13 @@ public record LlmRecommendationContext(
         WeatherSnapshot weather,
         StyleProfile styleProfile,
         Map<Long, Double> itemRatings,
-        TrendReference trendReference) {
+        TrendReference trendReference,
+        List<Long> lockedItemIds) {
+
+    public LlmRecommendationContext(String occasion, String styleHint, List<WardrobeItem> wardrobe,
+            WeatherSnapshot weather, StyleProfile styleProfile, Map<Long, Double> itemRatings, TrendReference trendReference) {
+        this(occasion, styleHint, wardrobe, weather, styleProfile, itemRatings, trendReference, List.of());
+    }
 
     public LlmRecommendationContext(String occasion, String styleHint, List<WardrobeItem> wardrobe,
             WeatherSnapshot weather, StyleProfile styleProfile, Map<Long, Double> itemRatings) {
@@ -23,5 +29,6 @@ public record LlmRecommendationContext(
     public LlmRecommendationContext {
         wardrobe = List.copyOf(wardrobe);
         itemRatings = Map.copyOf(itemRatings);
+        lockedItemIds = List.copyOf(lockedItemIds);
     }
 }

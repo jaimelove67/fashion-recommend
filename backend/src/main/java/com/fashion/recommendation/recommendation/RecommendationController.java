@@ -42,8 +42,10 @@ public class RecommendationController {
     public ApiResponse<RecommendationPage> list(
             Principal principal,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.ok(recommendationService.list(principal.getName(), page, size));
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "all") String filter,
+            @RequestParam(defaultValue = "") String query) {
+        return ApiResponse.ok(recommendationService.list(principal.getName(), page, size, filter, query));
     }
 
     @PostMapping("/me/recommendations/{recommendationId}/visual")

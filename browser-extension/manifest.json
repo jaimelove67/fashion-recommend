@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "知己 · 跨站试穿",
+  "version": "0.1.0",
+  "description": "在用户授权的购物网站显示试穿浮窗，将喜欢的单品保存回知己项目。",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "知己跨站试穿", "default_popup": "popup.html" },
+  "web_accessible_resources": [{
+    "resources": ["floating.html", "floating.js", "floating.css", "liveTryOn.js"],
+    "matches": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"]
+  }],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; frame-src https://anywear.decart.ai; img-src 'self' data: blob:; connect-src http: https:;"
+  }
+}

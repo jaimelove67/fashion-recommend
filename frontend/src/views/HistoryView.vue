@@ -1,5 +1,7 @@
 <script setup>
-import { computed, ref } from 'vue'
+import RecommendationFeedback from '../components/RecommendationFeedback.vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
+import { formatRecommendationReason, formatRecommendationTitle } from '../utils/recommendationReason'
 import {
   Bookmark,
   ChevronDown,
@@ -19,8 +21,8 @@ const props = defineProps({
   app: { type: Object, required: true }
 })
 
-const query = ref('')
-const activeFilter = ref('all')
+const query = ref(props.app.state.historyQuery || '')
+const activeFilter = ref(props.app.state.historyFilter || 'all')
 const expandedId = ref(null)
 const brokenImages = ref(new Set())
 
@@ -30,7 +32,7 @@ const filters = [
   { id: 'rated', label: '已评分' }
 ]
 
-const ratedCount = computed(() => props.app.state.history.filter((item) => Number.isFinite(item.feedback?.rating)).length)
+const ratedCount = computed(() => props.app.recommendationStats.rated || 0)
 const historyRungWidth = 13
 const historyRungs = computed(() => {
   const days = props.app.historyTrend || []
@@ -73,16 +75,13 @@ const historyRungs = computed(() => {
     }
   })
 })
-const filteredHistory = computed(() => {
-  const normalized = query.value.trim().toLocaleLowerCase('zh-CN')
-  return props.app.state.history.filter((item) => {
-    if (activeFilter.value === 'saved' && !item.saved) return false
-    if (activeFilter.value === 'rated' && !Number.isFinite(item.feedback?.rating)) return false
-    if (!normalized) return true
-    const itemText = (item.items || []).map((garment) => `${garment.name} ${garment.category} ${garment.color} ${garment.style || ''}`).join(' ')
-    return `${item.summary} ${item.reason} ${item.occasion} ${item.city} ${itemText}`.toLocaleLowerCase('zh-CN').includes(normalized)
-  })
+const filteredHistory = computed(() => props.app.state.history)
+let searchTimer
+watch([query, activeFilter], () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => props.app.loadHistory({ query: query.value, filter: activeFilter.value }), 250)
 })
+onBeforeUnmount(() => clearTimeout(searchTimer))
 
 function formatRating(value) {
   return Number.isFinite(value) ? value.toFixed(1) : '--'
@@ -115,14 +114,14 @@ function clearFilters() {
   <section class="history-view">
     <header class="page-hero">
       <div>
-        <p class="eyebrow"><History :size="15" aria-hidden="true" />推荐记录</p>
-        <h1>你生成过的每一套搭配</h1>
-        <p>按场合、城市、搭配名称或衣物搜索，查看当时的天气、搭配理由、收藏和评分。</p>
+        <p class="eyebrow"><History :size="15" aria-hidden="true" />搭配记录</p>
+        <h1>搭配记录</h1>
+        <p>查看过往搭配方案，按场合、城市、收藏与评分状态检索记录。</p>
       </div>
       <button class="refresh-button" type="button" :disabled="app.state.historyLoading" @click="app.loadHistory">
         <LoaderCircle v-if="app.state.historyLoading" class="spinning" :size="17" />
         <RefreshCw v-else :size="17" aria-hidden="true" />
-        刷新历史
+        刷新记录
       </button>
     </header>
 
@@ -130,30 +129,30 @@ function clearFilters() {
       <article>
         <span>搭配总数</span>
         <strong>{{ app.recommendationStats.total }}</strong>
-        <small>当前账户记录</small>
+        <small>当前账户全部记录</small>
       </article>
       <article>
         <span>已收藏</span>
-        <strong>{{ app.savedHistory.length }}</strong>
-        <small>当前记录</small>
+        <strong>{{ app.recommendationStats.saved }}</strong>
+        <small>已收藏的搭配方案</small>
       </article>
       <article>
         <span>已评分</span>
         <strong>{{ ratedCount }}</strong>
-        <small>收到评分的搭配</small>
+        <small>已提交评分的搭配方案</small>
       </article>
       <article>
         <span>平均评分</span>
         <strong>{{ formatRating(app.recommendationStats.averageRating) }}<em v-if="app.recommendationStats.averageRating"> / 5</em></strong>
-        <small>{{ app.recommendationStats.averageRating ? '按已有评分计算' : '暂无评分' }}</small>
+        <small>{{ app.recommendationStats.averageRating ? '按当前账户全部评分计算' : '暂无评分' }}</small>
       </article>
     </section>
 
     <section class="trend-section" aria-labelledby="history-trend-title">
       <header class="section-heading">
         <div>
-          <p class="section-kicker">最近 7 天的记录</p>
-          <h2 id="history-trend-title">最近 7 天的收藏情况</h2>
+          <p class="section-kicker">近 7 天</p>
+          <h2 id="history-trend-title">近 7 天搭配收藏统计</h2>
         </div>
         <div class="chart-legend" aria-label="图例">
           <span><i class="saved-mark"></i>已收藏</span>
@@ -190,19 +189,19 @@ function clearFilters() {
             <text :x="day.x" :y="day.totalY" class="day-total">{{ day.total }}</text>
             <text :x="day.x" y="282" class="day-label">{{ day.label }}</text>
           </g>
-          <text x="220" y="307" class="chart-note">ONE RUNG = ONE GENERATED RECOMMENDATION · DARK = SAVED</text>
+          <text x="220" y="307" class="chart-note">每格表示一套搭配 · 深色表示已收藏</text>
         </svg>
       </div>
-      <p class="chart-source">按生成日期统计当前载入的记录。已收藏表示搭配当前状态，不是收藏操作日期。</p>
+      <p class="chart-source">按已加载记录的生成日期统计，收藏状态以当前状态为准。</p>
     </section>
 
     <section class="records-section" aria-labelledby="records-title">
       <header class="records-header">
         <div>
-          <p class="section-kicker">全部记录</p>
+          <p class="section-kicker">全部</p>
           <h2 id="records-title">搭配记录</h2>
         </div>
-        <span>显示 {{ filteredHistory.length }} 条，已加载 {{ app.state.history.length }} 条，共 {{ app.state.historyTotal }} 条</span>
+        <span>显示 {{ filteredHistory.length }} 条，已加载 {{ app.state.history.length }} 条，符合条件共 {{ app.state.historyTotal }} 条</span>
       </header>
 
       <div class="record-tools">
@@ -220,7 +219,7 @@ function clearFilters() {
         </div>
         <label class="search-field">
           <Search :size="17" aria-hidden="true" />
-          <input v-model="query" type="search" placeholder="搜索场合、城市、搭配名称或衣物" aria-label="搜索搭配记录" />
+          <input v-model="query" type="search" maxlength="120" placeholder="搜索场合、城市、搭配名称或衣物" aria-label="搜索搭配记录" />
           <button v-if="query" type="button" aria-label="清空搜索" @click="query = ''"><X :size="15" /></button>
         </label>
       </div>
@@ -228,9 +227,13 @@ function clearFilters() {
       <div v-if="app.state.historyLoading" class="state-panel" aria-live="polite">
         <LoaderCircle class="spinning" :size="27" />
         <strong>正在加载搭配记录</strong>
-        <span>记录加载完成后会保留当前筛选条件。</span>
+        <span>加载完成后将应用当前筛选条件。</span>
       </div>
 
+      <div v-else-if="app.state.historyError" class="state-panel" role="alert">
+        <strong>{{ app.state.historyError }}</strong>
+        <button type="button" @click="app.loadHistory()">重新加载</button>
+      </div>
       <div v-else-if="filteredHistory.length" class="history-list">
         <article v-for="item in filteredHistory" :key="item.id" class="history-card">
           <header class="card-header">
@@ -245,7 +248,7 @@ function clearFilters() {
           <div class="card-title">
             <div>
               <p>{{ item.occasion || '未填写场合' }}</p>
-              <h3>{{ item.summary }}</h3>
+              <h3>{{ formatRecommendationTitle(item) }}</h3>
             </div>
             <button type="button" :aria-expanded="expandedId === item.id" @click="expandedId = expandedId === item.id ? null : item.id">
               {{ expandedId === item.id ? '收起详情' : '查看详情' }}
@@ -253,7 +256,7 @@ function clearFilters() {
             </button>
           </div>
 
-          <ul class="garment-strip" :aria-label="`${item.summary}包含的衣物`">
+          <ul class="garment-strip" :aria-label="`${formatRecommendationTitle(item)}包含的衣物`">
             <li v-for="garment in item.items || []" :key="`${item.id}-${garment.id}`">
               <div class="garment-media">
                 <img
@@ -269,31 +272,17 @@ function clearFilters() {
           </ul>
 
           <div v-if="expandedId === item.id" class="record-details">
-            <div><span>搭配理由</span><p>{{ item.reason }}</p></div>
+            <div><span>搭配依据</span><p>{{ formatRecommendationReason(item) }}</p></div>
             <div><span>生成方式</span><p>{{ app.engineLabel(item.engine) }}<small v-if="item.generationAudit?.modelName"> · {{ item.generationAudit.modelName }}</small><small v-if="item.generationAudit?.fallbackReason"> · {{ app.fallbackReasonLabel(item.generationAudit.fallbackReason) }}</small></p></div>
             <div v-if="item.weather">
-              <span>当时天气</span>
-              <p>{{ item.weather.temperatureC }}°C · 体感 {{ item.weather.apparentTemperatureC }}°C · 降水 {{ item.weather.precipitationMm }} mm · 风速 {{ item.weather.windSpeedKmh }} km/h · {{ app.weatherSourceLabel(item.weather.source) }}</p>
+              <span>生成时天气</span>
+              <p v-if="item.weather.source === 'user-provided'">{{ item.weather.temperatureC }}°C · 手动填写，非实时天气</p>
+              <p v-else>{{ item.weather.temperatureC }}°C · 体感 {{ item.weather.apparentTemperatureC }}°C · 降水 {{ item.weather.precipitationMm }} mm · 风速 {{ item.weather.windSpeedKmh }} km/h · {{ app.weatherSourceLabel(item.weather.source) }}</p>
             </div>
           </div>
 
           <footer class="card-footer">
-            <div class="rating-control">
-              <span>{{ item.feedback?.rating ? `已评 ${item.feedback.rating} 星` : '给这套搭配评分' }}</span>
-              <div>
-                <button
-                  v-for="rating in 5"
-                  :key="rating"
-                  type="button"
-                  :class="{ rated: item.feedback?.rating >= rating }"
-                  :disabled="app.state.feedbackSavingId === item.id"
-                  :aria-label="`给搭配 ${item.id} 打 ${rating} 分`"
-                  @click="app.rateRecommendation(item, rating)"
-                >
-                  <Star :size="18" :fill="item.feedback?.rating >= rating ? 'currentColor' : 'none'" />
-                </button>
-              </div>
-            </div>
+            <RecommendationFeedback :app="app" :recommendation="item" />
             <button
               class="save-button"
               type="button"
@@ -322,10 +311,10 @@ function clearFilters() {
 
       <div v-else class="state-panel empty-state">
         <Sparkles :size="29" aria-hidden="true" />
-        <strong>{{ app.state.history.length ? '没有找到相符的记录' : '还没有搭配记录' }}</strong>
-        <span>{{ app.state.history.length ? '换个关键词，或清除筛选条件。' : '生成一套搭配后，记录会出现在这里。' }}</span>
-        <button v-if="app.state.history.length" type="button" @click="clearFilters">清空筛选</button>
-        <button v-else type="button" @click="app.selectView('recommend')">去生成第一套搭配</button>
+        <strong>{{ (query || activeFilter !== 'all') ? '未找到符合条件的记录' : '暂无搭配记录' }}</strong>
+        <span>{{ (query || activeFilter !== 'all') ? '请调整关键词或清除筛选条件。' : '生成穿搭推荐后，搭配方案将自动保存在此。' }}</span>
+        <button v-if="query || activeFilter !== 'all'" type="button" @click="clearFilters">清除筛选</button>
+        <button v-else type="button" @click="app.selectView('recommend')">创建穿搭方案</button>
       </div>
     </section>
   </section>

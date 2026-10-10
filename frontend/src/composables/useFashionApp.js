@@ -1,6 +1,10 @@
-import { computed, reactive, nextTick } from 'vue'
+import { computed, reactive, nextTick, watch } from 'vue'
+import { verifiedFullBodyImageUrl } from '../utils/trendGallery.js'
+import { isConfiguredDemoTrend } from '../utils/trendSources.js'
+import { outfitModelReferenceKey } from '../utils/outfitModel.js'
+import { favoriteUploadForm } from '../utils/tryOnFavorites.js'
 
-const VALID_VIEWS = new Set(['home', 'trend', 'recommend', 'wardrobe', 'history', 'profile', 'admin'])
+const VALID_VIEWS = new Set(['home', 'trend', 'recommend', 'wardrobe', 'history', 'favorites', 'profile', 'admin'])
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 const ADMIN_PAGE_SIZE = 20
 
@@ -22,6 +26,17 @@ const COLOR_MAP = {
 const FALLBACK_COLORS = ['#9da6a1', '#b29a7a', '#77878d', '#746f67', '#879276', '#8f7d86']
 const WEATHER_CITY_STORAGE_KEY = 'fashion.weather.city'
 const WEATHER_LOCATION_STORAGE_KEY = 'fashion.weather.location'
+const TREND_GALLERY_SIZE = 10
+
+function uniqueTrendImages(items = []) {
+  const seen = new Set()
+  return items.filter((item) => {
+    const url = verifiedFullBodyImageUrl(item)
+    if (!url || seen.has(url)) return false
+    seen.add(url)
+    return true
+  })
+}
 
 function listFromCsv(value = '') {
   return value.split(/[，,、]/).map((item) => item.trim()).filter(Boolean)
@@ -75,7 +90,7 @@ function createRecommendationForm() {
 }
 
 function createProfileForm() {
-  return { displayName: '', gender: '', stylePreferences: '', colorPreferences: '', occasions: '' }
+  return { displayName: '', gender: '', stylePreferences: '', colorPreferences: '', occasions: '', heightCm: null, weightKg: null }
 }
 
 async function readApiBody(response) {
@@ -95,10 +110,12 @@ function sessionChangedError() {
 }
 
 export function useFashionApp() {
-  const categories = ['上装', '下装', '鞋履', '外套', '配饰']
+  const categories = ['上装', '下装', '连体装', '鞋履', '外套', '配饰']
   let csrf = null
   let sessionVersion = 0
   let trendRequestVersion = 0
+  let historyRequestVersion = 0
+  let favoritesRequestVersion = 0
   const visualCache = new Map()
   const state = reactive({
     authPhase: 'checking',
@@ -107,7 +124,8 @@ export function useFashionApp() {
     authError: '',
     activeView: 'home',
     trends: [],
-    trendPeriod: 'week',
+    galleryTrends: [],
+    trendPeriod: 'day',
     trendPlatform: '',
     trendStyles: [],
     trendError: '',
@@ -115,13 +133,22 @@ export function useFashionApp() {
     trendMeta: { primarySource: '', fetchedAt: null, demoMode: false, scoreLabel: '热度' },
     selectedTrendId: null,
     wardrobe: [],
+    tryOnFavorites: [],
+    tryOnFavoritesLoading: false,
+    tryOnFavoritesError: '',
     history: [],
     historyTotal: 0,
+    historyStatistics: null,
+    historyFilter: 'all',
+    historyQuery: '',
+    historyError: '',
     historyPage: 0,
     historyHasNext: false,
     currentRecommendation: null,
     profile: null,
+    outfitModelRevision: 0,
     weather: null,
+    weatherCoordinates: null,
     error: '',
     wardrobeLoading: false,
     historyLoading: false,
@@ -132,6 +159,8 @@ export function useFashionApp() {
     saving: false,
     adding: false,
     profileSaving: false,
+    profilePhotoUploading: false,
+    profileAnalyzing: false,
     feedbackSavingId: null,
     deletingId: null,
     editingId: null,
@@ -169,21 +198,38 @@ export function useFashionApp() {
     notificationsOpen: false,
     garmentForm: createGarmentForm(),
     recommendationForm: createRecommendationForm(),
-    profileForm: createProfileForm()
+    profileForm: createProfileForm(),
+    preferenceInspiration: null
   })
+
+  const stopOutfitModelWatch = watch(
+    () => `${String(state.profile?.gender || '').trim().toUpperCase()}:${outfitModelReferenceKey(state.profile)}`,
+    () => { state.outfitModelRevision += 1 },
+    { flush: 'sync' }
+  )
 
   function resetPrivateState() {
     state.selectedTrendReference = null
     sessionVersion += 1
     visualCache.clear()
     state.wardrobe = []
+    state.tryOnFavorites = []
+    state.tryOnFavoritesLoading = false
+    state.tryOnFavoritesError = ''
+    favoritesRequestVersion += 1
     state.history = []
+    historyRequestVersion += 1
+    state.historyStatistics = null
+    state.historyFilter = 'all'
+    state.historyQuery = ''
+    state.historyError = ''
     state.historyTotal = 0
     state.historyPage = 0
     state.historyHasNext = false
     state.currentRecommendation = null
     state.profile = null
     state.weather = null
+    state.weatherCoordinates = null
     state.wardrobeLoading = false
     state.historyLoading = false
     state.profileLoading = false
@@ -192,6 +238,8 @@ export function useFashionApp() {
     state.saving = false
     state.adding = false
     state.profileSaving = false
+    state.profilePhotoUploading = false
+    state.profileAnalyzing = false
     state.feedbackSavingId = null
     state.deletingId = null
     state.editingId = null
@@ -230,6 +278,7 @@ export function useFashionApp() {
     state.garmentForm = createGarmentForm()
     state.recommendationForm = createRecommendationForm()
     state.profileForm = createProfileForm()
+    state.preferenceInspiration = null
     state.error = ''
   }
 
@@ -256,7 +305,7 @@ export function useFashionApp() {
     const body = await readApiBody(response)
     if (expectedSessionVersion !== sessionVersion) throw sessionChangedError()
     if (!response.ok || !body || body.code !== 0 || !body.data?.headerName || !body.data?.token) {
-      throw responseError(response, body, '无法建立登录会话')
+      throw responseError(response, body, '无法建立登录会话，请刷新页面后重试。')
     }
     csrf = body.data
     return csrf
@@ -297,7 +346,7 @@ export function useFashionApp() {
     }
     if (response.status === 401) {
       if (!policy.allowUnauthorized && requestVersion === sessionVersion) expireSession()
-      throw responseError(response, body, '请先登录账户')
+      throw responseError(response, body, '请先登录账户。')
     }
     if (!response.ok || !body || body.code !== 0) {
       throw responseError(response, body)
@@ -323,12 +372,14 @@ export function useFashionApp() {
 
   function clearWeather() {
     state.weather = null
+    state.weatherCoordinates = null
     writeLocalStorage(WEATHER_CITY_STORAGE_KEY, null)
     writeLocalStorage(WEATHER_LOCATION_STORAGE_KEY, null)
   }
 
   async function loadPrivateData() {
     const requests = [loadWardrobe(), loadHistory(), loadProfile()]
+    if (state.activeView === 'favorites') requests.push(loadTryOnFavorites())
     if (isAdmin.value) requests.push(
       loadAdminOverview(),
       loadAdminUsers(),
@@ -425,10 +476,17 @@ export function useFashionApp() {
     state.trendsLoading = true
     state.trendError = ''
     try {
-      const params = new URLSearchParams({ period: state.trendPeriod, platform: state.trendPlatform })
+      const period = 'day'
+      const platform = state.trendPlatform
+      const params = new URLSearchParams({ period, platform })
       const feed = await request(`/api/v1/trends?${params}`)
       if (version !== trendRequestVersion) return
-      state.trends = feed.items || []
+      const trendItems = feed.items || []
+      let galleryItems = uniqueTrendImages(trendItems)
+
+      if (version !== trendRequestVersion) return
+      state.trends = trendItems
+      state.galleryTrends = galleryItems
       state.trendStyles = feed.styles || []
       state.trendMeta = {
         primarySource: feed.primarySource || '',
@@ -438,8 +496,9 @@ export function useFashionApp() {
         sources: feed.sources || [],
         notice: feed.notice || ''
       }
-      if (!state.selectedTrendId || !state.trends.some((item) => item.id === state.selectedTrendId)) {
-        state.selectedTrendId = state.trends[0]?.id || null
+      const visibleGalleryItems = galleryItems.slice(0, TREND_GALLERY_SIZE)
+      if (!state.selectedTrendId || !visibleGalleryItems.some((item) => item.id === state.selectedTrendId)) {
+        state.selectedTrendId = visibleGalleryItems[0]?.id || trendItems[0]?.id || null
       }
     } catch (cause) {
       if (version === trendRequestVersion) state.trendError = '趋势暂时无法加载，请稍后重试。'
@@ -450,7 +509,8 @@ export function useFashionApp() {
 
   async function useTrend(item) {
     state.selectedTrendReference = item
-    state.recommendationForm.trendId = item.id
+    if (isConfiguredDemoTrend(item)) delete state.recommendationForm.trendId
+    else state.recommendationForm.trendId = item.id
     state.recommendationForm.styleHint = (item.topicTags || []).join('、').slice(0, 120)
     await selectView('recommend')
     await nextTick()
@@ -487,26 +547,67 @@ export function useFashionApp() {
     }
   }
 
+  async function loadTryOnFavorites() {
+    if (state.authPhase !== 'authenticated') return null
+    const version = sessionVersion, requestId = ++favoritesRequestVersion
+    state.tryOnFavoritesLoading = true
+    state.tryOnFavoritesError = ''
+    try {
+      const items = await request('/api/v1/me/try-on-favorites')
+      if (isCurrentSession(version) && requestId === favoritesRequestVersion) state.tryOnFavorites = items
+      return items
+    } catch (cause) {
+      if (isCurrentSession(version) && requestId === favoritesRequestVersion) state.tryOnFavoritesError = cause.message
+      return null
+    } finally {
+      if (isCurrentSession(version) && requestId === favoritesRequestVersion) state.tryOnFavoritesLoading = false
+    }
+  }
+
+  async function saveTryOnFavorite(item, imageData) {
+    if (state.authPhase !== 'authenticated') throw sessionChangedError()
+    const version = sessionVersion
+    const form = favoriteUploadForm(item, imageData, state.authUser.username)
+    const saved = await requestMultipart('/api/v1/me/try-on-favorites', form)
+    if (!isCurrentSession(version)) throw sessionChangedError()
+    favoritesRequestVersion += 1
+    state.tryOnFavoritesLoading = false
+    state.tryOnFavorites = [saved, ...state.tryOnFavorites.filter(value => value.id !== saved.id)]
+    return saved
+  }
+
   async function loadHistory(options = {}) {
-    if (state.authPhase !== 'authenticated' || state.historyLoading) return null
+    if (state.authPhase !== 'authenticated') return null
     const append = options.append === true
+    if (append && (state.historyLoading || !state.historyHasNext)) return null
+    if (options.filter !== undefined) state.historyFilter = options.filter
+    if (options.query !== undefined) state.historyQuery = options.query.trim()
     const page = append ? state.historyPage + 1 : 0
     const version = sessionVersion
+    const requestVersion = ++historyRequestVersion
     state.historyLoading = true
+    state.historyError = ''
     try {
-      const historyPage = await request(`/api/v1/me/recommendations?page=${page}&size=20`)
-      if (isCurrentSession(version)) {
+      const params = new URLSearchParams({ page: String(page), size: '20' })
+      if (state.historyFilter !== 'all') params.set('filter', state.historyFilter)
+      if (state.historyQuery) params.set('query', state.historyQuery)
+      const historyPage = await request(`/api/v1/me/recommendations?${params}`)
+      if (isCurrentSession(version) && requestVersion === historyRequestVersion) {
         state.history = append ? [...state.history, ...historyPage.content] : historyPage.content
         state.historyTotal = historyPage.totalElements
         state.historyPage = historyPage.page
         state.historyHasNext = historyPage.hasNext
+        state.historyStatistics = historyPage.statistics || null
       }
       return historyPage
     } catch (cause) {
-      showError(cause)
+      if (isCurrentSession(version) && requestVersion === historyRequestVersion) {
+        state.historyError = cause.message || '搭配记录加载失败，请重试'
+        showError(cause)
+      }
       return null
     } finally {
-      if (isCurrentSession(version)) state.historyLoading = false
+      if (isCurrentSession(version) && requestVersion === historyRequestVersion) state.historyLoading = false
     }
   }
 
@@ -514,6 +615,8 @@ export function useFashionApp() {
     state.profileForm = {
       displayName: profile?.displayName || '',
       gender: profile?.gender || '',
+      heightCm: profile?.heightCm ?? null,
+      weightKg: profile?.weightKg ?? null,
       stylePreferences: (profile?.stylePreferences || []).join('、'),
       colorPreferences: (profile?.colorPreferences || []).join('、'),
       occasions: (profile?.occasions || []).join('、')
@@ -599,7 +702,8 @@ export function useFashionApp() {
         await loadAdminOverview()
         await loadAdminAuditLogs({ page: 0 })
       }
-      return updated
+      if (state.historyStatistics) await loadHistory()
+      return isCurrentSession(version) ? updated : null
     } catch (cause) {
       showError(cause)
       return null
@@ -655,7 +759,8 @@ export function useFashionApp() {
           await loadAdminFeedback({ page: state.adminFeedbackPage })
         }
       }
-      return updated
+      if (state.historyStatistics) await loadHistory()
+      return isCurrentSession(version) ? updated : null
     } catch (cause) {
       showError(cause)
       return null
@@ -720,7 +825,8 @@ export function useFashionApp() {
         if (index >= 0) state.adminAiModels.splice(index, 1, updated)
         await loadAdminAuditLogs({ page: 0 })
       }
-      return updated
+      if (state.historyStatistics) await loadHistory()
+      return isCurrentSession(version) ? updated : null
     } catch (cause) {
       showError(cause)
       return null
@@ -752,33 +858,85 @@ export function useFashionApp() {
     }
   }
 
-  async function saveProfile() {
-    if (state.authPhase !== 'authenticated') return null
+  async function writeProfile(path, body, busyField = 'profileSaving') {
+    if (state.authPhase !== 'authenticated' || state.profileSaving || state.profilePhotoUploading || state.profileAnalyzing) return null
     const version = sessionVersion
-    state.profileSaving = true
+    state[busyField] = true
     clearError()
     try {
-      const profile = await request('/api/v1/me/style-profile/refresh', {
-        method: 'POST',
-        body: JSON.stringify({
-          displayName: state.profileForm.displayName,
-          gender: state.profileForm.gender || null,
-          stylePreferences: listFromCsv(state.profileForm.stylePreferences),
-          colorPreferences: listFromCsv(state.profileForm.colorPreferences),
-          occasions: listFromCsv(state.profileForm.occasions)
-        })
-      })
-      if (isCurrentSession(version)) {
-        state.profile = profile
-        hydrateProfileForm(profile)
-      }
+      const profile = await request(path, { method: 'POST', body })
+      if (!isCurrentSession(version)) return null
+      state.profile = profile
+      hydrateProfileForm(profile)
       return profile
     } catch (cause) {
       showError(cause)
       return null
     } finally {
-      if (isCurrentSession(version)) state.profileSaving = false
+      if (isCurrentSession(version)) state[busyField] = false
     }
+  }
+
+  async function saveProfile(personalData = {}) {
+    return writeProfile('/api/v1/me/style-profile/refresh', JSON.stringify({
+      displayName: state.profileForm.displayName || state.authUser?.username || '用户',
+      gender: state.profileForm.gender || null,
+      stylePreferences: listFromCsv(state.profileForm.stylePreferences),
+      colorPreferences: listFromCsv(state.profileForm.colorPreferences),
+      occasions: listFromCsv(state.profileForm.occasions),
+      heightCm: personalData.heightCm ?? state.profileForm.heightCm ?? null,
+      weightKg: personalData.weightKg ?? state.profileForm.weightKg ?? null,
+      avoidPreferences: state.profile?.avoidPreferences || []
+    }))
+  }
+
+  async function savePreferences(preferences) {
+    const profile = state.profile
+    if (!profile) return null
+    return writeProfile('/api/v1/me/style-profile/refresh', JSON.stringify({
+      displayName: preferences.displayName?.trim() || profile.displayName || state.authUser?.username || '用户',
+      gender: profile.gender || null,
+      heightCm: profile.heightCm ?? null,
+      weightKg: profile.weightKg ?? null,
+      stylePreferences: preferences.stylePreferences || [],
+      colorPreferences: preferences.colorPreferences || [],
+      occasions: preferences.occasions || [],
+      avoidPreferences: preferences.avoidPreferences || [],
+      confirmPreferences: true
+    }))
+  }
+
+  function exploreRecommendationPreferences(recommendation) {
+    if (state.authPhase !== 'authenticated' || !recommendation) return
+    const values = key => [...new Set((recommendation.items || []).flatMap(item => listFromCsv(item[key])).filter(Boolean))].slice(0, 10)
+    state.preferenceInspiration = {
+      title: recommendation.summary || '这套搭配',
+      stylePreferences: values('style'),
+      colorPreferences: values('color')
+    }
+    selectView('profile')
+  }
+
+  async function uploadProfilePhoto(file) {
+    const data = new FormData()
+    data.append('photo', file)
+    return writeProfile('/api/v1/me/style-profile/photo', data, 'profilePhotoUploading')
+  }
+
+  async function analyzeProfile(allowAiAnalysis = false) {
+    if (!allowAiAnalysis) {
+      state.error = '请授权将本次照片与相关资料发送至 AI 分析服务。'
+      return null
+    }
+    return writeProfile('/api/v1/me/style-profile/analyze', JSON.stringify({ allowAiAnalysis }), 'profileAnalyzing')
+  }
+
+  async function saveProfileAnalysis(analysis) {
+    return writeProfile('/api/v1/me/style-profile/analysis', JSON.stringify(analysis))
+  }
+
+  async function saveOutfitModelPreference(usePersonalPhotoForOutfit) {
+    return writeProfile('/api/v1/me/style-profile/outfit-model', JSON.stringify({ usePersonalPhotoForOutfit }))
   }
 
   async function loadWeather() {
@@ -787,13 +945,15 @@ export function useFashionApp() {
     state.weatherLoading = true
     clearError()
     try {
-      const weather = await request(`/api/v1/weather/current?city=${encodeURIComponent(state.recommendationForm.city)}`)
+      const city = state.recommendationForm.city.trim()
+      const weather = await request(`/api/v1/weather/current?city=${encodeURIComponent(city)}`)
       if (isCurrentSession(version)) {
         state.weather = weather
-        writeLocalStorage(WEATHER_CITY_STORAGE_KEY, state.recommendationForm.city.trim())
+        state.weatherCoordinates = null
+        writeLocalStorage(WEATHER_CITY_STORAGE_KEY, city)
         writeLocalStorage(WEATHER_LOCATION_STORAGE_KEY, null)
       }
-      return weather
+      return isCurrentSession(version) ? weather : null
     } catch (cause) {
       if (isCurrentSession(version)) state.weather = null
       showError(cause)
@@ -823,7 +983,8 @@ export function useFashionApp() {
     state.weatherLoading = true
     if (!options.silent) clearError()
     try {
-      const coordinates = options.coordinates || readStoredWeatherLocation() || await browserLocation()
+      const coordinates = options.coordinates || (options.fresh ? await browserLocation() : readStoredWeatherLocation() || await browserLocation())
+      if (!isCurrentSession(version)) return null
       const query = new URLSearchParams({
         latitude: coordinates.latitude.toFixed(4),
         longitude: coordinates.longitude.toFixed(4)
@@ -831,13 +992,17 @@ export function useFashionApp() {
       const weather = await request(`/api/v1/weather/current?${query.toString()}`)
       if (isCurrentSession(version)) {
         state.weather = weather
+        state.weatherCoordinates = coordinates
+        state.recommendationForm.city = '当前位置'
         writeLocalStorage(WEATHER_CITY_STORAGE_KEY, null)
         writeLocalStorage(WEATHER_LOCATION_STORAGE_KEY, JSON.stringify(coordinates))
       }
-      return weather
+      return isCurrentSession(version) ? weather : null
     } catch (cause) {
       if (isCurrentSession(version) && !options.silent) {
-        showError(new Error('无法获取当前位置天气，请输入城市后再试。'))
+        showError(new Error(cause.code === 1
+          ? '定位权限未开启。可在浏览器地址栏的网站权限中允许定位后重试，或选择城市获取天气。'
+          : '暂时无法获取当前位置天气，请重试定位或选择城市获取天气。'))
       }
       return null
     } finally {
@@ -945,7 +1110,8 @@ export function useFashionApp() {
     }
   }
 
-  async function generateRecommendation() {
+  async function generateRecommendation(options = {}) {
+    if (state.generating) return null
     if (state.authPhase !== 'authenticated') return null
     const version = sessionVersion
     state.generating = true
@@ -953,14 +1119,18 @@ export function useFashionApp() {
     try {
       const recommendation = await request('/api/v1/recommendations', {
         method: 'POST',
-        body: JSON.stringify({ ...state.recommendationForm })
+        body: JSON.stringify({ ...state.recommendationForm,
+          ...((options.city ?? state.recommendationForm.city) === '当前位置' && state.weatherCoordinates
+            ? state.weatherCoordinates : {}),
+          ...Object.fromEntries(['occasion', 'city', 'styleHint', 'trendId', 'lockedItemIds', 'excludedItemIds', 'manualTemperatureC']
+            .filter(key => options[key] !== undefined).map(key => [key, options[key]])) })
       })
       if (isCurrentSession(version)) {
         state.currentRecommendation = recommendation
-        state.weather = recommendation.weather || null
+        if (recommendation.weather?.source !== 'user-provided') state.weather = recommendation.weather || null
         await loadHistory()
       }
-      return recommendation
+      return isCurrentSession(version) ? recommendation : null
     } catch (cause) {
       showError(cause)
       return null
@@ -971,43 +1141,54 @@ export function useFashionApp() {
 
   async function generateRecommendationVisual(recommendation, options = {}) {
     if (state.authPhase !== 'authenticated' || !recommendation?.id) return null
+    const version = sessionVersion
     const itemIds = (recommendation.items || []).map((item) => item?.id).filter(Boolean).join(',')
     const gender = String(state.profile?.gender || '').trim().toUpperCase()
-    const cacheKey = `${recommendation.id}:${gender}:${itemIds}`
+    const referenceKey = outfitModelReferenceKey(state.profile)
+    const modelRevision = state.outfitModelRevision
+    const modelSource = state.profile?.usePersonalPhotoForOutfit ? 'PERSONAL' : 'DEFAULT'
+    const cacheKey = `${recommendation.id}:${gender}:${referenceKey}:${itemIds}`
     if (!options.force && visualCache.has(cacheKey)) return visualCache.get(cacheKey)
     try {
       const result = await request(`/api/v1/me/recommendations/${recommendation.id}/visual`, { method: 'POST' })
+      if (!isCurrentSession(version) || state.outfitModelRevision !== modelRevision) return null
+      if ((result?.modelSource && result.modelSource !== modelSource)
+        || (result?.modelGender && String(result.modelGender).trim().toUpperCase() !== gender)) return null
       visualCache.set(cacheKey, result)
       return result
     } catch (cause) {
+      if (!isCurrentSession(version) || state.outfitModelRevision !== modelRevision) return null
       const result = {
         status: 'FAILED',
         imageUrl: null,
         model: null,
         modelGender: gender || null,
+        modelSource,
         itemCount: 0,
-        message: cause instanceof Error ? cause.message : '阿里云人物生图暂时失败，请稍后重试'
+        message: cause instanceof Error ? cause.message : '穿搭效果图生成失败，请稍后重试。'
       }
       visualCache.set(cacheKey, result)
       return result
     }
   }
 
-  async function rateRecommendation(recommendation, rating) {
-    if (state.authPhase !== 'authenticated' || !recommendation) return null
+  async function rateRecommendation(recommendation, rating, details = {}) {
+    if (state.authPhase !== 'authenticated' || !recommendation || state.feedbackSavingId === recommendation.id) return null
     const version = sessionVersion
     state.feedbackSavingId = recommendation.id
     clearError()
     try {
       const updated = await request(`/api/v1/me/recommendations/${recommendation.id}/feedback`, {
         method: 'POST',
-        body: JSON.stringify({ rating, feedbackType: 'rating' })
+        body: JSON.stringify({ rating,
+          feedbackType: details.feedbackType ?? recommendation.feedback?.feedbackType ?? 'rating',
+          comment: details.comment ?? recommendation.feedback?.comment ?? null })
       })
-      if (isCurrentSession(version)) {
-        if (state.currentRecommendation?.id === updated.id) state.currentRecommendation = updated
-        state.history = state.history.map((item) => item.id === updated.id ? updated : item)
-      }
-      return updated
+      if (!isCurrentSession(version)) return null
+      if (state.currentRecommendation?.id === updated.id) state.currentRecommendation = updated
+      state.history = state.history.map((item) => item.id === updated.id ? updated : item)
+      if (state.historyStatistics) await loadHistory()
+      return isCurrentSession(version) ? updated : null
     } catch (cause) {
       showError(cause)
       return null
@@ -1030,7 +1211,8 @@ export function useFashionApp() {
           ? state.history.map((item) => item.id === saved.id ? saved : item)
           : [saved, ...state.history]
       }
-      return saved
+      if (state.historyStatistics) await loadHistory()
+      return isCurrentSession(version) ? saved : null
     } catch (cause) {
       showError(cause)
       return null
@@ -1067,11 +1249,12 @@ export function useFashionApp() {
       for (const item of recommendation.items || []) covered.add(item.id || item.name)
     }
     return {
-      total: state.historyTotal,
+      total: state.historyStatistics?.total ?? state.historyTotal,
       loaded: state.history.length,
-      saved: savedHistory.value.length,
-      averageRating: ratings.length ? ratings.reduce((sum, value) => sum + value, 0) / ratings.length : null,
-      coveredItems: covered.size
+      saved: state.historyStatistics?.saved ?? savedHistory.value.length,
+      rated: state.historyStatistics?.rated ?? ratings.length,
+      averageRating: state.historyStatistics ? state.historyStatistics.averageRating : ratings.length ? ratings.reduce((sum, value) => sum + value, 0) / ratings.length : null,
+      coveredItems: state.historyStatistics?.coveredItems ?? covered.size
     }
   })
 
@@ -1146,6 +1329,7 @@ export function useFashionApp() {
   // Weather is usually live (wttr.in / open-meteo). The configured-demo snapshot is static offline
   // presentation data and must never be shown as real-time weather.
   function weatherSourceLabel(source = '') {
+    if (source === 'user-provided') return '手动温度 · 非实时天气'
     if (source === 'configured-demo') return '演示天气 · 非实时'
     if (source === 'wttr.in') return '实时天气 · wttr.in'
     if (source === 'open-meteo') return '实时天气 · Open-Meteo'
@@ -1153,6 +1337,7 @@ export function useFashionApp() {
   }
 
   function weatherConditionLabel(code) {
+    if (code === null || code === undefined || code === '') return '天气未知'
     const value = Number(code)
     if (value === 0) return '晴'
     if ([1, 2, 3].includes(value)) return '多云'
@@ -1165,8 +1350,8 @@ export function useFashionApp() {
   }
 
   function engineLabel(engine) {
-    if (engine === 'llm') return '大模型'
-    if (engine === 'development-rule-v1') return '规则引擎（备用）'
+    if (engine === 'llm') return 'AI 模型推荐'
+    if (engine === 'development-rule-v1') return '规则推荐（备用）'
     return engine || '来源未知'
   }
 
@@ -1177,9 +1362,9 @@ export function useFashionApp() {
       'request-failed': '模型请求失败',
       'response-invalid': '模型返回内容无法解析',
       'result-invalid': '模型结果未通过校验',
-      'duplicate-item-ids': '返回了重复衣物',
-      'foreign-item-ids': '返回了衣橱之外的衣物',
-      'same-category': '返回的衣物类别不完整'
+      'duplicate-item-ids': '推荐结果包含重复单品',
+      'foreign-item-ids': '推荐结果包含非衣橱单品',
+      'same-category': '推荐结果的衣物类别不完整'
     }
     return labels[reason] || reason || ''
   }
@@ -1188,6 +1373,7 @@ export function useFashionApp() {
     if (view === 'trend' && !state.trends.length) await loadTrends()
     if (view === 'wardrobe' && !state.wardrobe.length) await loadWardrobe()
     if (view === 'history') await loadHistory()
+    if (view === 'favorites') await loadTryOnFavorites()
     if (view === 'profile' && !state.profile) await loadProfile()
     if (view === 'admin' && isAdmin.value) {
       if (!state.adminOverview) await loadAdminOverview()
@@ -1260,6 +1446,7 @@ export function useFashionApp() {
   }
 
   function dispose() {
+    stopOutfitModelWatch()
     window.removeEventListener('hashchange', syncViewFromLocation)
   }
 
@@ -1292,6 +1479,8 @@ export function useFashionApp() {
     clearTrendReference,
     refreshTrendSources,
     loadWardrobe,
+    loadTryOnFavorites,
+    saveTryOnFavorite,
     loadHistory,
     loadProfile,
     loadAdminOverview,
@@ -1304,6 +1493,12 @@ export function useFashionApp() {
     saveAdminAiModel,
     resetAdminAiModel,
     saveProfile,
+    savePreferences,
+    exploreRecommendationPreferences,
+    uploadProfilePhoto,
+    analyzeProfile,
+    saveProfileAnalysis,
+    saveOutfitModelPreference,
     loadWeather,
     loadLocalWeather,
     refreshWeather,

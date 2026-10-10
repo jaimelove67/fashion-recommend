@@ -23,7 +23,7 @@ class RecommendationServiceTest {
                 mock(WeatherService.class),
                 mock(LlmRecommendationClient.class),
                 mock(TransactionTemplate.class), mock(com.fashion.recommendation.trend.TrendService.class));
-        when(repository.countByUserId("large-history-user")).thenReturn(1_000_051L);
+        when(repository.countByUserId("large-history-user", "all", "")).thenReturn(1_000_051L);
 
         assertTrue(service.list("large-history-user", 19_999, 50).hasNext());
         assertFalse(service.list("large-history-user", 20_000, 50).hasNext());

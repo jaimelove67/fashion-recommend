@@ -23,8 +23,8 @@ class WttrWeatherClient {
     WttrWeatherClient(
             ObjectMapper objectMapper,
             @Value("${app.weather.primary-base-url:https://wttr.in}") String baseUrl,
-            @Value("${app.weather.connect-timeout:3s}") Duration connectTimeout,
-            @Value("${app.weather.read-timeout:3s}") Duration readTimeout) {
+            @Value("${app.weather.connect-timeout:5s}") Duration connectTimeout,
+            @Value("${app.weather.read-timeout:15s}") Duration readTimeout) {
         this(createRestClient(baseUrl, connectTimeout, readTimeout), objectMapper);
     }
 

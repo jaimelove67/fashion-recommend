@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 PLATFORMS = {"dy": "douyin", "wb": "weibo"}
 # The backend rejects an import file larger than this, so status reports readiness the same way.
 MAX_FEED_BYTES = 2_000_000
+TREND_WINDOW_HOURS = 7 * 24
 RULES = {
     "通勤": ("通勤", "西装", "office", "blazer"), "极简": ("极简", "简约", "minimal"),
     "丹宁": ("牛仔", "丹宁", "denim", "jeans"), "轻户外": ("户外", "机能", "gorpcore"),
@@ -33,7 +34,8 @@ SHOW_MARKERS = ("红毯", "red carpet", "red-carpet", "时装周", "fashion week
                 "runway", "runway show", "catwalk", "秀场", "走秀", "大秀")
 CELEBRITY_MARKERS = ("明星", "艺人", "演员", "歌手", "女星", "男星", "影后", "影帝", "偶像", "名人")
 CELEBRITY_STYLE_MARKERS = ("造型", "穿搭", "搭配", "礼服", "首映", "典礼", "封面", "大片", "珠宝", "亮相", "出席")
-EDITORIAL_STYLE_MARKERS = ("红毯造型", "明星造型", "明星穿搭", "女星造型", "男星造型", "时装大片", "封面造型")
+EDITORIAL_STYLE_MARKERS = ("红毯造型", "明星造型", "明星穿搭", "女星造型", "男星造型", "时装大片", "封面造型",
+                           "杂志", "画报", "时尚大片", "封面拍摄", "magazine", "fashion editorial", "editorial shoot")
 
 
 def text(value):
@@ -70,6 +72,21 @@ def instant(value):
     return parsed.astimezone(timezone.utc)
 
 
+def utc_now(value=None):
+    """Return an aware UTC instant, allowing deterministic import/status checks."""
+    current = datetime.now(timezone.utc) if value is None else value
+    if current.tzinfo is None:
+        raise ValueError("now timezone missing")
+    return current.astimezone(timezone.utc)
+
+
+def is_within_window(value, now, hours=TREND_WINDOW_HOURS):
+    """Match TrendService's inclusive recent-publication window."""
+    published = instant(value)
+    current = utc_now(now)
+    return current - timedelta(hours=hours) <= published <= current
+
+
 def http_url(value):
     value = str(value or "")
     parsed = urlparse(value)
@@ -97,7 +114,7 @@ def excluded_show_or_celebrity(value):
         marker in lower for marker in CELEBRITY_STYLE_MARKERS)
 
 
-def normalize(row, platform, observed=None):
+def normalize(row, platform, observed=None, now=None):
     """Accept MediaCrawler content export fields (not comment/creator exports)."""
     if platform not in PLATFORMS.values():
         raise ValueError("unsupported platform")
@@ -117,11 +134,13 @@ def normalize(row, platform, observed=None):
     fetched = instant(row.get("last_modify_ts")) if row.get("last_modify_ts") else observed
     if fetched is None:
         raise ValueError("observation time missing; do not relabel old exports as fresh")
-    now = datetime.now(timezone.utc)
-    if published > now + timedelta(minutes=1) or fetched > now + timedelta(minutes=1):
+    current = utc_now(now)
+    if published > current + timedelta(minutes=1) or fetched > current + timedelta(minutes=1):
         raise ValueError("future timestamp")
     images = image_urls(row.get("image_list") or row.get("note_download_url") or [])
     cover = http_url(row.get("cover_url")) or (images[0] if images else None)
+    reviewed_image = http_url(row.get("full_body_image_url"))
+    full_body_image = reviewed_image if row.get("full_body_image_verified") is True and reviewed_image in (images + [cover]) else None
     source = http_url(row.get("aweme_url") or row.get("note_url"))
     follower_count = next((row.get(field) for field in (
         "authorFollowers", "author_followers_count", "author_follower_count", "author_followers",
@@ -147,16 +166,20 @@ def normalize(row, platform, observed=None):
                      "favorites": count(row.get("collected_count")), "comments": count(row.get("comment_count", row.get("comments_count"))),
                      "reposts": count(row.get("share_count", row.get("shared_count"))),
                      "authorFollowers": count(follower_count),
-                     "authorFollowersLabel": count_label(follower_count)},
+                     "authorFollowersLabel": count_label(follower_count),
+                     "fullBodyImageUrl": full_body_image},
     }
 
 
-def write_feed(rows, platform, output, observed=None):
+def write_feed(rows, platform, output, observed=None, require_fresh_hours=None, now=None):
+    current = utc_now(now)
+    if require_fresh_hours is not None and require_fresh_hours < 0:
+        raise ValueError("require_fresh_hours must be non-negative")
     items = {}
     skipped = 0
     for row in rows:
         try:
-            item = normalize(row, platform, observed)
+            item = normalize(row, platform, observed, current)
             previous = items.get(item["id"])
             if previous is None or instant(item["fetchedAt"]) > instant(previous["fetchedAt"]):
                 items[item["id"]] = item
@@ -165,23 +188,30 @@ def write_feed(rows, platform, output, observed=None):
     if not items:
         raise ValueError("No usable fashion content; previous feed preserved")
     ordered = sorted(items.values(), key=lambda i: instant(i["publishedAt"]), reverse=True)[:50]
+    fresh_items = [item for item in ordered if is_within_window(item["publishedAt"], current,
+                                                                require_fresh_hours if require_fresh_hours is not None else TREND_WINDOW_HOURS)]
+    if require_fresh_hours is not None and not fresh_items:
+        raise ValueError(f"No content published in the last {require_fresh_hours:g} hours; previous feed preserved")
     output.mkdir(parents=True, exist_ok=True)
     target = output / f"{platform}.json"
     temporary = target.with_suffix(".tmp")
     temporary.write_text(json.dumps({"items": ordered}, ensure_ascii=False), encoding="utf-8")
     temporary.replace(target)
-    print(json.dumps({"platform": platform, "items": len(ordered), "skipped": skipped}))
+    print(json.dumps({"platform": platform, "items": len(ordered), "skipped": skipped,
+                      "newestPublishedAt": ordered[0]["publishedAt"], "freshItems": len(fresh_items)},
+                     ensure_ascii=False))
 
 
-def report(output):
+def report(output, now=None):
     """Inventory the feed directory the backend reads. Never contacts the backend."""
+    current = utc_now(now)
     sources = []
     for platform in sorted(set(PLATFORMS.values())):
         path = output / f"{platform}.json"
         entry = {"platform": platform, "file": str(path)}
         if not path.is_file():
             sources.append({**entry, "state": "missing", "items": 0, "newestPublishedAt": None,
-                            "writtenAt": None, "withinBackendLimit": None,
+                            "eligibleItems": 0, "writtenAt": None, "withinBackendLimit": None,
                             "note": "尚未导入；趋势页会把该来源显示为未接通"})
             continue
         stats = path.stat()
@@ -194,7 +224,7 @@ def report(output):
                 raise ValueError("items must be a list")
         except (ValueError, OSError):
             sources.append({**entry, "state": "unreadable", "items": 0, "newestPublishedAt": None,
-                            "writtenAt": written, "withinBackendLimit": within,
+                            "eligibleItems": 0, "writtenAt": written, "withinBackendLimit": within,
                             "note": "不是后端契约所需的 {\"items\": [...]} JSON；请重新导入"})
             continue
         if not within:
@@ -203,10 +233,30 @@ def report(output):
             state, note = "empty", "文件存在但没有可用条目"
         else:
             state, note = "ready", "可被后端读取；刷新趋势来源后即可展示"
-        published = sorted(str(i.get("publishedAt")) for i in items
-                           if isinstance(i, dict) and i.get("publishedAt"))
+        published = []
+        for item in items:
+            if not isinstance(item, dict) or not item.get("publishedAt"):
+                continue
+            try:
+                published.append((instant(item["publishedAt"]), str(item["publishedAt"])))
+            except (ValueError, TypeError, OverflowError):
+                continue
+        newest = max(published, default=(None, None), key=lambda pair: pair[0])
+        eligible = [item for item in published if current - timedelta(hours=TREND_WINDOW_HOURS)
+                    <= item[0] <= current]
+        if within and items and not eligible:
+            state = "stale"
+            if newest[0] is None:
+                note = "没有可解析的发布时间；无法确认条目属于最近 7 天，趋势页不会将其作为最近趋势"
+            else:
+                note = (f"最新内容发布于 {newest[1]}，早于最近 7 天；不会进入最近 7 天趋势"
+                        "（若后端已验证互动增长，后端可按互动增长规则另行判断）")
+        elif within and items and len(eligible) < len(items):
+            note = (f"有 {len(eligible)} 条内容发布于最近 7 天，可进入趋势；其余旧内容仅在后端"
+                    "验证互动增长时保留")
         sources.append({**entry, "state": state, "items": len(items),
-                        "newestPublishedAt": published[-1] if published else None,
+                        "eligibleItems": len(eligible),
+                        "newestPublishedAt": newest[1],
                         "writtenAt": written, "withinBackendLimit": within, "note": note})
     print(json.dumps({"directory": str(output), "backendLimitBytes": MAX_FEED_BYTES, "sources": sources},
                      ensure_ascii=False, indent=2))
@@ -239,6 +289,8 @@ def main():
     parser.add_argument("--input", type=Path, nargs="+", help="MediaCrawler content JSON export (one or more files)")
     parser.add_argument("--output", type=Path, default=Path(__file__).parent / "data")
     parser.add_argument("--port", type=int, default=8767)
+    parser.add_argument("--require-fresh-hours", type=float,
+                        help="import only if at least one item was published within this many hours")
     args = parser.parse_args()
     if args.mode == "status": report(args.output); return
     if args.mode == "serve": serve(args.output, args.port); return
@@ -249,7 +301,7 @@ def main():
             if not path.is_file(): parser.error(f"input file not found: {path}")
             data = json.loads(path.read_text(encoding="utf-8-sig"))
             rows.extend(data if isinstance(data, list) else data["items"])
-        write_feed(rows, args.platform, args.output)
+        write_feed(rows, args.platform, args.output, require_fresh_hours=args.require_fresh_hours)
         report(args.output)
         return
 

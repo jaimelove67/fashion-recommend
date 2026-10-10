@@ -96,7 +96,7 @@ class BailianRecommendationClientTest {
         assertEquals(direct.reason(), wrapped.reason());
         assertEquals(direct.itemIds(), wrapped.itemIds());
         assertEquals(BailianRecommendationClient.PROMPT_VERSION, wrapped.promptVersion());
-        assertEquals("recommendation-v2-trend", wrapped.promptVersion());
+        assertEquals("recommendation-v7-outfit-constraints", wrapped.promptVersion());
     }
 
     @Test
@@ -114,7 +114,7 @@ class BailianRecommendationClientTest {
 
         assertEquals("chatcmpl-abc123", result.providerCallId());
         assertEquals("qwen-plus", result.modelName());
-        assertEquals("recommendation-v2-trend", result.promptVersion());
+        assertEquals("recommendation-v7-outfit-constraints", result.promptVersion());
         assertEquals(617, result.promptTokens());
         assertEquals(226, result.completionTokens());
         assertEquals(843, result.totalTokens());

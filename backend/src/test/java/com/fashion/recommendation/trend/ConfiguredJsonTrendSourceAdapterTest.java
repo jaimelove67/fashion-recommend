@@ -25,6 +25,15 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 class ConfiguredJsonTrendSourceAdapterTest {
+    @Test void socialSearchAcceptsAHealthyEmptyResultButOtherSourcesStayStrict() {
+        var social = new ConfiguredJsonTrendSourceAdapter(new ObjectMapper(), "", "weibo",
+                Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ofMinutes(1));
+        assertEquals(List.of(), social.parseFeed("{\"items\":[]}"));
+        var licensed = new ConfiguredJsonTrendSourceAdapter(new ObjectMapper(), "", "licensed-feed",
+                Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ofMinutes(1));
+        assertThrows(TrendSourceException.class, () -> licensed.parseFeed("{\"items\":[]}"));
+    }
+
     private static final String ENDPOINT = "https://trends.test/feed.json";
     private static final String VALID_FEED = """
             {"items":[{
@@ -98,6 +107,26 @@ class ConfiguredJsonTrendSourceAdapterTest {
 
         assertEquals(null, result.get(0).evidence().authorFollowers());
         assertEquals("1.2万", result.get(0).evidence().authorFollowersLabel());
+    }
+
+    @Test
+    void acceptsOnlyAnImageFromThePostAsItsReviewedFullBodyPhoto() {
+        var result = adapter.parseFeed("""
+                {"items":[{"id":"creator","platform":"weibo","title":"日常穿搭",
+                "topicTags":["穿搭"],"heatScore":1,"publishedAt":"2026-07-21T08:00:00Z",
+                "sourceUrl":"https://weibo.com/detail/creator","imageUrl":"https://images.example/cover.jpg",
+                "evidence":{"images":["https://images.example/full.jpg"],
+                "fullBodyImageUrl":"https://images.example/full.jpg"}}]}
+                """);
+        assertEquals("https://images.example/full.jpg", result.get(0).evidence().fullBodyImageUrl());
+
+        String unrelatedImage = """
+                {"items":[{"id":"creator","platform":"weibo","title":"日常穿搭",
+                "topicTags":["穿搭"],"heatScore":1,"publishedAt":"2026-07-21T08:00:00Z",
+                "sourceUrl":"https://weibo.com/detail/creator","imageUrl":"https://images.example/cover.jpg",
+                "evidence":{"fullBodyImageUrl":"https://images.example/unrelated.jpg"}}]}
+                """;
+        assertThrows(TrendSourceException.class, () -> adapter.parseFeed(unrelatedImage));
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.fashion.recommendation.trend;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -18,7 +19,11 @@ public final class TrendTopics {
         "造型", "穿搭", "搭配", "礼服", "首映", "典礼", "封面", "大片", "珠宝", "亮相", "出席"
     };
     private static final String[] EDITORIAL_STYLE_MARKERS = {
-        "红毯造型", "明星造型", "明星穿搭", "女星造型", "男星造型", "时装大片", "封面造型"
+        "红毯造型", "明星造型", "明星穿搭", "女星造型", "男星造型", "时装大片", "封面造型",
+        "杂志", "画报", "时尚大片", "封面拍摄", "magazine", "fashion editorial", "editorial shoot"
+    };
+    private static final String[] PUBLISHER_HOSTS = {
+        "vogue.com", "hypebeast.cn", "toodaylab.com", "elle.com", "harpersbazaar.com", "marieclaire.com"
     };
     private static final String[][] RULES = {
         {"通勤", "通勤", "office", "workwear", "tailoring", "blazer", "西装"},
@@ -94,10 +99,26 @@ public final class TrendTopics {
 
     public static boolean excludedShowOrCelebrity(TrendItem item) {
         if (item == null) return false;
+        if ("editorial".equalsIgnoreCase(item.platform())) return true;
+        if (publisherOrShowUrl(item.sourceUrl())) return true;
         String tags = String.join(" ", item.topicTags() == null ? List.of() : item.topicTags());
         return excludedShowOrCelebrity(String.join(" ",
                 item.title() == null ? "" : item.title(),
                 item.summary() == null ? "" : item.summary(), tags));
+    }
+
+    private static boolean publisherOrShowUrl(String sourceUrl) {
+        if (sourceUrl == null || sourceUrl.isBlank()) return false;
+        try {
+            URI uri = URI.create(sourceUrl);
+            String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
+            for (String publisher : PUBLISHER_HOSTS)
+                if (host.equals(publisher) || host.endsWith("." + publisher)) return true;
+            String path = uri.getPath() == null ? "" : uri.getPath().toLowerCase(Locale.ROOT);
+            return path.contains("/runway/") || path.contains("/fashion-shows/") || path.contains("/magazine/");
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 
     /**

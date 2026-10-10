@@ -258,9 +258,9 @@ onDeactivated(() => {
   <section class="wardrobe-view" aria-labelledby="wardrobe-title">
     <header class="page-header">
       <div>
-        <p class="eyebrow">衣橱管理</p>
+        <p class="eyebrow">衣橱</p>
         <h1 id="wardrobe-title">我的衣橱</h1>
-        <p class="page-intro">把常穿的衣物记在这里，推荐才会用到你的实际选择。</p>
+        <p class="page-intro">集中管理衣物单品，完善类别、颜色与风格信息，为穿搭推荐提供依据。</p>
       </div>
       <div class="header-actions">
         <button type="button" class="button secondary" @click="openAddModal(true)">
@@ -360,7 +360,7 @@ onDeactivated(() => {
         <section class="category-overview" aria-labelledby="category-overview-title">
           <div class="section-heading">
             <div>
-              <p class="section-kicker">类别概览</p>
+              <p class="section-kicker">分类</p>
               <h2 id="category-overview-title">按类别查看衣物</h2>
             </div>
             <span>{{ categories.length }} 个分类</span>
@@ -385,13 +385,13 @@ onDeactivated(() => {
               <span v-else class="category-fallback"><Shirt :size="27" aria-hidden="true" /></span>
             </button>
           </div>
-          <div v-else class="overview-empty">添加衣物后，这里会显示各类别的数量。</div>
+          <div v-else class="overview-empty">添加衣物后，可查看各类别的单品数量。</div>
         </section>
 
         <section id="wardrobe-collection" class="collection" aria-labelledby="collection-title">
           <div class="section-heading collection-heading">
             <div>
-              <p class="section-kicker">衣物列表</p>
+              <p class="section-kicker">全部衣物</p>
               <h2 id="collection-title">{{ filteredItems.length }} 件衣物</h2>
             </div>
             <button
@@ -441,7 +441,7 @@ onDeactivated(() => {
             <label class="search-control">
               <Search :size="17" aria-hidden="true" />
               <span class="sr-only">搜索衣橱</span>
-              <input v-model="query" type="search" placeholder="搜名称、颜色或风格" />
+              <input v-model="query" type="search" placeholder="搜索衣物名称、颜色或风格" />
               <button v-if="query" type="button" aria-label="清空搜索" @click="query = ''">
                 <X :size="15" aria-hidden="true" />
               </button>
@@ -468,23 +468,23 @@ onDeactivated(() => {
 
           <div v-if="loading" class="state-panel" role="status" aria-live="polite">
             <LoaderCircle class="spinning" :size="25" aria-hidden="true" />
-            <strong>正在加载衣物</strong>
-            <span>衣物加载后会显示在这里。</span>
+            <strong>正在加载衣橱单品…</strong>
+            <span>加载完成后可查看、筛选与编辑衣物。</span>
           </div>
 
           <div v-else-if="wardrobe.length === 0" class="state-panel empty-state">
             <span class="state-icon"><PackageOpen :size="28" aria-hidden="true" /></span>
-            <strong>衣橱里还没有衣物</strong>
-            <span>先添加一件衣物，之后的搭配才会用到它。</span>
+            <strong>暂无衣橱单品</strong>
+            <span>添加衣物并完善信息后，单品即可参与穿搭推荐。</span>
             <button type="button" class="button primary" @click="openAddModal(false)">
-              <Plus :size="16" aria-hidden="true" />添加第一件衣物
+              <Plus :size="16" aria-hidden="true" />添加衣物
             </button>
           </div>
 
           <div v-else-if="filteredItems.length === 0" class="state-panel empty-state">
             <span class="state-icon"><Search :size="27" aria-hidden="true" /></span>
-            <strong>没有找到符合条件的衣物</strong>
-            <span>换个关键词，或清除筛选条件。</span>
+            <strong>未找到符合条件的衣物</strong>
+            <span>请调整关键词或清除筛选条件。</span>
             <button type="button" class="button secondary" @click="clearFilters">清除筛选</button>
           </div>
 
@@ -509,7 +509,7 @@ onDeactivated(() => {
                   <button
                     type="button"
                     class="icon-button"
-                    :aria-label="'编辑' + (item.name || '这件衣物')"
+                    :aria-label="'编辑' + (item.name || '衣物')"
                     title="编辑衣物"
                     @click="openEditModal(item)"
                   ><Pencil :size="15" aria-hidden="true" /></button>
@@ -517,7 +517,7 @@ onDeactivated(() => {
                     type="button"
                     class="icon-button danger"
                     :disabled="deletingId === item.id"
-                    :aria-label="'删除' + (item.name || '这件衣物')"
+                    :aria-label="'删除' + (item.name || '衣物')"
                     title="删除衣物"
                     @click="app.deleteGarment(item.id)"
                   >
@@ -557,8 +557,8 @@ onDeactivated(() => {
         <header class="modal-header">
           <div>
             <p class="section-kicker">{{ editingId ? '补充信息' : uploadIntent ? '上传照片' : '手动添加' }}</p>
-            <h2 id="garment-modal-title">{{ editingId ? '编辑衣物' : '添加一件衣物' }}</h2>
-            <p>{{ editingId ? '可修改名称、类别、颜色和风格。' : '上传照片后可选择 AI 识别，也可以手动填写。' }}</p>
+            <h2 id="garment-modal-title">{{ editingId ? '编辑衣物' : '添加衣物' }}</h2>
+            <p>{{ editingId ? '可修改名称、类别、颜色和风格。' : '支持上传照片并授权 AI 识别，或手动录入衣物信息。' }}</p>
           </div>
           <button
             type="button"
@@ -622,7 +622,7 @@ onDeactivated(() => {
               aria-label="衣物照片"
               @change="app.selectImage($event)"
             />
-            <small>{{ selectedImage ? selectedImage.name : '支持 JPG、PNG 和 WebP；选好照片后可选择是否使用 AI 识别。' }}</small>
+            <small>{{ selectedImage ? selectedImage.name : '支持 JPG、PNG、WebP 格式，单张不超过 10 MB；可选择是否授权 AI 识别。' }}</small>
           </label>
 
           <label v-if="!editingId && selectedImage" class="recognition-consent">
@@ -631,12 +631,12 @@ onDeactivated(() => {
               type="checkbox"
               aria-describedby="recognition-consent-note"
             />
-            <span>使用 AI 识别照片</span>
-            <small id="recognition-consent-note">只有勾选本次上传，照片才会发送给已配置的识别模型。</small>
+            <span>授权 AI 识别衣物</span>
+            <small id="recognition-consent-note">勾选后，本次上传的衣物照片将发送至 AI 识别服务，用于提取衣物信息。</small>
           </label>
 
           <label v-if="!editingId && !selectedImage">
-            <span>照片地址 <em>可选</em></span>
+            <span>图片链接 <em>可选</em></span>
             <input
               v-model.trim="garmentForm.imageUrl"
               type="url"

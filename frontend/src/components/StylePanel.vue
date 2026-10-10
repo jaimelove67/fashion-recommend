@@ -13,10 +13,10 @@ defineEmits(['refresh'])
   <section class="style-panel">
     <header class="panel-heading">
       <div>
-        <p class="section-label">风格档案</p>
-        <h2>从衣橱开始</h2>
+        <p class="section-label">个人形象档案</p>
+        <h2>个人风格概览</h2>
       </div>
-      <button class="icon-button" type="button" title="编辑风格档案" :disabled="loading" @click="$emit('refresh')">
+      <button class="icon-button" type="button" title="更新个人形象档案" :disabled="loading" @click="$emit('refresh')">
         <RefreshCw :size="18" :class="{ spinning: loading }" />
       </button>
     </header>
@@ -28,16 +28,16 @@ defineEmits(['refresh'])
 
     <div class="recommend-block">
       <Sparkles :size="18" />
-      <div><strong>下一套可以试试</strong><p>{{ profile.itemSuggestions.join(' · ') }}</p></div>
+      <div><strong>建议单品</strong><p>{{ profile.itemSuggestions.join(' · ') }}</p></div>
     </div>
 
     <div class="palette-row">
-      <div class="palette-heading"><Palette :size="16" /><span>适合的颜色</span></div>
+      <div class="palette-heading"><Palette :size="16" /><span>建议配色</span></div>
       <div class="swatches">
         <span v-for="color in profile.colorSuggestions" :key="color" :title="color" :class="`swatch ${color}`"></span>
       </div>
     </div>
 
-    <footer><span>可以试试</span><strong>{{ profile.tryStyleTags.join('、') }}</strong></footer>
+    <footer><span>风格拓展建议</span><strong>{{ profile.tryStyleTags.join('、') }}</strong></footer>
   </section>
 </template>

@@ -10,24 +10,25 @@ import org.springframework.core.env.Environment;
 /**
  * Separate endpoints allow a failure on one platform without losing the others.
  *
- * <p>Precedence per platform: an imported file beats a configured endpoint, and a configured
- * endpoint beats the optional public hot board. The hot board is disabled by default because it
- * contains trend words rather than creator content. Xiaohongshu is excluded from trend collection.
+ * <p>Precedence per platform: a configured endpoint beats an imported file, and an imported
+ * file beats the optional public hot board. The hot board is disabled by default because it
+ * contains trend words rather than creator content. Public image posts are eligible across platforms.
  */
 @Configuration
 public class SocialTrendConfiguration {
     @Bean TrendSourceAdapter douyinFeed(ObjectMapper mapper, Environment env) { return source("douyin", mapper, env); }
     @Bean TrendSourceAdapter weiboFeed(ObjectMapper mapper, Environment env) { return source("weibo", mapper, env); }
+    @Bean TrendSourceAdapter xiaohongshuFeed(ObjectMapper mapper, Environment env) { return source("xiaohongshu", mapper, env); }
     private TrendSourceAdapter source(String platform, ObjectMapper mapper, Environment env) {
         String url = env.getProperty("app.trends." + platform + "-endpoint", "");
         var adapter = new ConfiguredJsonTrendSourceAdapter(mapper, url, platform,
-                Duration.ofSeconds(3), Duration.ofSeconds(8), Duration.ofMinutes(5));
+                Duration.ofSeconds(3), Duration.ofSeconds(90), Duration.ZERO);
         String directory = env.getProperty("app.trends.import-directory", "");
         boolean hotBoard = env.getProperty("app.trends.hot-boards-enabled", Boolean.class, false)
                 && PublicHotBoards.supports(platform);
         return new TrendSourceAdapter() {
             public String platform() { return platform; }
-            public boolean emptyResultIsHealthy() { return hotBoard; }
+            public boolean emptyResultIsHealthy() { return hotBoard || !url.isBlank(); }
             public java.util.List<TrendItem> fetchPublicSnapshots() {
                 java.util.List<TrendItem> items;
                 var file = directory.isBlank() ? null : java.nio.file.Path.of(directory).resolve(platform + ".json");

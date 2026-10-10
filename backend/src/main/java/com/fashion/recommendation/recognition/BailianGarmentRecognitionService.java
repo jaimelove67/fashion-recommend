@@ -91,7 +91,7 @@ public class BailianGarmentRecognitionService implements GarmentRecognitionServi
             request.put("max_tokens", 200);
             ArrayNode messages = request.putArray("messages");
             messages.addObject().put("role", "system").put("content", PROMPT);
-            ArrayNode content = messages.addObject().putArray("content");
+            ArrayNode content = messages.addObject().put("role", "user").putArray("content");
             content.addObject().put("type", "text").put("text", PROMPT);
             ObjectNode imagePart = content.addObject();
             imagePart.put("type", "image_url");

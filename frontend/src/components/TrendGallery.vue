@@ -1,8 +1,14 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ImageOff } from '@lucide/vue'
-
-const AUTOPLAY_INTERVAL_MS = 3000
+import { verifiedFullBodyImageUrl } from '../utils/trendGallery.js'
+import { trendImageCandidates, trendDisplayImageUrl } from '../utils/trendImage.js'
+const AUTOPLAY_INTERVAL_MS = 2000
+const GALLERY_POOL_SIZE = 10
+const fallbackTrendImages = [
+  { src: '/assets/look-urban.jpg', alt: '城市日常穿搭参考' },
+  { src: '/assets/look-tailoring.jpg', alt: '利落通勤穿搭参考' },
+  { src: '/assets/look-color.jpg', alt: '简洁配色穿搭参考' }
+]
 
 const props = defineProps({
   trends: { type: Array, default: () => [] },
@@ -12,10 +18,11 @@ const props = defineProps({
 const emit = defineEmits(['select'])
 const gallerySection = ref(null)
 const galleryStage = ref(null)
-const galleryShift = ref(126)
+const galleryCardWidth = ref(360)
+const galleryShift = ref(400)
 const galleryIndex = ref(0)
 const galleryReady = ref(false)
-const galleryVisibleRange = ref(2)
+const galleryVisibleCount = ref(5)
 const unavailableImageUrls = ref(new Set())
 let resizeObserver = null
 let autoplayTimer = null
@@ -24,30 +31,34 @@ let galleryMounted = false
 let galleryKeyboardFocused = false
 let galleryReducedMotion = false
 
+const galleryImages = computed(() => {
+  const seen = new Set()
+  return props.trends.flatMap((item) => {
+    const verifiedUrl = verifiedFullBodyImageUrl(item)
+    if (!verifiedUrl) return []
+    const url = trendImageCandidates(verifiedUrl).map(trendDisplayImageUrl)
+      .find((candidate) => !unavailableImageUrls.value.has(candidate))
+    if (!url || seen.has(url)) return []
+    seen.add(url)
+    return [{ item, url, key: String(item.id) }]
+  }).slice(0, GALLERY_POOL_SIZE)
+})
+
 const selectedIndex = computed(() => {
-  const index = props.trends.findIndex((item) => item.id === props.selectedId)
+  const index = galleryImages.value.findIndex(({ item }) => item.id === props.selectedId)
   return index >= 0 ? index : 0
 })
 const visibleCards = computed(() => {
-  const total = props.trends.length
+  const total = galleryImages.value.length
   if (!total) return []
-  const range = Math.min(galleryVisibleRange.value, Math.floor((total - 1) / 2))
-  if (total <= range * 2 + 1) return props.trends.map((item, index) => ({ item, index }))
+  const count = Math.min(galleryVisibleCount.value, total)
+  const leadingCount = Math.floor((count - 1) / 2)
 
-  return Array.from({ length: range * 2 + 1 }, (_, index) => index - range).map((offset) => {
+  return Array.from({ length: count }, (_, index) => index - leadingCount).map((offset) => {
     const index = (galleryIndex.value + offset + total) % total
-    return { item: props.trends[index], index }
+    return { ...galleryImages.value[index], index, offset }
   })
 })
-
-function imageUrl(item) {
-  return item?.imageUrl || item?.evidence?.images?.find(Boolean) || ''
-}
-
-function hasImage(item) {
-  const url = imageUrl(item)
-  return Boolean(url) && !unavailableImageUrls.value.has(url)
-}
 
 function markImageUnavailable(event) {
   const url = event.currentTarget.getAttribute('src') || event.currentTarget.currentSrc
@@ -61,48 +72,43 @@ function updateGalleryShift() {
     || window.innerWidth
   const mobileLayout = window.innerWidth <= 760
   const cardWidth = mobileLayout
-    ? Math.min(260, stageWidth * 0.68)
-    : Math.min(308, Math.max(236, stageWidth * 0.235))
-  galleryShift.value = mobileLayout
-    ? Math.round(cardWidth + 20)
-    : Math.round(cardWidth * 0.8)
-  const visibleRange = window.innerWidth <= 980 ? 1 : 2
-  galleryVisibleRange.value = visibleRange
+    ? Math.min(300, stageWidth * 0.74)
+    : Math.min(360, Math.max(300, stageWidth * 0.26))
+  const cardGap = mobileLayout
+    ? 32
+    : Math.min(48, Math.max(32, stageWidth * 0.028))
+  galleryCardWidth.value = Math.round(cardWidth)
+  galleryShift.value = Math.round(cardWidth + cardGap)
+  galleryVisibleCount.value = window.innerWidth <= 1100 ? 3 : 5
 
-  if (props.trends.length) {
-    let selectedOffset = selectedIndex.value - galleryIndex.value
-    const half = props.trends.length / 2
-    if (selectedOffset > half) selectedOffset -= props.trends.length
-    if (selectedOffset < -half) selectedOffset += props.trends.length
-    if (Math.abs(selectedOffset) > visibleRange) galleryIndex.value = selectedIndex.value
+  if (galleryImages.value.length && !visibleCards.value.some(({ index }) => index === selectedIndex.value)) {
+    galleryIndex.value = selectedIndex.value
   }
 }
 
-function cardOffset(index) {
-  const total = props.trends.length
-  if (!total) return 0
-  let offset = index - galleryIndex.value
-  const half = total / 2
-  if (offset > half) offset -= total
-  if (offset < -half) offset += total
-  return offset
-}
-
-function cardStyle(index) {
-  const offset = cardOffset(index)
+function cardStyle(offset) {
   const distance = Math.abs(offset)
+  const positionOffset = distance <= 1
+    ? offset
+    : Math.sign(offset) * (1 + (distance - 1) * 0.8)
+  const scale = Math.max(0.82, 1 - distance * 0.09)
+  const edgeShift = Math.sign(offset || 1) * 76
   return {
-    '--gallery-x': `${offset * galleryShift.value}px`,
-    '--gallery-y': `${distance * 7}px`,
+    '--gallery-x': `${positionOffset * galleryShift.value}px`,
+    '--gallery-y': `${distance * 8}px`,
     '--gallery-rotation': `${offset * -7}deg`,
-    '--gallery-scale': Math.max(0.82, 1 - distance * 0.06),
+    '--gallery-scale': scale,
+    '--gallery-transition-scale': Math.max(0.76, scale - 0.06),
+    '--gallery-edge-shift': `${edgeShift}px`,
+    '--gallery-opacity': distance > 1 ? 0.68 : 1,
     zIndex: 20 - distance
   }
 }
 
-function selectTrend(item, index = props.trends.findIndex((trend) => trend.id === item?.id)) {
+function selectTrend(entry) {
+  const item = entry?.item
   if (item?.id == null) return
-  if (index >= 0) galleryIndex.value = index
+  galleryIndex.value = entry.index
   emit('select', item)
   startGalleryAutoplay()
 }
@@ -129,11 +135,11 @@ function startGalleryAutoplay() {
     || galleryKeyboardFocused
     || galleryReducedMotion
     || document.hidden
-    || props.trends.length < 2
+    || galleryImages.value.length < 2
   ) return
 
   autoplayTimer = window.setInterval(() => {
-    const total = props.trends.length
+    const total = galleryImages.value.length
     if (total < 2) {
       stopGalleryAutoplay()
       return
@@ -166,15 +172,16 @@ function handleGalleryVisibility() {
 
 function handleKeydown(event) {
   if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-  if (props.trends.length < 2) return
+  const total = galleryImages.value.length
+  if (total < 2) return
   event.preventDefault()
 
   let nextIndex = selectedIndex.value
-  if (event.key === 'ArrowLeft') nextIndex = (selectedIndex.value - 1 + props.trends.length) % props.trends.length
-  if (event.key === 'ArrowRight') nextIndex = (selectedIndex.value + 1) % props.trends.length
+  if (event.key === 'ArrowLeft') nextIndex = (selectedIndex.value - 1 + total) % total
+  if (event.key === 'ArrowRight') nextIndex = (selectedIndex.value + 1) % total
   if (event.key === 'Home') nextIndex = 0
-  if (event.key === 'End') nextIndex = props.trends.length - 1
-  selectTrend(props.trends[nextIndex], nextIndex)
+  if (event.key === 'End') nextIndex = total - 1
+  selectTrend({ ...galleryImages.value[nextIndex], index: nextIndex })
   focusCenterCard()
 }
 
@@ -193,7 +200,7 @@ onMounted(() => {
   startGalleryAutoplay()
 })
 
-watch(() => JSON.stringify(props.trends.map((item) => item.id)), async () => {
+watch(() => JSON.stringify(galleryImages.value.map(({ key, url }) => [key, url])), async () => {
   galleryReady.value = false
   await nextTick()
   galleryIndex.value = selectedIndex.value
@@ -216,15 +223,18 @@ onBeforeUnmount(() => {
   <section ref="gallerySection" class="trend-gallery" aria-labelledby="trend-gallery-title">
     <header class="gallery-heading">
       <div>
-        <h2 id="trend-gallery-title">风潮穿搭精选</h2>
-        <p>画廊自动轮播，点击图片可将其转到中心并查看对应穿搭灵感</p>
+        <h2 id="trend-gallery-title">趋势穿搭精选</h2>
+        <p v-if="galleryImages.length">{{ galleryImages.length }} 张可用趋势图片</p>
+        <p v-else-if="galleryReady && props.trends.length">趋势图片暂不可用</p>
+        <p v-else>图片待加载</p>
       </div>
     </header>
 
     <div
-      v-if="trends.length && galleryReady"
+      v-if="galleryImages.length && galleryReady"
       ref="galleryStage"
       class="gallery-stage"
+      :style="{ '--gallery-card-width': `${galleryCardWidth}px` }"
       role="region"
       aria-label="趋势穿搭画廊"
       aria-roledescription="3D 画廊"
@@ -233,40 +243,55 @@ onBeforeUnmount(() => {
       @focusin="handleGalleryFocusin"
       @focusout="handleGalleryFocusout"
     >
-      <button
-        v-for="{ item, index } in visibleCards"
-        :key="item.id"
-        type="button"
-        class="gallery-card"
-        :class="{ active: selectedId === item.id }"
-        :style="cardStyle(index)"
-        :data-gallery-index="index"
-        :data-gallery-center="cardOffset(index) === 0 ? 'true' : undefined"
-        :aria-label="`查看第 ${index + 1} 条：${item.title}`"
-        :aria-current="selectedId === item.id ? 'true' : undefined"
-        :aria-pressed="selectedId === item.id"
-        :aria-posinset="index + 1"
-        :aria-setsize="trends.length"
-        :tabindex="Math.abs(cardOffset(index)) <= 3 ? 0 : -1"
-        @click="selectTrend(item, index)"
-      >
-        <span v-if="hasImage(item)" class="gallery-card-image">
-          <img
-            :src="imageUrl(item)"
-            :alt="item.title || '趋势穿搭图片'"
-            loading="lazy"
-            referrerpolicy="no-referrer"
-            @error="markImageUnavailable"
-          />
-        </span>
-        <span v-else class="gallery-card-no-image">
-          <ImageOff :size="22" aria-hidden="true" />
-          <small>{{ item.title || '来源未提供配图' }}</small>
-        </span>
-      </button>
+      <TransitionGroup name="gallery-card">
+        <button
+          v-for="{ item, url, key, index, offset } in visibleCards"
+          :key="key"
+          type="button"
+          class="gallery-card"
+          :class="{
+            active: selectedId === item.id,
+            focal: offset === 0,
+            edge: Math.abs(offset) > 1
+          }"
+          :style="cardStyle(offset)"
+          :data-gallery-index="index"
+          :data-gallery-center="offset === 0 ? 'true' : undefined"
+          :data-gallery-edge="Math.abs(offset) > 1 ? 'true' : undefined"
+          :aria-label="`查看第 ${index + 1} 张图片：${item.title}`"
+          :aria-current="selectedId === item.id ? 'true' : undefined"
+          :aria-pressed="selectedId === item.id"
+          :aria-posinset="index + 1"
+          :aria-setsize="galleryImages.length"
+          :tabindex="0"
+          @click="selectTrend({ item, index })"
+        >
+          <span class="gallery-card-image">
+            <img
+              :src="url"
+              :alt="item.title || '趋势穿搭图片'"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+              @error="markImageUnavailable"
+            />
+          </span>
+        </button>
+      </TransitionGroup>
     </div>
-    <div v-else-if="!trends.length" class="gallery-empty" role="status">趋势内容加载后，会显示在这里。</div>
-    <div v-else class="gallery-measuring" role="status">正在整理画廊…</div>
+    <div v-else-if="galleryReady && props.trends.length && !galleryImages.length" class="gallery-empty gallery-empty-reference" role="status">
+      <div class="gallery-empty-copy">
+        <strong>趋势图片暂时无法显示</strong>
+        <span>以下为本地穿搭参考图片，非实时趋势内容。</span>
+      </div>
+      <div class="gallery-empty-images" aria-label="本地穿搭参考">
+        <figure v-for="image in fallbackTrendImages" :key="image.src">
+          <img :src="image.src" :alt="image.alt" />
+          <figcaption>本地参考</figcaption>
+        </figure>
+      </div>
+    </div>
+    <div v-else-if="galleryReady && !galleryImages.length" class="gallery-empty" role="status">暂无可展示的趋势图片</div>
+    <div v-else class="gallery-measuring" role="status">正在加载趋势画廊…</div>
   </section>
 </template>
 
@@ -299,11 +324,13 @@ onBeforeUnmount(() => {
 
 .gallery-stage {
   position: relative;
-  height: clamp(430px, 42vw, 560px);
-  margin-top: 18px;
+  height: clamp(500px, 40vw, 600px);
+  margin-top: 24px;
   overflow: hidden;
   isolation: isolate;
   perspective: 1800px;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 4%, #000 96%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 4%, #000 96%, transparent 100%);
 }
 
 .gallery-card {
@@ -311,7 +338,7 @@ onBeforeUnmount(() => {
   top: 51%;
   left: 50%;
   display: block;
-  width: clamp(236px, 23.5%, 308px);
+  width: var(--gallery-card-width, 360px);
   aspect-ratio: 3 / 4;
   overflow: visible;
   border: 0;
@@ -321,10 +348,28 @@ onBeforeUnmount(() => {
   background: transparent;
   cursor: pointer;
   filter: saturate(.92);
+  opacity: var(--gallery-opacity, 1);
   transform: translate3d(calc(-50% + var(--gallery-x)), calc(-50% + var(--gallery-y)), 0) rotateY(var(--gallery-rotation)) scale(var(--gallery-scale));
   transform-origin: center 70%;
   transform-style: preserve-3d;
-  transition: transform 720ms cubic-bezier(.22, .75, .2, 1), filter 260ms ease;
+  transition: transform 720ms cubic-bezier(.22, .75, .2, 1), opacity 420ms ease, filter 260ms ease;
+}
+
+.gallery-card-enter-active,
+.gallery-card-leave-active {
+  pointer-events: none;
+  transition: transform 620ms cubic-bezier(.22, .75, .2, 1), opacity 420ms ease, filter 420ms ease;
+}
+
+.gallery-card-leave-active {
+  position: absolute;
+}
+
+.gallery-card-enter-from,
+.gallery-card-leave-to {
+  opacity: 0;
+  filter: saturate(.76) blur(1px);
+  transform: translate3d(calc(-50% + var(--gallery-x) + var(--gallery-edge-shift)), calc(-50% + var(--gallery-y)), 0) rotateY(var(--gallery-rotation)) scale(var(--gallery-transition-scale));
 }
 
 .gallery-card:active:not(:disabled) {
@@ -342,14 +387,16 @@ onBeforeUnmount(() => {
   filter: saturate(1.08) brightness(1.04);
 }
 
-.gallery-card:focus-visible .gallery-card-image,
-.gallery-card:focus-visible .gallery-card-no-image {
+.gallery-card.focal {
+  filter: saturate(1.08) brightness(1.035);
+}
+
+.gallery-card:focus-visible .gallery-card-image {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
 
-.gallery-card-image,
-.gallery-card-no-image {
+.gallery-card-image {
   position: absolute;
   inset: 0;
   display: block;
@@ -360,37 +407,21 @@ onBeforeUnmount(() => {
   box-shadow: 0 16px 28px rgba(41, 55, 63, .13);
 }
 
-.gallery-card.active .gallery-card-image,
-.gallery-card.active .gallery-card-no-image {
+.gallery-card.active .gallery-card-image {
   border-color: rgba(54, 64, 62, .38);
   box-shadow: 0 20px 34px rgba(41, 55, 63, .2);
+}
+
+.gallery-card.focal .gallery-card-image {
+  border-color: rgba(23, 79, 66, .46);
+  box-shadow: 0 26px 44px rgba(41, 55, 63, .23);
 }
 
 .gallery-card-image img {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-}
-
-.gallery-card-no-image {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 16px;
-  color: var(--muted);
-  text-align: center;
-}
-
-.gallery-card-no-image small {
-  display: -webkit-box;
-  overflow: hidden;
-  font-size: 11px;
-  line-height: 1.5;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  object-fit: contain;
 }
 
 .gallery-empty {
@@ -404,9 +435,62 @@ onBeforeUnmount(() => {
   font-size: 14px;
 }
 
+.gallery-empty-reference {
+  align-content: center;
+  gap: 16px;
+  padding: 24px;
+}
+
+.gallery-empty-copy {
+  display: grid;
+  gap: 6px;
+  text-align: center;
+}
+
+.gallery-empty-copy strong {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.gallery-empty-copy span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.gallery-empty-images {
+  display: grid;
+  width: min(100%, 760px);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.gallery-empty-images figure {
+  overflow: hidden;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  text-align: left;
+}
+
+.gallery-empty-images img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.gallery-empty-images figcaption {
+  padding: 7px 10px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .gallery-measuring {
   display: grid;
-  height: clamp(430px, 42vw, 560px);
+  height: clamp(500px, 40vw, 600px);
   place-items: center;
   color: var(--muted);
   font-size: 12px;
@@ -414,11 +498,11 @@ onBeforeUnmount(() => {
 
 @media (max-width: 980px) {
   .gallery-stage {
-    height: 440px;
+    height: 520px;
   }
 
   .gallery-measuring {
-    height: 440px;
+    height: 520px;
   }
 }
 
@@ -432,12 +516,8 @@ onBeforeUnmount(() => {
   }
 
   .gallery-stage {
-    height: 460px;
+    height: 500px;
     margin-top: 16px;
-  }
-
-  .gallery-card {
-    width: min(68%, 260px);
   }
 }
 
@@ -447,11 +527,14 @@ onBeforeUnmount(() => {
   }
 
   .gallery-stage {
-    height: 420px;
+    height: 460px;
   }
+}
 
-  .gallery-card {
-    width: 68%;
+@media (max-width: 760px) {
+  .gallery-empty-images {
+    grid-template-columns: 1fr;
+    max-width: 300px;
   }
 }
 

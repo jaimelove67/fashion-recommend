@@ -12,6 +12,20 @@ test('capture supports Douyin and Weibo, but not Xiaohongshu', () => {
   assert.equal(capture.detectPlatform('www.xiaohongshu.com'), null);
 });
 
+test('gallery image requires an explicitly confirmed image from the captured post', () => {
+  const fields = {
+    id: '12345678', sourceUrl: 'https://www.douyin.com/video/12345678',
+    title: '秋季穿搭', publishedText: '2026-09-20',
+    images: ['https://images.example/cover.jpg', 'https://images.example/full.jpg'],
+    fullBodyImageUrl: 'https://images.example/full.jpg'
+  };
+  const observed = new Date('2026-09-21T12:00:00+08:00');
+  assert.equal(capture.buildRecord('douyin', fields, observed).full_body_image_url, '');
+  assert.equal(capture.buildRecord('douyin', { ...fields, fullBodyImageVerified: true }, observed).full_body_image_url,
+    'https://images.example/full.jpg');
+  assert.equal(capture.buildRecord('douyin', { ...fields, fullBodyImageUrl: 'https://images.example/other.jpg', fullBodyImageVerified: true }, observed).full_body_image_url, '');
+});
+
 class FakeElement {
   constructor(tagName) {
     this.tagName = tagName;

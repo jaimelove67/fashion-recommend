@@ -2,38 +2,38 @@
 import { computed, onMounted } from 'vue'
 import TrendDiscovery from '../components/TrendDiscovery.vue'
 import TrendGallery from '../components/TrendGallery.vue'
+import TrendPieceExplorer from '../components/TrendPieceExplorer.vue'
 import TrendOutfitBreakdown from '../components/TrendOutfitBreakdown.vue'
+import CrossSiteTryOnLauncher from '../components/CrossSiteTryOnLauncher.vue'
 import { LoaderCircle } from '@lucide/vue'
+import {
+  trendPlatformName,
+  trendSourceCounts,
+  trendSourceExclusionReason,
+  trendSourceMessage
+} from '../utils/trendSources.js'
 
 const props = defineProps({
   app: { type: Object, required: true }
 })
+const emit = defineEmits(['open-try-on'])
 
 const app = props.app
 const state = computed(() => app.state || {})
 const trends = computed(() => Array.isArray(state.value.trends) ? state.value.trends : [])
+const galleryTrends = computed(() => Array.isArray(state.value.galleryTrends) ? state.value.galleryTrends : [])
 const trendMeta = computed(() => state.value.trendMeta || {})
 const selectedTrend = computed(() =>
-  trends.value.find((item) => item.id === state.value.selectedTrendId) || trends.value[0] || null
+  trends.value.find((item) => item.id === state.value.selectedTrendId)
+    || galleryTrends.value.find((item) => item.id === state.value.selectedTrendId)
+    || trends.value[0]
+    || galleryTrends.value[0]
+    || null
 )
-
-const platformNames = {
-  douyin: '抖音',
-  weibo: '微博',
-  editorial: '时尚编辑精选',
-  'configured-feed': '配置来源',
-  'web-scrape': '公开网页'
-}
-const sourceStateNames = {
-  ready: '已连接',
-  unavailable: '采集失败',
-  unconfigured: '未接通',
-  pending: '等待采集'
-}
-
-function formatPlatform(value) {
-  return platformNames[value] || '授权来源'
-}
+const isEmptyFeed = computed(() => {
+  if (state.value.trendsLoading || state.value.trendError) return false
+  return trends.value.length === 0 && galleryTrends.value.length === 0
+})
 
 function formatDateTime(value) {
   if (!value) return '发布时间未提供'
@@ -66,36 +66,42 @@ onMounted(() => {
 
     <header class="trend-page-heading">
       <div>
-        <p class="eyebrow">穿搭灵感</p>
-        <h1>拆开看，一种趋势怎么穿</h1>
-        <p>先看来源里真实出现的穿搭线索，再用衣橱里的衣物试搭。</p>
+        <p class="eyebrow">趋势</p>
+        <h1>穿搭趋势与风格参考</h1>
+        <p>浏览穿搭内容与单品建议，结合个人衣橱探索搭配方案。</p>
       </div>
       <span v-if="trends.length" class="trend-count">当前范围收录 {{ trends.length }} 条</span>
     </header>
 
+    <CrossSiteTryOnLauncher v-if="state.authUser?.username" :username="state.authUser.username" />
+
     <TrendGallery
-      v-if="trends.length"
-      :trends="trends"
+      v-if="galleryTrends.length"
+      :trends="galleryTrends"
       :selected-id="selectedTrend?.id"
       @select="selectTrend"
     />
 
+    <TrendDiscovery v-if="trends.length && !galleryTrends.length" :app="app" posts-only :limit="0" />
+
     <div v-if="!selectedTrend && state.trendsLoading" class="trend-page-state" role="status" aria-live="polite">
       <LoaderCircle class="spinning" :size="22" aria-hidden="true" />
-      正在读取趋势内容…
+      正在加载穿搭趋势…
     </div>
     <div v-else-if="!selectedTrend && state.trendError" class="trend-page-state" role="alert">
-      <strong>趋势暂时无法加载</strong>
+      <strong>穿搭趋势加载失败</strong>
       <span>{{ state.trendError }}</span>
       <button type="button" @click="app.loadTrends()">重新加载</button>
     </div>
-    <div v-else-if="!selectedTrend" class="trend-page-state">
-      <strong>这个范围还没有可用的穿搭内容</strong>
-      <span>试试近 7 天或其他来源。</span>
+    <div v-else-if="isEmptyFeed" class="trend-page-state trend-empty-state">
+      <div class="trend-empty-copy">
+        <strong>当前筛选范围暂无穿搭内容</strong>
+        <span>数据源恢复并有符合筛选条件的内容后，将在此展示。</span>
+      </div>
       <button type="button" @click="app.loadTrends()">重新加载</button>
     </div>
     <TrendOutfitBreakdown
-      v-else
+      v-if="selectedTrend"
       :trend="selectedTrend"
       :wardrobe="state.wardrobe || []"
       :wardrobe-loading="state.wardrobeLoading"
@@ -103,15 +109,24 @@ onMounted(() => {
       @open-wardrobe="app.selectView('wardrobe')"
     />
 
+    <TrendPieceExplorer
+      :trends="trends"
+      :weather="state.weather"
+      :loading="state.trendsLoading"
+      :error="state.trendError"
+      @open-try-on="emit('open-try-on', $event)"
+    />
+
     <details class="trend-source-details">
-      <summary>来源与采集说明</summary>
+      <summary>数据来源与收录说明</summary>
       <p>{{ trendMeta.notice || '趋势内容来自已连接的数据源。各平台数据口径独立展示。' }}</p>
       <ul>
         <li v-for="source in trendMeta.sources || []" :key="source.id">
-          <strong>{{ platformNames[source.id] || source.id }}</strong>
-          <span>{{ sourceStateNames[source.state] || '状态未知' }} · {{ source.message }}</span>
-          <span v-if="source.itemCount">收录 {{ source.itemCount }} 条</span>
-          <time v-if="source.lastSuccessAt">最后成功 {{ formatDateTime(source.lastSuccessAt) }}</time>
+          <strong>{{ trendPlatformName(source.id) }}</strong>
+          <span>{{ trendSourceMessage(source) }}</span>
+          <span v-if="trendSourceCounts(source)">{{ trendSourceCounts(source) }}</span>
+          <span v-if="trendSourceExclusionReason(source)">原因：{{ trendSourceExclusionReason(source) }}</span>
+          <time v-if="source.lastSuccessAt">最近成功更新 {{ formatDateTime(source.lastSuccessAt) }}</time>
         </li>
       </ul>
       <button
@@ -120,14 +135,14 @@ onMounted(() => {
         class="source-refresh"
         :disabled="state.trendsLoading"
         @click="app.refreshTrendSources()"
-      >更新已连接来源</button>
+      >刷新已连接数据源</button>
     </details>
   </div>
 </template>
 
 <style scoped>
 .trend-page {
-  width: min(calc(100% - 48px), 1240px);
+  width: min(calc(100% - 48px), 1440px);
   margin: 0 auto;
   padding-bottom: 104px;
   color: var(--ink);
@@ -145,8 +160,8 @@ onMounted(() => {
   margin: 0 0 12px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .08em;
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 .trend-page-heading h1 {
@@ -191,6 +206,16 @@ onMounted(() => {
   font-family: var(--font-display);
   font-size: 24px;
   font-weight: 500;
+}
+
+.trend-empty-state {
+  gap: 24px;
+  padding: 40px 24px;
+}
+
+.trend-empty-copy {
+  display: grid;
+  gap: 8px;
 }
 
 .trend-page-state button,
@@ -260,7 +285,7 @@ onMounted(() => {
 
 @media (max-width: 760px) {
   .trend-page {
-    width: min(calc(100% - 32px), 1240px);
+    width: min(calc(100% - 32px), 1440px);
   }
 
   .trend-page-heading {

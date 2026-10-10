@@ -232,7 +232,7 @@ class RecommendationControllerTest {
                         .with(user(userId)).with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("UNAVAILABLE"))
-                .andExpect(jsonPath("$.data.message").value("请先在个人档案中选择每日模特性别"));
+                .andExpect(jsonPath("$.data.message").value("请在个人形象档案中设置模特性别。"));
         verifyNoInteractions(bailianImageGenerationClient);
     }
 
@@ -665,7 +665,7 @@ class RecommendationControllerTest {
                 .andExpect(jsonPath("$.data.engine").value("development-rule-v1"))
                 .andExpect(jsonPath("$.data.summary").value(org.hamcrest.Matchers.not("不完整的搭配")))
                 .andExpect(jsonPath("$.data.generationAudit.fallbackReason").value("same-category"))
-                .andExpect(jsonPath("$.data.items.length()").value(3));
+                .andExpect(jsonPath("$.data.items.length()").value(2));
     }
 
     @Test
@@ -778,4 +778,131 @@ class RecommendationControllerTest {
     private JsonNode readData(org.springframework.test.web.servlet.MvcResult result) throws Exception {
         return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
     }
+
+    @Test
+    void rejectsShoesAndAccessoriesAsAnOutfit() throws Exception {
+        String owner = "outfit-incomplete";
+        createItem(owner, "运动鞋", "鞋履", "白色");
+        createItem(owner, "肩包", "配饰", "黑色");
+        mockMvc.perform(post("/api/v1/recommendations").with(user(owner)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"occasion\":\"通勤\",\"city\":\"长沙\"}"))
+                .andExpect(status().isUnprocessableEntity());
+        verifyNoInteractions(llmRecommendationClient);
+    }
+
+    @Test
+    void locationRecommendationsUseCoordinatesAndRejectPartialOrMismatchedLocations() throws Exception {
+        String owner = "location-recommendation-owner";
+        createItem(owner, "衬衫", "上装", "白色");
+        createItem(owner, "长裤", "下装", "黑色");
+        given(weatherService.currentAt(28.2, 112.9)).willReturn(new WeatherSnapshot(
+                "当前位置", 24, 24.0, 0.0, 1, 5.0, java.time.Instant.now(), "open-meteo"));
+        String body = "{\"occasion\":\"通勤\",\"city\":\"当前位置\",\"latitude\":28.2,\"longitude\":112.9}";
+        mockMvc.perform(post("/api/v1/recommendations").with(user(owner)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.weather.source").value("open-meteo"))
+                .andExpect(jsonPath("$.data.city").value("当前位置"));
+        verify(weatherService).currentAt(28.2, 112.9);
+        verify(weatherService, org.mockito.Mockito.never()).current(anyString());
+        for (String invalid : List.of(body.replace(",\"longitude\":112.9", ""),
+                body.replace("28.2", "91"), body.replace("当前位置", "长沙"))) {
+            mockMvc.perform(post("/api/v1/recommendations").with(user(owner)).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content(invalid)).andExpect(status().isBadRequest());
+        }
+    }
+
+    @Test
+    void locksAndExclusionsAreEnforcedEvenWhenModelIgnoresThem() throws Exception {
+        String owner = "outfit-constraints";
+        long top = createItem(owner, "衬衫", "上装", "白色");
+        long oldPants = createItem(owner, "旧长裤", "下装", "蓝色");
+        long newPants = createItem(owner, "新长裤", "下装", "黑色");
+        long shoes = createItem(owner, "鞋", "鞋履", "白色");
+        long bag = createItem(owner, "包", "配饰", "白色");
+        given(llmRecommendationClient.recommend(any())).willReturn(Optional.of(new LlmRecommendationResult(
+                "缺少上装的结果", "模型忽略保留条件", List.of(newPants, shoes))));
+        String body = objectMapper.writeValueAsString(Map.of("occasion", "通勤", "city", "长沙",
+                "lockedItemIds", List.of(top), "excludedItemIds", List.of(oldPants)));
+        var result = mockMvc.perform(post("/api/v1/recommendations").with(user(owner)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.engine").value("development-rule-v1")).andReturn();
+        var ids = new java.util.ArrayList<Long>();
+        readData(result).path("items").forEach(item -> ids.add(item.path("id").asLong()));
+        assertTrue(ids.containsAll(List.of(top, newPants)));
+        assertFalse(ids.contains(oldPants));
+        assertTrue(ids.size() <= 4);
+        var captor = ArgumentCaptor.forClass(LlmRecommendationContext.class);
+        verify(llmRecommendationClient).recommend(captor.capture());
+        assertEquals(List.of(top), captor.getValue().lockedItemIds());
+        assertFalse(captor.getValue().wardrobe().stream().anyMatch(item -> item.id() == oldPants));
+
+        long foreign = createItem("outfit-other-owner", "别人的衬衫", "上装", "白色");
+        for (String invalid : List.of(
+                body.replace("[" + top + "]", "[" + foreign + "]"),
+                body.replace("[" + oldPants + "]", "[" + top + "]"),
+                body.replace("[" + top + "]", "[null]"))) {
+            mockMvc.perform(post("/api/v1/recommendations").with(user(owner)).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content(invalid)).andExpect(status().isBadRequest());
+        }
+    }
+
+    @Test
+    void manualTemperatureBypassesUnavailableWeatherAndPreservesUnknownFields() throws Exception {
+        String owner = "manual-temperature-owner";
+        createItem(owner, "衬衫", "上装", "白色");
+        createItem(owner, "长裤", "下装", "黑色");
+        given(weatherService.current(anyString())).willThrow(new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "天气不可用"));
+        var result = mockMvc.perform(post("/api/v1/recommendations").with(user(owner)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"occasion\":\"通勤\",\"city\":\"长沙\",\"manualTemperatureC\":24}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.weather.source").value("user-provided"))
+                .andExpect(jsonPath("$.data.temperatureC").value(24))
+                .andExpect(jsonPath("$.data.weather.precipitationMm").doesNotExist())
+                .andExpect(jsonPath("$.data.weather.weatherCode").doesNotExist())
+                .andExpect(jsonPath("$.data.weather.apparentTemperatureC").doesNotExist()).andReturn();
+        verifyNoInteractions(weatherService);
+        long id = readData(result).path("id").asLong();
+        mockMvc.perform(get("/api/v1/recommendations/" + id).with(user(owner)))
+                .andExpect(jsonPath("$.data.weather.source").value("user-provided"));
+        mockMvc.perform(post("/api/v1/recommendations").with(user(owner)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"occasion\":\"通勤\",\"city\":\"长沙\",\"manualTemperatureC\":61}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void historySearchAndStatisticsIncludeRecordsBeyondFirstPageAndRemainPrivate() throws Exception {
+        String owner = "history-search-owner";
+        createItem(owner, "衬衫", "上装", "白色");
+        createItem(owner, "长裤", "下装", "黑色");
+        long oldest = 0;
+        for (int i = 0; i < 25; i++) {
+            var result = mockMvc.perform(post("/api/v1/recommendations").with(user(owner)).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(
+                            Map.of("occasion", i == 0 ? "旧收藏100%" : "通勤", "city", "长沙"))))
+                    .andExpect(status().isOk()).andReturn();
+            if (i == 0) oldest = readData(result).path("id").asLong();
+        }
+        mockMvc.perform(post("/api/v1/me/recommendations/" + oldest + "/save").with(user(owner)).with(csrf())).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/me/recommendations/" + oldest + "/feedback").with(user(owner)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"rating\":5,\"feedbackType\":\"useful\"}")).andExpect(status().isOk());
+        for (String filter : List.of("saved", "rated")) {
+            mockMvc.perform(get("/api/v1/me/recommendations").with(user(owner)).param("filter", filter))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(1))
+                    .andExpect(jsonPath("$.data.content[0].id").value(oldest))
+                    .andExpect(jsonPath("$.data.statistics.total").value(25))
+                    .andExpect(jsonPath("$.data.statistics.saved").value(1))
+                    .andExpect(jsonPath("$.data.statistics.rated").value(1))
+                    .andExpect(jsonPath("$.data.statistics.averageRating").value(5.0));
+        }
+        mockMvc.perform(get("/api/v1/me/recommendations").with(user(owner)).param("query", "%"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(1));
+        mockMvc.perform(get("/api/v1/me/recommendations").with(user("history-other-owner")).param("query", "旧收藏"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(0))
+                .andExpect(jsonPath("$.data.statistics.total").value(0));
+        mockMvc.perform(get("/api/v1/me/recommendations").with(user(owner)).param("filter", "invalid"))
+                .andExpect(status().isBadRequest());
+    }
+
 }

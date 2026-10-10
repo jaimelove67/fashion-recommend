@@ -1,6 +1,7 @@
 package com.fashion.recommendation.recommendation;
 
 import com.fashion.recommendation.style.PersonalStyleProfileService;
+import com.fashion.recommendation.style.PersonalStyleMatcher;
 import com.fashion.recommendation.style.StyleProfile;
 import com.fashion.recommendation.weather.WeatherService;
 import com.fashion.recommendation.weather.WeatherSnapshot;
@@ -73,15 +74,31 @@ public class RecommendationService {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "请先添加并完善至少两件衣物，再生成穿搭推荐");
         }
 
+        Set<Long> ownedIds = wardrobe.stream().map(WardrobeItem::id).collect(java.util.stream.Collectors.toSet());
+        if (!ownedIds.containsAll(request.lockedItemIds()) || !ownedIds.containsAll(request.excludedItemIds())
+                || request.lockedItemIds().stream().anyMatch(request.excludedItemIds()::contains)
+                || request.lockedItemIds().stream().distinct().count() != request.lockedItemIds().size()
+                || request.excludedItemIds().stream().distinct().count() != request.excludedItemIds().size()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "保留或排除的衣物必须是当前衣橱中已确认的单品，且不能重复或冲突");
+        }
         Map<Long, Double> itemRatings = feedbackRepository.averageRatingByItem(userId);
-        WeatherSnapshot weather = weatherService.current(request.city());
-        List<WardrobeItem> ruleSelected = selectItems(wardrobe, weather.temperatureC(), itemRatings,
-                reference == null ? List.of() : reference.styleTags());
-        if (ruleSelected.size() < 2 || distinctCategoryCount(ruleSelected) < 2) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "当前衣橱缺少可组合的不同类别衣物");
+        WeatherSnapshot weather = request.manualTemperatureC() == null
+                ? (request.latitude() == null ? weatherService.current(request.city())
+                    : weatherService.currentAt(request.latitude(), request.longitude()))
+                : new WeatherSnapshot(request.city().trim(), request.manualTemperatureC(), null, null, null, null,
+                        Instant.now(), "user-provided");
+        wardrobe = wardrobe.stream().filter(item -> !request.excludedItemIds().contains(item.id()))
+                .filter(item -> OutfitPolicy.suitable(item, weather.temperatureC())).toList();
+        if (!wardrobe.stream().map(WardrobeItem::id).toList().containsAll(request.lockedItemIds())) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "保留的衣物与当前温度不适配，请解除保留或确认温度");
+        }
+        StyleProfile profile = profileService.current(userId);
+        List<WardrobeItem> ruleSelected = selectItems(wardrobe, weather.temperatureC(), itemRatings, profile,
+                reference == null ? List.of() : reference.styleTags(), request);
+        if (!OutfitPolicy.complete(ruleSelected)) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "当前条件下无法组成完整搭配：请补充上装和下装，或连体装与鞋履等单品；也可解除保留或排除条件");
         }
 
-        StyleProfile profile = profileService.current(userId);
         RecommendationAttempt attempt = tryLlmRecommendation(request, wardrobe, weather, profile, itemRatings, reference);
         RecommendationDraft draft = attempt.draft()
                 .orElseGet(() -> buildRuleRecommendation(request, ruleSelected, weather, profile));
@@ -107,11 +124,19 @@ public class RecommendationService {
     }
 
     public RecommendationPage list(String userId, int page, int size) {
+        return list(userId, page, size, "all", "");
+    }
+
+    public RecommendationPage list(String userId, int page, int size, String filter, String query) {
+        if (!List.of("all", "saved", "rated").contains(filter) || query.length() > 120) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "筛选参数不合法");
+        }
+        query = query.trim();
         long offset = (long) page * size;
         if (page < 0 || size < 1 || size > 50 || offset > MAX_HISTORY_OFFSET) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "分页参数不合法");
         }
-        List<RecommendationRecord> records = recommendationRepository.findPageByUserId(userId, page, size);
+        List<RecommendationRecord> records = recommendationRepository.findPageByUserId(userId, page, size, filter, query);
         List<Long> recommendationIds = records.stream().map(RecommendationRecord::id).toList();
         Map<Long, RecommendationFeedback> feedbackByRecommendation =
                 feedbackRepository.findByRecommendationIds(userId, recommendationIds);
@@ -123,10 +148,10 @@ public class RecommendationService {
                         feedbackByRecommendation.get(record.id()),
                         itemsByRecommendation.getOrDefault(record.id(), List.of())))
                 .toList();
-        long totalElements = recommendationRepository.countByUserId(userId);
+        long totalElements = recommendationRepository.countByUserId(userId, filter, query);
         long nextOffset = ((long) page + 1L) * size;
         return new RecommendationPage(content, totalElements, page, size,
-                nextOffset <= MAX_HISTORY_OFFSET && nextOffset < totalElements);
+                nextOffset <= MAX_HISTORY_OFFSET && nextOffset < totalElements, recommendationRepository.statistics(userId));
     }
 
     public Recommendation save(String userId, Long recommendationId) {
@@ -189,28 +214,13 @@ public class RecommendationService {
     }
 
     private static List<WardrobeItem> selectItems(
-            List<WardrobeItem> wardrobe, double temperature, Map<Long, Double> itemRatings, List<String> referenceTags) {
-        List<String> categoryOrder = temperature < 18
-                ? List.of("外套", "上装", "下装", "鞋履", "配饰")
-                : List.of("上装", "下装", "鞋履", "外套", "配饰");
+            List<WardrobeItem> wardrobe, double temperature, Map<Long, Double> itemRatings, StyleProfile profile, List<String> referenceTags, RecommendationRequest request) {
         List<WardrobeItem> ranked = wardrobe.stream()
                 .sorted(Comparator.comparingDouble((WardrobeItem item) -> feedbackScore(item, itemRatings)
+                        + PersonalStyleMatcher.score(item, profile)
                         + referenceTags.stream().filter(tag -> (item.name() + " " + item.style() + " " + item.category()).contains(tag)).count()).reversed())
                 .toList();
-        Map<Long, WardrobeItem> selected = new LinkedHashMap<>();
-        for (String category : categoryOrder) {
-            ranked.stream().filter(item -> matchesCategory(item.category(), category)).findFirst()
-                    .ifPresent(item -> selected.putIfAbsent(item.id(), item));
-        }
-        if (selected.size() < 4) {
-            for (WardrobeItem item : ranked) {
-                selected.putIfAbsent(item.id(), item);
-                if (selected.size() == 4) {
-                    break;
-                }
-            }
-        }
-        return new ArrayList<>(selected.values());
+        return OutfitPolicy.select(ranked, request.lockedItemIds(), temperature);
     }
 
     private static double feedbackScore(WardrobeItem item, Map<Long, Double> itemRatings) {
@@ -221,7 +231,7 @@ public class RecommendationService {
             RecommendationRequest request, List<WardrobeItem> wardrobe, WeatherSnapshot weather, StyleProfile profile,
             Map<Long, Double> itemRatings, TrendReference reference) {
         LlmRecommendationContext context = new LlmRecommendationContext(
-                request.occasion().trim(), request.styleHint(), wardrobe, weather, profile, itemRatings, reference);
+                request.occasion().trim(), request.styleHint(), wardrobe, weather, profile, itemRatings, reference, request.lockedItemIds());
         Optional<LlmRecommendationResult> optionalResult;
         try {
             optionalResult = llmRecommendationClient.recommend(context);
@@ -236,11 +246,11 @@ public class RecommendationService {
         if (optionalResult.isEmpty()) {
             return RecommendationAttempt.fallback(RecommendationFallbackReason.NO_API_KEY);
         }
-        return validateLlmResult(optionalResult.get(), wardrobe);
+        return validateLlmResult(optionalResult.get(), wardrobe, request.lockedItemIds());
     }
 
     private RecommendationAttempt validateLlmResult(
-            LlmRecommendationResult result, List<WardrobeItem> wardrobe) {
+            LlmRecommendationResult result, List<WardrobeItem> wardrobe, List<Long> lockedItemIds) {
         if (result == null || !validText(result.summary(), 500) || !validText(result.reason(), 1200)
                 || result.itemIds() == null || result.itemIds().size() < 2 || result.itemIds().size() > 4) {
             log.warn("LLM recommendation failed result validation; falling back to {}", RULE_ENGINE);
@@ -262,6 +272,9 @@ public class RecommendationService {
         if (distinctCategoryCount(selected) < 2) {
             log.warn("LLM recommendation does not contain distinct garment categories; falling back to {}", RULE_ENGINE);
             return RecommendationAttempt.fallback(RecommendationFallbackReason.SAME_CATEGORY);
+        }
+        if (!OutfitPolicy.complete(selected) || !requestedIds.containsAll(lockedItemIds)) {
+            return RecommendationAttempt.fallback(RecommendationFallbackReason.RESULT_INVALID);
         }
         return RecommendationAttempt.llm(new RecommendationDraft(
                 result.summary().trim(), result.reason().trim(), LLM_ENGINE, selected,
@@ -319,15 +332,19 @@ public class RecommendationService {
     private static String buildReason(
             RecommendationRequest request, List<WardrobeItem> selected, WeatherSnapshot weather, StyleProfile profile) {
         boolean configuredDemo = "configured-demo".equals(weather.source());
+        boolean manualWeather = "user-provided".equals(weather.source());
         StringBuilder reason = new StringBuilder()
                 .append("根据当前衣橱中 ").append(selected.size()).append(" 件可组合单品，结合 ")
-                .append(weather.city()).append(configuredDemo ? "天气" : "实况 ")
+                .append(weather.city()).append(manualWeather ? "手动填写的温度（非实时天气） " : configuredDemo ? "天气" : "实况 ")
                 .append(String.format("%.1f", weather.temperatureC()))
-                .append("°C、体感 ").append(String.format("%.1f", weather.apparentTemperatureC()))
                 .append("°C 和").append(request.occasion().trim()).append("场景生成。规则优先保证基本类别齐全");
         if (!profile.stylePreferences().isEmpty()) {
             reason.append("，并参考已保存的“").append(String.join("、", profile.stylePreferences())).append("”风格偏好");
         }
+        if (selected.stream().anyMatch(item -> PersonalStyleMatcher.score(item, profile) > 0)) {
+            reason.append("。已按个人档案中的风格、颜色和可用剪裁建议匹配衣物属性");
+        }
+        if (profile.stale()) reason.append("。形象资料已变更，旧分析暂未用于本次推荐，请重新分析或人工确认");
         if (request.trendId() != null && !request.trendId().isBlank())
             reason.append("。已按参考风格标签匹配现有衣物；当前为基础规则结果，不代表复现参考图");
         return reason.append("。").toString();

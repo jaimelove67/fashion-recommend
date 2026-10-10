@@ -56,10 +56,10 @@ public class RecommendationRepository {
             statement.setString(5, summary);
             statement.setString(6, reason);
             statement.setString(7, engine);
-            statement.setDouble(8, weather.apparentTemperatureC());
-            statement.setDouble(9, weather.precipitationMm());
-            statement.setInt(10, weather.weatherCode());
-            statement.setDouble(11, weather.windSpeedKmh());
+            statement.setObject(8, weather.apparentTemperatureC());
+            statement.setObject(9, weather.precipitationMm());
+            statement.setObject(10, weather.weatherCode());
+            statement.setObject(11, weather.windSpeedKmh());
             statement.setTimestamp(12, Timestamp.from(weather.observedAt()));
             statement.setString(13, weather.source());
             statement.setString(14, audit.modelName());
@@ -115,6 +115,54 @@ public class RecommendationRepository {
         Long count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM recommendations WHERE user_id = ?", Long.class, userId);
         return count == null ? 0 : count;
+    }
+
+    public List<RecommendationRecord> findPageByUserId(String userId, int page, int size, String filter, String query) {
+        if (filter.equals("all") && query.isEmpty()) return findPageByUserId(userId, page, size);
+        var parameters = searchParameters(userId, query);
+        parameters.add(size);
+        parameters.add((long) page * size);
+        return jdbcTemplate.query(SELECT_RECORD + searchWhere(filter, query)
+                + " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?", this::mapRecord, parameters.toArray());
+    }
+
+    public long countByUserId(String userId, String filter, String query) {
+        if (filter.equals("all") && query.isEmpty()) return countByUserId(userId);
+        Long count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM recommendations " + searchWhere(filter, query),
+                Long.class, searchParameters(userId, query).toArray());
+        return count == null ? 0 : count;
+    }
+
+    private static String searchWhere(String filter, String query) {
+        String where = "WHERE user_id = ?";
+        if (filter.equals("saved")) where += " AND saved = TRUE";
+        if (filter.equals("rated")) where += " AND EXISTS (SELECT 1 FROM recommendation_feedback f WHERE f.recommendation_id = recommendations.id AND f.user_id = recommendations.user_id)";
+        if (!query.isEmpty()) where += " AND (LOWER(occasion) LIKE ? ESCAPE '!' OR LOWER(city) LIKE ? ESCAPE '!'"
+                + " OR LOWER(summary) LIKE ? ESCAPE '!' OR LOWER(reason) LIKE ? ESCAPE '!'"
+                + " OR EXISTS (SELECT 1 FROM recommendation_items i WHERE i.recommendation_id = recommendations.id"
+                + " AND (LOWER(i.name) LIKE ? ESCAPE '!' OR LOWER(i.category) LIKE ? ESCAPE '!'"
+                + " OR LOWER(i.color) LIKE ? ESCAPE '!' OR LOWER(i.style) LIKE ? ESCAPE '!')))";
+        return where;
+    }
+
+    private static java.util.ArrayList<Object> searchParameters(String userId, String query) {
+        var parameters = new java.util.ArrayList<Object>();
+        parameters.add(userId);
+        if (!query.isEmpty()) {
+            String pattern = "%" + query.toLowerCase(java.util.Locale.ROOT).replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
+            for (int i = 0; i < 8; i++) parameters.add(pattern);
+        }
+        return parameters;
+    }
+
+    public RecommendationStatistics statistics(String userId) {
+        Long covered = jdbcTemplate.queryForObject("SELECT COUNT(DISTINCT i.wardrobe_item_id) FROM recommendation_items i "
+                + "JOIN recommendations r ON r.id = i.recommendation_id WHERE r.user_id = ?", Long.class, userId);
+        return jdbcTemplate.queryForObject("SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN r.saved THEN 1 ELSE 0 END), 0) AS saved, "
+                + "COUNT(f.rating) AS rated, AVG(CAST(f.rating AS DOUBLE PRECISION)) AS average_rating FROM recommendations r "
+                + "LEFT JOIN recommendation_feedback f ON f.recommendation_id = r.id AND f.user_id = r.user_id WHERE r.user_id = ?",
+                (rs, row) -> new RecommendationStatistics(rs.getLong("total"), rs.getLong("saved"), rs.getLong("rated"),
+                        nullableDouble(rs, "average_rating"), covered == null ? 0 : covered), userId);
     }
 
     public List<WardrobeItem> findItems(Long recommendationId) {

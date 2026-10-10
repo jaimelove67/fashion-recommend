@@ -6,5 +6,6 @@ public record RecommendationVisualResponse(
         String model,
         String modelGender,
         int itemCount,
-        String message) {
+        String message,
+        String modelSource) {
 }

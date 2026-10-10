@@ -1,12 +1,11 @@
 <script setup>
+import OutfitAdjustment from '../components/OutfitAdjustment.vue'
+import RecommendationFeedback from '../components/RecommendationFeedback.vue'
 import { computed, ref, watch } from 'vue'
-import TrendDiscovery from '../components/TrendDiscovery.vue'
 import {
   ArrowRight,
   Bookmark,
   Check,
-  ChevronLeft,
-  ChevronRight,
   CloudSun,
   Flame,
   LoaderCircle,
@@ -15,110 +14,30 @@ import {
   Sparkles,
   Star,
   SunMedium,
-  Thermometer,
   Umbrella,
   Wind
 } from '@lucide/vue'
-import RecommendationAssistant from '../components/RecommendationAssistant.vue'
+import { formatRecommendationReason, formatRecommendationTitle } from '../utils/recommendationReason'
+import { outfitModelReferenceKey } from '../utils/outfitModel'
 
 const props = defineProps({
   app: { type: Object, required: true }
 })
 
+const emit = defineEmits(['open-assistant'])
+
 const brokenImages = ref(new Set())
 const visualResults = ref({})
 const visualBusyKeys = ref(new Set())
-const dailyOffset = ref(0)
-const assistantRef = ref(null)
+const rationaleSection = ref(null)
 const today = new Date()
 const weekdayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
-const planTemplates = [
-  {
-    dayName: '周一',
-    occasion: '通勤 · 清爽利落',
-    weatherLabel: '晴朗',
-    temperature: '24°',
-    low: '17°',
-    score: 93,
-    palette: '暖白 / 石墨灰',
-    note: '柔和的中性色适合工作日，轮廓利落，穿着也不拘束。',
-    icon: SunMedium
-  },
-  {
-    dayName: '周二',
-    occasion: '客户会面 · 稳妥得体',
-    weatherLabel: '多云',
-    temperature: '22°',
-    low: '16°',
-    score: 91,
-    palette: '雾蓝 / 米白',
-    note: '蓝灰色压住明度，利落的版型看起来正式，但不会太用力。',
-    icon: CloudSun
-  },
-  {
-    dayName: '周三',
-    occasion: '城市漫步 · 轻松分层',
-    weatherLabel: '晴朗',
-    temperature: '25°',
-    low: '18°',
-    score: 90,
-    palette: '黑色 / 冷灰白',
-    note: '用常穿的一件做主角，颜色保持简单，走一天也轻便。',
-    icon: SunMedium
-  },
-  {
-    dayName: '周四',
-    occasion: '通勤 · 稳妥正式',
-    weatherLabel: '小雨',
-    temperature: '20°',
-    low: '15°',
-    score: 90,
-    palette: '雾蓝 / 炭灰',
-    note: '带一件轻薄外层应对温差，鞋子选防滑、走路不累的款式。',
-    icon: Umbrella
-  },
-  {
-    dayName: '周五',
-    occasion: '晚间约会 · 舒展得体',
-    weatherLabel: '多云',
-    temperature: '23°',
-    low: '17°',
-    score: 92,
-    palette: '炭灰 / 暖白',
-    note: '深色打底更收比例，再用柔软材质放松整体感觉。',
-    icon: CloudSun
-  },
-  {
-    dayName: '周六',
-    occasion: '周末出行 · 轻装',
-    weatherLabel: '晴朗',
-    temperature: '26°',
-    low: '19°',
-    score: 88,
-    palette: '橄榄绿 / 白色',
-    note: '少穿一层，把方便活动的衣物留给户外行程。',
-    icon: SunMedium
-  },
-  {
-    dayName: '周日',
-    occasion: '休息日 · 随意出门',
-    weatherLabel: '晴间云',
-    temperature: '24°',
-    low: '18°',
-    score: 89,
-    palette: '米白 / 橄榄绿',
-    note: '用熟悉的颜色配一双舒服的鞋，出门不必花太多时间。',
-    icon: Wind
-  }
-]
-
 const dailyLookMode = {
-  title: '今日穿搭',
+  title: '穿搭方案',
   subtitle: '衣橱预览',
   palette: '待搭配',
-  note: '先生成搭配推荐，再查看天气、场合和风格适配。',
-  fitLabel: '待生成'
+  note: '生成穿搭推荐后，可查看单品组合与搭配依据。',
 }
 
 const state = computed(() => props.app.state || {})
@@ -132,6 +51,7 @@ const modelGender = computed(() => {
   return supportedModelGenders.has(value) ? value : ''
 })
 const modelGenderLabel = computed(() => ({ MALE: '男', FEMALE: '女' }[modelGender.value] || '待补充'))
+const modelDisplayLabel = computed(() => profile.value?.usePersonalPhotoForOutfit ? '本人形象' : modelGenderLabel.value + '模特')
 
 function isWardrobeItemUsable(item) {
   return Boolean(item?.id) && item.recognitionStatus !== 'NEEDS_MANUAL_REVIEW'
@@ -162,27 +82,39 @@ const recommendationPool = computed(() => {
   return [...unique.values()]
 })
 
+const generatedRecommendation = computed(() => {
+  const source = recommendationPool.value[0]
+  return source?.id && hasCombinableOutfit(wardrobeItemsOnly(source.items)) ? source : null
+})
+// Keep a restored outfit's explanation, weather and occasion from the same saved record.
+const outfitWeather = computed(() => generatedRecommendation.value?.weather || actualWeather.value)
+
+function temperatureLabel(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(0)}°` : '--°'
+}
+
 function itemKey(item) {
   return item?.id || item?.name || 'unknown'
 }
 
 function wardrobeCategoryLabel(category) {
   const value = String(category || '')
-  if (value.includes('外套')) return 'OUTERWEAR'
-  if (value.includes('上装')) return 'TOP'
-  if (value.includes('下装')) return 'BOTTOM'
-  if (value.includes('鞋')) return 'SHOES'
-  if (value.includes('配饰')) return 'ACCESSORY'
-  return 'WARDROBE ITEM'
+  if (/连体|连衣裙/.test(value)) return '连体装'
+  if (value.includes('外套')) return '外套'
+  if (value.includes('上装')) return '上装'
+  if (value.includes('下装')) return '下装'
+  if (value.includes('鞋')) return '鞋履'
+  if (value.includes('配饰')) return '配饰'
+  return '衣物'
 }
 
 function categoryMatches(item, category) {
-  const value = item?.category || ''
-  return value.includes(category) || (category === '鞋履' && value.includes('鞋'))
+  return canonicalWardrobeCategory(item?.category) === category
 }
 
 function canonicalWardrobeCategory(category) {
   const value = String(category || '').trim()
+  if (/连体|连衣裙/.test(value)) return '连体装'
   for (const canonical of ['外套', '上装', '下装', '鞋履', '配饰']) {
     if (value.includes(canonical) || (canonical === '鞋履' && value.includes('鞋'))) return canonical
   }
@@ -191,11 +123,13 @@ function canonicalWardrobeCategory(category) {
 
 function hasCombinableOutfit(items) {
   return items.length >= 2
-    && new Set(items.map((item) => canonicalWardrobeCategory(item.category))).size >= 2
+    && (items.some(item => /连体|连衣裙/.test(item.category))
+      || (items.some(item => categoryMatches(item, '上装')) && items.some(item => categoryMatches(item, '下装'))))
 }
 
 function itemsForLook(dayIndex) {
-  const categoryOrder = ['上装', '下装', '外套', '鞋履', '配饰']
+  const categoryOrder = availableWardrobe.value.some(item => /连体|连衣裙/.test(item.category))
+    ? ['连体装', '鞋履', '外套', '配饰'] : ['上装', '下装', '鞋履', '外套']
   const picked = []
   const pickedKeys = new Set()
   for (const category of categoryOrder) {
@@ -211,12 +145,6 @@ function itemsForLook(dayIndex) {
   return hasCombinableOutfit(picked) ? picked.slice(0, 4) : []
 }
 
-function addDays(date, amount) {
-  const result = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-  result.setDate(result.getDate() + amount)
-  return result
-}
-
 function dateSlug(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
@@ -229,52 +157,42 @@ function uniqueColors(items) {
   return [...new Set(items.map((item) => item?.color).filter(Boolean))].slice(0, 2)
 }
 
-const dailyDate = computed(() => addDays(today, dailyOffset.value))
-const dailyDateKey = computed(() => dateSlug(dailyDate.value))
-const dailyDayIndex = computed(() => {
-  const todayIndex = today.getDay() === 0 ? 6 : today.getDay() - 1
-  return (todayIndex + dailyOffset.value + planTemplates.length) % planTemplates.length
+const dailyDate = computed(() => {
+  const savedDate = generatedRecommendation.value?.generatedAt
+  return savedDate && Number.isFinite(new Date(savedDate).getTime()) ? new Date(savedDate) : today
 })
-const dailyTemplate = computed(() => planTemplates[dailyDayIndex.value])
+const dailyDateKey = computed(() => dateSlug(dailyDate.value))
 const dailyDateLabel = computed(() => dateLabel(dailyDate.value))
 const dailyDayName = computed(() => weekdayNames[dailyDate.value.getDay()])
 const dailyDateHeading = computed(() => `${dailyDate.value.getMonth() + 1}月${dailyDate.value.getDate()}日 · ${dailyDayName.value}`)
 const dailyWeather = computed(() => {
-  if (dailyOffset.value === 0 && actualWeather.value) {
-    return {
-      label: props.app.weatherConditionLabel(actualWeather.value.weatherCode),
-      temperature: `${Number(actualWeather.value.temperatureC).toFixed(0)}°`,
-      low: `${Number(actualWeather.value.apparentTemperatureC).toFixed(0)}°`
-    }
-  }
+  const weather = outfitWeather.value
   return {
-    label: dailyTemplate.value.weatherLabel,
-    temperature: dailyTemplate.value.temperature,
-    low: dailyTemplate.value.low
+    label: weather?.source === 'user-provided' ? '手动温度 · 非实时' : weather?.weatherCode != null ? props.app.weatherConditionLabel(weather.weatherCode) : '天气待获取',
+    temperature: temperatureLabel(weather?.temperatureC),
+    low: temperatureLabel(weather?.apparentTemperatureC)
   }
 })
 
 const weatherBriefCity = computed(() => {
-  const city = state.value.recommendationForm?.city || actualWeather.value?.city || '你的常用城市'
-  return dailyOffset.value === 0 ? city : `${city} · 计划参考`
+  return actualWeather.value?.city || state.value.recommendationForm?.city || '城市待设置'
 })
 
-const weatherBriefDetail = computed(() => {
-  if (dailyOffset.value === 0 && actualWeather.value) {
-    return `体感 ${Number(actualWeather.value.apparentTemperatureC).toFixed(0)}° · 风速 ${Number(actualWeather.value.windSpeedKmh).toFixed(0)} km/h`
-  }
-  return dailyOffset.value === 0 ? '填好城市后，这里会显示天气' : '非当天日期使用搭配计划参考，不代表实时预报'
+const weatherBriefIcon = computed(() => {
+  const code = actualWeather.value?.weatherCode
+  if (code === 0 || code === 1) return SunMedium
+  if (code >= 51 && code <= 67 || code >= 80) return Umbrella
+  return CloudSun
 })
 
 const dailyLooks = computed(() => {
-  const candidateSource = recommendationPool.value[0] || null
-  const sourceItems = wardrobeItemsOnly(candidateSource?.items)
-  const isGenerated = Boolean(candidateSource?.id && hasCombinableOutfit(sourceItems))
-  const source = isGenerated ? candidateSource : null
-  const items = isGenerated ? sourceItems.slice(0, 4) : itemsForLook(dailyDayIndex.value)
+  const source = generatedRecommendation.value
+  const sourceItems = wardrobeItemsOnly(source?.items)
+  const isGenerated = Boolean(source)
+  const items = isGenerated ? sourceItems.slice(0, 4) : itemsForLook(0)
   const mode = dailyLookMode
   const palette = uniqueColors(items).join(' / ') || mode.palette
-  const occasion = dailyTemplate.value.occasion.split('·')[0].trim()
+  const occasion = source?.occasion || state.value.recommendationForm?.occasion || '待选择场合'
   const visualKey = isGenerated ? visualKeyForSource(source, modelGender.value, sourceItems) : ''
   const visual = visualKey ? visualResults.value[visualKey] : null
   const generatedImage = visual?.imageUrl || ''
@@ -284,35 +202,37 @@ const dailyLooks = computed(() => {
     modelImageKind: generatedImage ? 'generated' : 'missing',
     modelGender: modelGender.value,
     modelGenderLabel: modelGenderLabel.value,
+    modelDisplayLabel: modelDisplayLabel.value,
     visualKey,
     visualStatus: visual?.status || 'idle',
     visualMessage: visual?.message || '',
-    lookLabel: '今日穿搭',
+    lookLabel: source ? '已生成搭配' : '衣橱预览',
     title: occasion + ' · ' + mode.title,
-    subtitle: source?.summary || mode.subtitle,
+    subtitle: source ? formatRecommendationTitle(source) : mode.subtitle,
     occasion,
     palette,
     note: source?.reason || mode.note,
     items,
     source,
-    fitLabel: mode.fitLabel,
     weatherLabel: dailyWeather.value.label,
     temperature: dailyWeather.value.temperature,
     low: dailyWeather.value.low,
-    city: source?.city || actualWeather.value?.city || state.value.recommendationForm.city || '当前城市',
+    city: source?.city || outfitWeather.value?.city || state.value.recommendationForm?.city || '当前城市',
     dayName: dailyDayName.value,
     dateLabel: dailyDateLabel.value,
-    isToday: dailyOffset.value === 0,
+    isToday: dailyDateKey.value === dateSlug(today),
     isGenerated,
     isWardrobePreview: !isGenerated && hasCombinableOutfit(items)
   }]
 })
 
 const selectedLook = computed(() => dailyLooks.value[0] || null)
+const selectedLookReason = computed(() => formatRecommendationReason(selectedLook.value?.source))
+const currentRecommendationReason = computed(() => formatRecommendationReason(state.value.currentRecommendation))
 const wardrobeLookCount = computed(() => dailyLooks.value.filter((look) => look.items.length).length)
 const generatedLookCount = computed(() => dailyLooks.value.filter((look) => look.isGenerated).length)
 const hasWardrobeLooks = computed(() => wardrobeLookCount.value > 0)
-const modelSelectionHint = computed(() => modelGender.value ? `${modelGenderLabel.value}模特 · 阿里云每日生图` : '待补充个人档案性别')
+const modelSelectionHint = computed(() => modelGender.value ? `${modelDisplayLabel.value} · AI 穿搭效果图` : '需设置模特性别')
 const coveragePercent = computed(() => {
   const total = props.app.wardrobeStats.total
   if (!total) return null
@@ -321,31 +241,28 @@ const coveragePercent = computed(() => {
 
 const profileTags = computed(() => {
   const tags = profile.value?.styleTags || []
-  return tags.length ? tags.slice(0, 3) : ['低饱和', '利落轮廓', '日常通勤']
+  return tags.length ? tags.slice(0, 3) : ['偏好待完善']
 })
 
 const selectedLookRationale = computed(() => {
   const look = selectedLook.value
   if (!look) {
     return [
-      { label: '天气适配', value: '等待天气信息' },
-      { label: '场合适配', value: '等待搭配场合' },
-      { label: '风格方向', value: '等待个人风格档案' },
-      { label: '衣橱依据', value: '当前没有可用衣物' }
+      { label: '适用场合', value: '待选择' },
+      { label: '搭配配色', value: '待搭配' },
+      { label: '衣橱来源', value: '当前没有可用衣物' }
     ]
   }
-  const itemNames = look.items.map((item) => item.name || item.category || '衣橱衣物').slice(0, 4)
   return [
-    { label: '天气适配', value: `${look.weatherLabel} ${look.temperature}，体感参考 ${look.low}；${look.note}` },
-    { label: '场合适配', value: `${look.occasion} · ${look.fitLabel}，保持活动与得体之间的平衡。` },
-    { label: '风格方向', value: `${look.subtitle}，以 ${look.palette} 作为主色方向。` },
-    { label: '衣橱依据', value: itemNames.length ? `仅使用当前衣橱中的 ${itemNames.join('、')}，共 ${look.items.length} 件。` : '当前没有可用衣物；待补充确认后才会进入搭配。' }
+    { label: '适用场合', value: look.source?.occasion || state.value.recommendationForm?.occasion || '待选择' },
+    { label: '搭配配色', value: look.palette },
+    { label: '衣橱来源', value: look.items.length ? `${look.items.length} 件已确认衣物` : '当前没有可用衣物' }
   ]
 })
 
 function visualKeyForSource(source, gender, items) {
   const itemIds = (items || []).map((item) => item?.id).filter(Boolean).join(',')
-  return `${source?.id || ''}:${gender || ''}:${itemIds}`
+  return `${source?.id || ''}:${gender || ''}:${outfitModelReferenceKey(profile.value)}:${state.value.outfitModelRevision || 0}:${itemIds}`
 }
 
 function visualKeyForLook(look) {
@@ -361,16 +278,22 @@ const selectedVisualBusy = computed(() => visualBusyKeys.value.has(visualKeyForL
 async function requestLookVisual(look = selectedLook.value, force = false) {
   if (!look?.source?.id || !modelGender.value || typeof props.app.generateRecommendationVisual !== 'function') return null
   const key = visualKeyForLook(look)
-  if (!key || (!force && visualResults.value[key])) return visualResults.value[key] || null
+  if (!key || (!force && visualResults.value[key] && visualResults.value[key].status !== 'PENDING')) return visualResults.value[key] || null
   if (visualBusyKeys.value.has(key)) return null
   visualResults.value = {
     ...visualResults.value,
-    [key]: { status: 'PENDING', imageUrl: null, model: null, modelGender: modelGender.value, message: '正在调用阿里云生成今日模特图' }
+    [key]: { status: 'PENDING', imageUrl: null, model: null, modelGender: modelGender.value, message: '正在生成穿搭效果图…' }
   }
   visualBusyKeys.value = new Set([...visualBusyKeys.value, key])
   try {
     const result = await props.app.generateRecommendationVisual(look.source, { force })
-    if (result) visualResults.value = { ...visualResults.value, [key]: result }
+    if (result && key === visualKeyForLook(selectedLook.value)) {
+      visualResults.value = { ...visualResults.value, [key]: result }
+    } else {
+      const next = { ...visualResults.value }
+      delete next[key]
+      visualResults.value = next
+    }
     return result
   } finally {
     const next = new Set(visualBusyKeys.value)
@@ -379,8 +302,9 @@ async function requestLookVisual(look = selectedLook.value, force = false) {
   }
 }
 
-const heroCondition = computed(() => dailyWeather.value.label || '晴朗')
-const heroTemperature = computed(() => dailyWeather.value.temperature || '--')
+const heroCondition = computed(() => actualWeather.value?.weatherCode != null
+  ? props.app.weatherConditionLabel(actualWeather.value.weatherCode) : '天气待获取')
+const heroTemperature = computed(() => temperatureLabel(actualWeather.value?.temperatureC))
 
 function formatDate(value) {
   if (!value) return '暂无时间'
@@ -418,19 +342,23 @@ function imageFailed(prefix, item, index = 0) {
   brokenImages.value = new Set([...brokenImages.value, imageKey(prefix, item, index)])
 }
 
-function shiftDay(step) {
-  dailyOffset.value += step
-}
-
-function jumpToToday() {
-  dailyOffset.value = 0
-}
-
 function openAssistant(plan = null, prompt = '') {
-  assistantRef.value?.open(plan, prompt)
+  emit('open-assistant', plan, prompt)
 }
 
-watch(selectedLook, (look) => {
+function showDailyLook() {
+  document.getElementById('ootd-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function showRecommendationReason() {
+  const section = rationaleSection.value
+  if (!section) return
+  section.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  section.focus({ preventScroll: true })
+}
+
+watch(() => selectedLook.value?.visualKey, () => {
+  const look = selectedLook.value
   if (look?.isGenerated && modelGender.value) requestLookVisual(look)
 }, { immediate: true })
 </script>
@@ -440,65 +368,59 @@ watch(selectedLook, (look) => {
     <div class="recommendation-canvas">
       <header class="recommendation-hero">
         <div class="hero-overline">
-          <span><Sparkles :size="14" aria-hidden="true" />DAILY EDIT / 今日搭配</span>
+          <span><Sparkles :size="14" aria-hidden="true" />今日搭配</span>
           <span class="hero-overline-date">{{ dailyDateHeading }}</span>
         </div>
 
         <div class="hero-grid">
           <div class="hero-copy">
-            <div class="hero-index"><span>01</span><span>今天穿哪一套？</span></div>
-            <h1 v-if="selectedLook?.isGenerated">今天的一套搭配已准备好。</h1>
-            <h1 v-else-if="hasWardrobeLooks">衣橱已就绪，生成今日搭配。</h1>
-            <h1 v-else>先确认两类可用衣物，再生成今日搭配。</h1>
-            <p v-if="selectedLook?.isGenerated" class="hero-lead">今天只展示这一套搭配和一张模特图，推荐依据来自天气、场合与当前衣橱。</p>
-            <p v-else-if="hasWardrobeLooks" class="hero-lead">当前展示衣橱预览。告诉知己今天的场合，生成搭配后就会为这一套生成一张模特图。</p>
-            <p v-else class="hero-lead">衣橱需要至少两类已确认衣物。补齐后，告诉知己今天的场合即可生成一套搭配和一张模特图。</p>
+            <div class="hero-index"><span>01</span><span>个性化穿搭方案</span></div>
+            <h1 v-if="selectedLook?.isGenerated">搭配方案已生成。</h1>
+            <h1 v-else-if="hasWardrobeLooks">衣橱已就绪，创建穿搭方案。</h1>
+            <h1 v-else>完善衣橱，开始穿搭推荐。</h1>
+            <p v-if="selectedLook?.isGenerated" class="hero-lead">查看搭配方案与单品组合，推荐综合参考天气、场合、个人偏好及当前衣橱。</p>
+            <p v-else-if="hasWardrobeLooks" class="hero-lead">当前展示衣橱单品预览，可通过穿搭助手设置场合与风格需求，生成搭配方案。</p>
+            <p v-else class="hero-lead">请添加并确认上装与下装，或连体装与配套单品，再通过穿搭助手生成搭配方案。</p>
             <div class="hero-actions">
-              <button class="hero-primary" type="button" @click="openAssistant()">
-                <MessageCircle :size="17" aria-hidden="true" />问问知己<ArrowRight :size="17" aria-hidden="true" />
+              <button class="hero-primary" type="button" @click="showDailyLook">
+                <Sparkles :size="17" aria-hidden="true" />查看搭配方案<ArrowRight :size="17" aria-hidden="true" />
               </button>
             </div>
             <div class="hero-footnote">
               <span v-for="tag in profileTags" :key="tag">#{{ tag }}</span>
-              <span class="hero-footnote-model">模特：{{ modelSelectionHint }}</span>
-              <span class="hero-footnote-muted">{{ profile?.displayName ? `${profile.displayName}的今日搭配` : '按你的衣橱生成' }}</span>
+              <span class="hero-footnote-model">效果图：{{ modelSelectionHint }}</span>
+              <span class="hero-footnote-muted">{{ profile?.displayName ? `${profile.displayName}的今日搭配` : '基于个人衣橱' }}</span>
             </div>
           </div>
 
-          <aside class="weather-brief" aria-label="今天的天气和穿衣提示">
+          <aside class="weather-brief" aria-label="当地天气概览">
             <div class="weather-brief-top">
               <div>
-                <span class="brief-label">{{ dailyOffset === 0 ? 'TODAY / 今日' : 'DAY / 当日参考' }}</span>
+                <span class="brief-label">当地天气</span>
                 <strong>{{ heroCondition }}</strong>
               </div>
-              <component :is="dailyTemplate?.icon || CloudSun" :size="24" aria-hidden="true" />
+              <component :is="weatherBriefIcon" :size="24" aria-hidden="true" />
             </div>
             <div class="weather-reading">
               <strong>{{ heroTemperature }}</strong>
               <div>
                 <span>{{ weatherBriefCity }}</span>
-                <small>{{ weatherBriefDetail }}</small>
               </div>
             </div>
-            <div class="weather-note">
-              <Thermometer :size="15" aria-hidden="true" />
-              <span>{{ selectedLook?.note || dailyTemplate.note }}</span>
-            </div>
-            <button class="weather-link" type="button" @click="openAssistant()">问问知己修改条件 <ArrowRight :size="14" /></button>
           </aside>
         </div>
       </header>
 
       <div v-if="state.selectedTrendReference" class="trend-reference-banner" role="status" tabindex="-1">
-        <div><strong>已选择穿搭参考</strong><p>{{ state.selectedTrendReference.title }}</p><small>生成时只从你的衣橱选择单品，参考图不会加入衣橱。</small></div>
-        <button type="button" @click="openAssistant(null, '参考我选中的穿搭风格，用我的衣橱搭一套')">填写场合并生成</button>
+        <div><strong>已选择穿搭参考</strong><p>{{ state.selectedTrendReference.title }}</p><small>推荐参考所选穿搭风格，单品仍从个人衣橱中选择。</small></div>
+        <button type="button" @click="openAssistant(null, '请参考已选择的穿搭风格，使用我的衣橱单品生成搭配方案')">设置需求并生成</button>
         <button type="button" @click="props.app.clearTrendReference()">取消参考</button>
       </div>
       <section class="overview-strip" aria-label="今日搭配概览">
         <div class="overview-item">
-          <span>{{ hasWardrobeLooks ? '衣橱搭配' : '等待衣橱' }}</span>
+          <span>{{ hasWardrobeLooks ? '搭配方案' : '衣橱待完善' }}</span>
           <strong>{{ hasWardrobeLooks ? wardrobeLookCount : 0 }} <small>套</small></strong>
-          <em>{{ hasWardrobeLooks ? (generatedLookCount ? `${generatedLookCount} 套有推荐记录` : '按当前衣橱预览') : '先添加可用衣物' }}</em>
+          <em>{{ hasWardrobeLooks ? (generatedLookCount ? `${generatedLookCount} 套已生成方案` : '当前衣橱预览') : '先添加可用衣物' }}</em>
         </div>
         <div class="overview-item">
           <span>可用衣物</span>
@@ -506,33 +428,30 @@ watch(selectedLook, (look) => {
           <em>{{ props.app.wardrobeStats.review ? `${props.app.wardrobeStats.review} 件衣物待补充` : (props.app.wardrobeStats.ready ? '衣物信息齐全' : '至少添加两类衣物') }}</em>
         </div>
         <div class="overview-item overview-item-accent">
-          <span>风格线索</span>
+          <span>风格偏好</span>
           <strong class="overview-style-value">{{ profileTags[0] || '待建立' }}</strong>
-          <em>{{ profileTags.slice(1).join(' · ') || '完善档案后更精准' }}</em>
+          <em>{{ profileTags.slice(1).join(' · ') || '可在形象档案中完善偏好' }}</em>
         </div>
         <div class="overview-source">
           <span>推荐依据</span>
-          <strong>天气 × 衣橱 × 场合</strong>
-          <p>问问知己时，会把这些信息一起考虑。</p>
+          <strong>天气 · 场合 · 衣橱</strong>
+          <p>结合已保存的形象资料与个人偏好。</p>
         </div>
       </section>
 
       <section class="ootd-section" aria-labelledby="ootd-title">
         <header class="section-header ootd-header">
           <div>
-            <div class="section-number">02 / DAILY OOTD</div>
-            <h2 id="ootd-title">今天的搭配</h2>
-            <p>{{ dailyDateHeading }} · {{ dailyWeather.label }} {{ dailyWeather.temperature }} · {{ hasWardrobeLooks ? `${wardrobeLookCount} 套只取当前衣橱` : '等待可用衣橱单品' }}</p>
+            <div class="section-number">02 · 搭配</div>
+            <h2 id="ootd-title">搭配方案</h2>
+            <p>{{ generatedRecommendation ? '生成于 ' : '' }}{{ dailyDateHeading }} · {{ dailyWeather.label }} {{ dailyWeather.temperature }} · {{ hasWardrobeLooks ? `${wardrobeLookCount} 套方案 · 单品来自当前衣橱` : '需补充可用衣物' }}</p>
           </div>
-          <div class="ootd-controls">
-            <button class="round-control" type="button" aria-label="前一天" title="前一天" @click="shiftDay(-1)"><ChevronLeft :size="17" /></button>
-            <button class="ootd-today" type="button" @click="jumpToToday">{{ dailyOffset === 0 ? '今天' : '回到今天' }}</button>
-            <button class="round-control" type="button" aria-label="后一天" title="后一天" @click="shiftDay(1)"><ChevronRight :size="17" /></button>
-          </div>
+          <button class="ootd-today" type="button" @click="app.selectView('history')">查看搭配记录</button>
         </header>
 
+        <OutfitAdjustment v-if="generatedRecommendation" :app="app" :recommendation="generatedRecommendation" />
         <div v-if="selectedLook" class="ootd-board-wrap">
-          <div class="ootd-board" :aria-label="`${selectedLook.title}的每日穿搭展示`">
+          <div class="ootd-board" :aria-label="`${selectedLook.title}的穿搭方案展示`">
             <div class="ootd-board-heading">
               <span>{{ selectedLook.lookLabel }} / {{ selectedLook.dateLabel }}</span>
               <strong>{{ selectedLook.weatherLabel }} {{ selectedLook.temperature }} · {{ selectedLook.occasion }}</strong>
@@ -542,27 +461,27 @@ watch(selectedLook, (look) => {
               <div v-if="modelImageSource(selectedLook)" class="ootd-board-model-visual">
                 <img
                   :src="modelImageSource(selectedLook)"
-                  :alt="`${selectedLook.modelGenderLabel}模特每日穿搭图`"
+                  :alt="`${selectedLook.modelDisplayLabel}穿搭效果图`"
                   draggable="false"
                   @error="modelImageFailed(selectedLook)"
                 />
-                <span v-if="selectedVisualBusy" class="ootd-board-model-loading"><LoaderCircle :size="15" class="spinning" />阿里云正在生成今日模特图</span>
+                <span v-if="selectedVisualBusy" class="ootd-board-model-loading"><LoaderCircle :size="15" class="spinning" />正在生成穿搭效果图…</span>
               </div>
               <div v-else-if="selectedLook.items.length" class="ootd-model-empty">
                 <Shirt :size="30" aria-hidden="true" />
                 <template v-if="!selectedLook.modelGender">
-                  <strong>先选择每日模特性别</strong>
-                  <span>选择后会使用对应原型生成一张穿搭图。</span>
+                  <strong>请设置模特性别</strong>
+                  <span>设置模特性别后，可生成对应的穿搭效果图。</span>
                   <button class="ootd-visual-action" type="button" @click="props.app.selectView('profile')">选择模特性别</button>
                 </template>
                 <template v-else-if="!selectedLook.isGenerated">
-                  <strong>先生成今日搭配</strong>
-                  <span>当前是衣橱预览。生成文字搭配后，才会生成一张模特图。</span>
-                  <button class="ootd-visual-action" type="button" @click="openAssistant(selectedLook)">生成今日搭配</button>
+                  <strong>请先生成搭配方案</strong>
+                  <span>当前为衣橱预览。生成搭配方案后，可继续生成穿搭效果图。</span>
+                  <button class="ootd-visual-action" type="button" @click="openAssistant(selectedLook)">生成搭配方案</button>
                 </template>
                 <template v-else>
-                  <strong>{{ selectedVisualBusy ? '正在生成单张模特图' : '尚未生成模特图' }}</strong>
-                  <span>{{ selectedVisual?.message || '今日搭配只生成一张模特图，完成后会显示在这里。' }}</span>
+                  <strong>{{ selectedVisualBusy ? '正在生成穿搭效果图…' : '暂无穿搭效果图' }}</strong>
+                  <span>{{ selectedVisual?.message || '穿搭效果图生成后将在此展示，仅供搭配参考。' }}</span>
                 </template>
               </div>
             </div>
@@ -593,9 +512,9 @@ watch(selectedLook, (look) => {
 
             <div v-if="!selectedLook.items.length" class="ootd-board-empty" role="status">
               <Shirt :size="24" aria-hidden="true" />
-              <strong>衣橱里还没有可搭配的衣物</strong>
-              <span>请确认至少两类不同类别的衣物，再生成今日搭配图。</span>
-              <button class="ootd-empty-action" type="button" @click="props.app.selectView('wardrobe')">去衣橱确认衣物</button>
+              <strong>暂无可组合的衣橱单品</strong>
+              <span>请添加并确认上装与下装，或连体装与配套单品，以生成完整搭配。</span>
+              <button class="ootd-empty-action" type="button" @click="props.app.selectView('wardrobe')">完善衣橱信息</button>
             </div>
           </div>
 
@@ -603,16 +522,16 @@ watch(selectedLook, (look) => {
             <div class="ootd-board-status" aria-live="polite">
               <span>
                 {{ !selectedLook.items.length
-                  ? '先确认两类不同类别的可用衣物'
+                  ? '生成搭配需上装与下装，或连体装与配套单品'
                   : selectedLook.modelGenderLabel === '待补充'
-                    ? '请先在个人档案选择模特性别'
+                    ? '请在个人形象档案中设置模特性别'
                     : selectedLook.modelImageKind === 'generated'
-                    ? `已按${selectedLook.modelGenderLabel}性别档案生成 1 张今日模特图`
+                    ? `已生成${selectedLook.modelDisplayLabel}穿搭效果图`
                     : !selectedLook.isGenerated
-                      ? '先生成今日搭配，再生成 1 张模特图'
+                      ? '请先生成搭配方案，再生成穿搭效果图'
                       : selectedVisualBusy
-                        ? '阿里云正在生成 1 张今日模特图'
-                        : (selectedVisual?.message || '等待阿里云返回 1 张今日模特图') }}
+                        ? '正在生成穿搭效果图…'
+                        : (selectedVisual?.message || '穿搭效果图尚未生成') }}
               </span>
               <button
                 v-if="selectedLook.isGenerated && selectedLook.modelGender"
@@ -623,75 +542,66 @@ watch(selectedLook, (look) => {
               >
                 <LoaderCircle v-if="selectedVisualBusy" :size="14" class="spinning" />
                 <Sparkles v-else :size="14" />
-                {{ selectedVisualBusy ? '生成中' : selectedLook.modelImageKind === 'generated' ? '重新生成单张图片' : '生成单张图片' }}
+                {{ selectedVisualBusy ? '生成中' : selectedLook.modelImageKind === 'generated' ? '重新生成效果图' : '生成穿搭效果图' }}
               </button>
             </div>
           </div>
 
           <section class="ootd-rationale" aria-labelledby="ootd-rationale-title">
-            <div class="ootd-rationale-heading"><span>WHY THIS LOOK</span><strong id="ootd-rationale-title">搭配信息</strong></div>
+            <div class="ootd-rationale-heading"><span>搭配依据</span><strong id="ootd-rationale-title">搭配信息</strong></div>
             <dl>
               <div v-for="fact in selectedLookRationale" :key="fact.label">
                 <dt>{{ fact.label }}</dt>
                 <dd>{{ fact.value }}</dd>
               </div>
             </dl>
+            <div v-if="selectedLook.isGenerated && selectedLookReason" ref="rationaleSection" class="ootd-reason" tabindex="-1" aria-label="搭配理由">
+              <p>{{ selectedLookReason }}</p>
+            </div>
           </section>
-          <div class="ootd-board-actions">
-            <button class="detail-secondary" type="button" @click="openAssistant(selectedLook)">调整条件</button>
-            <button class="detail-primary" type="button" @click="openAssistant(selectedLook, '参考这套搭配，再给我一套相近但不同的组合')"><Sparkles :size="15" />生成类似搭配</button>
-          </div>
         </div>
         <div v-else class="ootd-board-empty ootd-board-empty-page">
           <Shirt :size="24" aria-hidden="true" />
-          <strong>暂无每日搭配</strong>
-          <span>先添加衣橱单品并生成一条推荐。</span>
+          <strong>暂无搭配方案</strong>
+          <span>请添加衣橱单品，再生成穿搭推荐。</span>
         </div>
       </section>
 
-      <section class="workbench-grid assistant-workbench" aria-label="AI 穿搭助手与衣橱状态">
-        <RecommendationAssistant
-          ref="assistantRef"
-          :app="props.app"
-          :selected-look="selectedLook"
-          :actual-weather="actualWeather"
-          :profile-tags="profileTags"
-        />
-
+      <section class="workbench-grid" aria-label="衣橱使用情况">
         <aside class="closet-panel">
           <header class="panel-header compact">
             <div>
-              <div class="section-number">04 / CLOSET SIGNAL</div>
+              <div class="section-number">03 · 衣橱</div>
               <h2>衣橱使用情况</h2>
             </div>
             <Shirt :size="19" aria-hidden="true" />
           </header>
           <div class="closet-score">
             <strong>{{ coveragePercent === null ? '--' : `${coveragePercent}%` }}</strong>
-            <span>已有衣物参与推荐</span>
+            <span>衣物参与推荐的比例</span>
           </div>
           <div class="closet-progress" role="progressbar" :aria-valuenow="coveragePercent || 0" aria-valuemin="0" aria-valuemax="100" aria-label="衣橱参与推荐的比例"><span :style="{ transform: `scaleX(${(coveragePercent || 0) / 100})` }"></span></div>
           <div class="closet-facts">
-            <div><span>衣橱衣物数</span><strong>{{ props.app.wardrobeStats.total }}</strong></div>
-            <div><span>历史搭配</span><strong>{{ props.app.recommendationStats.total }}</strong></div>
+            <div><span>衣橱单品总数</span><strong>{{ props.app.wardrobeStats.total }}</strong></div>
+            <div><span>搭配记录</span><strong>{{ props.app.recommendationStats.total }}</strong></div>
           </div>
-          <div class="closet-suggestion"><Check :size="15" aria-hidden="true" /><span>{{ props.app.wardrobeStats.review ? '先补充待确认衣物的信息，再生成搭配。' : (props.app.wardrobeStats.ready ? '衣物信息已齐，可以生成下一套搭配。' : '先添加至少两类衣物，再生成第一套搭配。') }}</span></div>
+          <div class="closet-suggestion"><Check :size="15" aria-hidden="true" /><span>{{ props.app.wardrobeStats.review ? '部分衣物信息待确认，补充后即可参与推荐。' : (props.app.wardrobeStats.ready ? '已确认的衣物可用于穿搭推荐。' : '请添加并确认上装与下装，或连体装与配套单品，再生成搭配方案。') }}</span></div>
         </aside>
       </section>
 
       <section class="generated-section" aria-labelledby="generated-title">
         <header class="section-header">
           <div>
-            <div class="section-number">05 / GENERATED LOOK</div>
-            <h2 id="generated-title">刚生成的搭配</h2>
+            <div class="section-number">04 · 记录</div>
+            <h2 id="generated-title">本次生成结果</h2>
           </div>
           <span v-if="state.currentRecommendation" class="generated-time">{{ formatDate(state.currentRecommendation.generatedAt) }}</span>
         </header>
 
         <div v-if="state.generating" class="generated-state" aria-live="polite">
           <LoaderCircle class="spinning" :size="22" />
-          <strong>正在从衣橱里挑选搭配</strong>
-          <span>天气、场合和风格偏好会一起参考。</span>
+          <strong>正在生成搭配方案…</strong>
+          <span>正在综合天气、场合、形象资料与个人偏好选择衣橱单品。</span>
         </div>
 
         <article v-else-if="state.currentRecommendation" class="generated-card">
@@ -700,7 +610,7 @@ watch(selectedLook, (look) => {
             <span class="saved-state" :class="{ saved: state.currentRecommendation.saved }"><Bookmark :size="15" :fill="state.currentRecommendation.saved ? 'currentColor' : 'none'" />{{ state.currentRecommendation.saved ? '已收藏' : '未收藏' }}</span>
           </div>
           <div class="engine-line"><span><Sparkles :size="13" />{{ props.app.engineLabel(state.currentRecommendation.engine) }}</span><small v-if="state.currentRecommendation.generationAudit?.modelName">{{ state.currentRecommendation.generationAudit.modelName }}</small><small v-if="state.currentRecommendation.generationAudit?.fallbackReason">{{ props.app.fallbackReasonLabel(state.currentRecommendation.generationAudit.fallbackReason) }}</small></div>
-          <h3>{{ state.currentRecommendation.summary }}</h3>
+          <h3>{{ formatRecommendationTitle(state.currentRecommendation) }}</h3>
           <div class="generated-content-grid">
             <ul v-if="currentRecommendationItems.length" class="generated-items" aria-label="搭配中的衣物">
               <li v-for="(item, itemIndex) in currentRecommendationItems" :key="`${state.currentRecommendation.id}-${item.id || itemIndex}`">
@@ -711,30 +621,33 @@ watch(selectedLook, (look) => {
                 <div><span>{{ item.category }} · {{ item.color }}</span><strong>{{ item.name }}</strong><small>{{ item.style || '衣橱衣物' }}</small></div>
               </li>
             </ul>
-            <div v-else class="generated-items-empty"><Shirt :size="17" aria-hidden="true" /><span>这条推荐中的单品已不在当前可用衣橱，未展示。</span></div>
-            <div class="generated-reason"><span>这样搭的原因</span><p>{{ state.currentRecommendation.reason }}</p><div v-if="state.currentRecommendation.weather" class="generated-weather"><CloudSun :size="15" />{{ state.currentRecommendation.weather.temperatureC }}° · 体感 {{ state.currentRecommendation.weather.apparentTemperatureC }}° · {{ props.app.weatherConditionLabel(state.currentRecommendation.weather.weatherCode) }}</div></div>
+            <div v-else class="generated-items-empty"><Shirt :size="17" aria-hidden="true" /><span>该方案的单品已不在当前可用衣橱中。</span></div>
+            <div class="generated-reason">
+              <span>推荐说明</span>
+              <button v-if="selectedLook.source?.id === state.currentRecommendation.id && selectedLookReason" class="rationale-link" type="button" @click="showRecommendationReason">查看搭配依据 <ArrowRight :size="14" /></button>
+              <p v-else>{{ currentRecommendationReason }}</p>
+            </div>
           </div>
           <footer class="generated-actions">
-            <div class="rating-control"><span>这套搭配对你有用吗？</span><div aria-label="搭配评分"><button v-for="rating in 5" :key="rating" type="button" :class="{ rated: state.currentRecommendation.feedback?.rating >= rating }" :disabled="state.feedbackSavingId === state.currentRecommendation.id" :aria-label="`${rating} 星评分`" @click="props.app.rateRecommendation(state.currentRecommendation, rating)"><Star :size="18" :fill="state.currentRecommendation.feedback?.rating >= rating ? 'currentColor' : 'none'" /></button></div></div>
-            <button class="save-button" type="button" :class="{ saved: state.currentRecommendation.saved }" :disabled="state.saving || state.currentRecommendation.saved" @click="props.app.saveRecommendation()"><LoaderCircle v-if="state.saving" class="spinning" :size="16" /><Bookmark v-else :size="16" :fill="state.currentRecommendation.saved ? 'currentColor' : 'none'" />{{ state.currentRecommendation.saved ? '已保存' : '收藏这套搭配' }}</button>
+            <RecommendationFeedback :app="app" :recommendation="state.currentRecommendation" />
+            <button class="save-button" type="button" :class="{ saved: state.currentRecommendation.saved }" :disabled="state.saving || state.currentRecommendation.saved" @click="props.app.saveRecommendation()"><LoaderCircle v-if="state.saving" class="spinning" :size="16" /><Bookmark v-else :size="16" :fill="state.currentRecommendation.saved ? 'currentColor' : 'none'" />{{ state.currentRecommendation.saved ? '已收藏' : '收藏搭配' }}</button>
           </footer>
         </article>
 
           <div v-else class="generated-empty">
-          <div><Sparkles :size="19" aria-hidden="true" /><strong>还没有生成搭配</strong></div>
-          <span>选择上面的日期，或问问知己生成一套搭配。</span>
-          <button type="button" @click="openAssistant()"><MessageCircle :size="14" />问问知己 <ArrowRight :size="14" /></button>
+          <div><Sparkles :size="19" aria-hidden="true" /><strong>暂无生成结果</strong></div>
+          <span>通过穿搭助手设置需求，生成个性化搭配方案。</span>
+          <button type="button" @click="openAssistant()"><MessageCircle :size="14" />打开穿搭助手 <ArrowRight :size="14" /></button>
         </div>
       </section>
 
-      <TrendDiscovery :app="app" />
       <section class="signal-grid" aria-label="搭配参考">
         <article class="signal-panel note-signal">
-          <header class="panel-header compact"><div><div class="section-number">07 / NOTES</div><h2>搭配小提示</h2></div><Wind :size="19" aria-hidden="true" /></header>
+          <header class="panel-header compact"><div><div class="section-number">05 · 建议</div><h2>穿搭建议</h2></div><Wind :size="19" aria-hidden="true" /></header>
           <ul>
-            <li><span>01</span><p><strong>让常穿衣物多出现几次</strong>同一件衣物也能搭出不同组合。</p></li>
-            <li><span>02</span><p><strong>先把主色定下来</strong>颜色稳定后，再决定要不要加配饰。</p></li>
-            <li><span>03</span><p><strong>给天气留一点余量</strong>温差大时，带一件轻薄外层更方便。</p></li>
+            <li><span>01</span><p><strong>合理复用衣橱单品</strong>通过调整配色与组合，拓展同一单品的搭配方式。</p></li>
+            <li><span>02</span><p><strong>明确主要配色</strong>确定主要配色后，再以配饰补充层次。</p></li>
+            <li><span>03</span><p><strong>考虑天气与温差</strong>温差较大时，可准备便于穿脱的轻薄外套。</p></li>
           </ul>
         </article>
       </section>
@@ -810,8 +723,6 @@ watch(selectedLook, (look) => {
 .hero-footnote,
 .hero-index,
 .weather-brief-top,
-.weather-note,
-.weather-link,
 .section-number,
 .generated-card-topline,
 .engine-line,
@@ -828,10 +739,9 @@ watch(selectedLook, (look) => {
   justify-content: space-between;
   gap: 24px;
   color: var(--rec-muted);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .13em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 .hero-overline > span:first-child {
@@ -894,8 +804,6 @@ watch(selectedLook, (look) => {
 }
 
 .hero-primary,
-.detail-primary,
-.detail-secondary,
 .save-button,
 .generated-empty button {
   min-height: 42px;
@@ -906,7 +814,6 @@ watch(selectedLook, (look) => {
 }
 
 .hero-primary,
-.detail-primary,
 .save-button {
   display: inline-flex;
   justify-content: center;
@@ -915,13 +822,11 @@ watch(selectedLook, (look) => {
 }
 
 .hero-primary:hover,
-.detail-primary:hover,
 .save-button:hover:not(:disabled) {
   background: var(--rec-accent);
   transform: translateY(-1px);
 }
 
-.detail-secondary,
 .generated-empty button {
   display: inline-flex;
   justify-content: center;
@@ -930,7 +835,6 @@ watch(selectedLook, (look) => {
   background: transparent;
 }
 
-.detail-secondary:hover,
 .generated-empty button:hover {
   border-color: var(--rec-accent);
   color: var(--rec-accent);
@@ -967,9 +871,6 @@ watch(selectedLook, (look) => {
 
 .brief-label,
 .weather-reading span,
-.weather-reading small,
-.weather-note,
-.weather-link,
 .overview-item span,
 .overview-item em,
 .overview-source span,
@@ -982,7 +883,6 @@ watch(selectedLook, (look) => {
 .generated-item-image + div small,
 .generated-reason span,
 .generated-reason p,
-.generated-weather,
 .signal-panel span,
 .signal-panel p,
 .note-signal p,
@@ -1022,36 +922,6 @@ watch(selectedLook, (look) => {
 .weather-reading > div {
   display: grid;
   gap: 4px;
-}
-
-.weather-reading small {
-  line-height: 1.45;
-}
-
-.weather-note {
-  align-items: flex-start;
-  gap: 8px;
-  margin-top: 26px;
-  line-height: 1.6;
-}
-
-.weather-note svg {
-  flex: 0 0 auto;
-  color: var(--rec-accent);
-}
-
-.weather-link {
-  gap: 5px;
-  margin-top: 17px;
-  padding: 0;
-  color: var(--rec-ink);
-  background: transparent;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.weather-link:hover {
-  color: var(--rec-accent);
 }
 
 .overview-strip {
@@ -1141,10 +1011,9 @@ watch(selectedLook, (look) => {
   gap: 7px;
   margin-bottom: 12px;
   color: var(--rec-rust);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .08em;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .02em;
 }
 
 .section-header h2,
@@ -1522,6 +1391,38 @@ watch(selectedLook, (look) => {
   color: var(--rec-muted);
   font-size: 11px;
   line-height: 1.55;
+}
+
+.ootd-reason {
+  border-top: 1px solid var(--rec-line);
+  padding-top: 16px;
+}
+
+.ootd-reason:focus-visible,
+.rationale-link:focus-visible {
+  outline: 2px solid var(--rec-accent);
+  outline-offset: 3px;
+}
+
+.ootd-reason p {
+  margin: 0;
+  color: var(--rec-muted);
+  font-size: 12px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.rationale-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  margin-top: 8px;
+  padding: 0;
+  color: var(--rec-ink);
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .ootd-detail-palette {
@@ -1986,7 +1887,7 @@ watch(selectedLook, (look) => {
   margin-top: 30px;
   border: 1px solid var(--rec-line);
   border-radius: 18px;
-  padding: 18px 22px 0;
+  padding: 18px 22px;
   background: rgba(255, 255, 253, .5);
 }
 
@@ -1994,16 +1895,9 @@ watch(selectedLook, (look) => {
   grid-template-columns: 92px minmax(0, 1fr);
 }
 
-.ootd-board-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 9px;
-  margin-top: 15px;
-}
-
 .workbench-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 28px;
   padding-top: 64px;
 }
@@ -2308,17 +2202,6 @@ watch(selectedLook, (look) => {
 .generated-reason p {
   margin: 8px 0 0;
   line-height: 1.7;
-}
-
-.generated-weather {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 16px;
-}
-
-.generated-weather svg {
-  color: var(--rec-accent);
 }
 
 .generated-actions {
@@ -2696,8 +2579,7 @@ watch(selectedLook, (look) => {
   }
 
   .ootd-board-caption,
-  .ootd-board-status,
-  .ootd-board-actions {
+  .ootd-board-status {
     align-items: stretch;
     flex-direction: column;
   }
@@ -2706,14 +2588,13 @@ watch(selectedLook, (look) => {
     gap: 10px;
   }
 
-  .ootd-visual-action,
-  .ootd-board-actions button {
+  .ootd-visual-action {
     width: 100%;
     justify-content: center;
   }
 
   .ootd-board-wrap > .ootd-rationale {
-    padding: 16px 16px 0;
+    padding: 16px;
   }
 
   .ootd-board-wrap > .ootd-rationale dl > div {

@@ -18,7 +18,7 @@ const mode = ref('login')
 const showPassword = ref(false)
 const validationError = ref('')
 const phase = ref('loading')
-const statusText = ref('正在加载双鱼…')
+const statusText = ref('正在加载登录页面…')
 const introVisible = ref(true)
 const loginVisible = ref(false)
 const assetsError = ref('')
@@ -416,7 +416,7 @@ function resetScene() {
   introVisible.value = true
   loginVisible.value = false
   clearAuthError()
-  setPhase('intro', '点击双鱼开始')
+  setPhase('intro', '点击图标进入登录')
   nextTick(() => startButton.value?.focus({ preventScroll: true }))
 }
 
@@ -428,7 +428,7 @@ function openLogin(skipAnimation = false) {
     revealLogin()
     setPhase('login', '等待登录')
   } else {
-    setPhase('opening', '正在展开登录')
+    setPhase('opening', '正在打开登录表单…')
   }
 }
 
@@ -449,11 +449,11 @@ async function submit() {
   const passwordBytes = new TextEncoder().encode(form.password).length
 
   if (!/^[a-z0-9][a-z0-9_-]{2,31}$/.test(username)) {
-    validationError.value = '账号需为 3–32 位小写字母、数字、下划线或连字符。'
+    validationError.value = '账号长度为 3–32 位，支持小写字母、数字、下划线和连字符，须以字母或数字开头。'
     return
   }
   if (passwordBytes < 8) {
-    validationError.value = '密码至少需要 8 个字符。'
+    validationError.value = '密码长度至少为 8 个字符。'
     return
   }
   if (passwordBytes > 72) {
@@ -461,7 +461,7 @@ async function submit() {
     return
   }
   if (mode.value === 'register' && form.password !== form.confirmPassword) {
-    validationError.value = '两次输入的密码不一样。'
+    validationError.value = '两次输入的密码不一致，请重新确认。'
     return
   }
 
@@ -478,12 +478,12 @@ async function submit() {
     loginVisible.value = true
     setPhase(
       'login',
-      mode.value === 'login' ? '登录失败，可重试' : '注册失败，可重试'
+      mode.value === 'login' ? '登录失败，请重试' : '注册失败，请重试'
     )
   } catch (cause) {
     validationError.value = cause instanceof Error ? cause.message : '服务暂时不可用，请稍后再试。'
     loginVisible.value = true
-    setPhase('login', '请求失败，可重试')
+    setPhase('login', '请求失败，请重试')
   }
 }
 
@@ -510,7 +510,7 @@ onMounted(() => {
   else motionMedia.addListener(handleMotionChange)
 
   if (!context) {
-    assetsError.value = '当前浏览器不支持双鱼动画，但仍可继续登录。'
+    assetsError.value = '当前浏览器无法显示开场动画，可直接使用登录表单。'
     introVisible.value = false
     loginVisible.value = true
     setPhase('login', '等待登录')
@@ -528,7 +528,7 @@ onMounted(() => {
       resetScene()
     })
     .catch(() => {
-      assetsError.value = '双鱼图片加载失败，但仍可继续登录。'
+      assetsError.value = '开场动画加载失败，可直接使用登录表单。'
       introVisible.value = false
       loginVisible.value = true
       setPhase('login', '等待登录')
@@ -551,7 +551,7 @@ onBeforeUnmount(() => {
       <header class="fish-auth-header">
         <div class="fish-auth-brand">
           <strong>知己</strong>
-          <small>ZHI JI</small>
+          <small>穿搭推荐</small>
         </div>
         <button
           v-if="!loginVisible"
@@ -569,7 +569,7 @@ onBeforeUnmount(() => {
           :disabled="submitting"
           @click="resetScene"
         >
-          返回开场
+          返回欢迎页
         </button>
       </header>
 
@@ -584,14 +584,14 @@ onBeforeUnmount(() => {
             ref="startButton"
             class="fish-auth-logo-trigger"
             type="button"
-            aria-label="轻触双鱼，走近知己"
+            aria-label="点击图标，进入知己"
             :disabled="phase !== 'intro' || submitting"
             @click="openLogin()"
           ></button>
           <div class="fish-auth-wordmark">知己</div>
-          <div class="fish-auth-roman">ZHI JI</div>
-          <p class="fish-auth-invitation">轻触双鱼，走近知己</p>
-          <p class="fish-auth-note">你的穿衣心事，和知己聊聊。</p>
+          <div class="fish-auth-roman">穿搭推荐</div>
+          <p class="fish-auth-invitation">点击图标，进入知己</p>
+          <p class="fish-auth-note">管理个人衣橱，获取个性化穿搭建议。</p>
         </div>
       </section>
 
@@ -600,12 +600,12 @@ onBeforeUnmount(() => {
         :class="{ 'is-visible': loginVisible }"
         :aria-hidden="!loginVisible ? 'true' : undefined"
         :inert="!loginVisible"
-        aria-label="真实账户认证"
+        aria-label="账户登录与注册"
       >
         <div class="fish-auth-login-inner">
-          <h1>{{ mode === 'login' ? '欢迎回来' : '创建你的风格档案' }}</h1>
+          <h1>{{ mode === 'login' ? '登录知己' : '创建知己账户' }}</h1>
           <p class="fish-auth-subtitle">
-            {{ mode === 'login' ? '今天想怎么穿，从你的喜好说起。' : '建立你的风格档案，从喜欢的衣物开始。' }}
+            {{ mode === 'login' ? '登录后可管理衣橱、查看推荐与搭配记录。' : '注册账户，建立个人衣橱与形象档案。' }}
           </p>
 
           <div class="fish-auth-tabs" role="tablist" aria-label="账户操作">
@@ -619,7 +619,7 @@ onBeforeUnmount(() => {
               @click="selectMode('login')"
             >
               <span>登录</span>
-              <small aria-hidden="true">继续使用</small>
+              <small aria-hidden="true">已有账户</small>
             </button>
             <button
               type="button"
@@ -631,7 +631,7 @@ onBeforeUnmount(() => {
               @click="selectMode('register')"
             >
               <span>注册</span>
-              <small aria-hidden="true">新建风格档案</small>
+              <small aria-hidden="true">创建账户</small>
             </button>
           </div>
 
@@ -659,7 +659,7 @@ onBeforeUnmount(() => {
                 required
                 placeholder="请输入账号"
               />
-              <small v-if="mode === 'register'">3–32 位小写字母、数字、下划线或连字符</small>
+              <small v-if="mode === 'register'">3–32 位，支持小写字母、数字、下划线及连字符；以字母或数字开头。</small>
             </label>
 
             <label class="fish-auth-field" for="fish-password">
@@ -700,7 +700,7 @@ onBeforeUnmount(() => {
                 minlength="8"
                 maxlength="72"
                 required
-                placeholder="再次输入密码"
+                placeholder="请再次输入密码"
               />
             </label>
 
@@ -708,12 +708,12 @@ onBeforeUnmount(() => {
               <LoaderCircle v-if="submitting" class="spinning" :size="18" aria-hidden="true" />
               <LogIn v-else-if="mode === 'login'" :size="18" aria-hidden="true" />
               <UserRoundPlus v-else :size="18" aria-hidden="true" />
-              {{ submitting ? '正在提交' : mode === 'login' ? '登录知己' : '注册账户' }}
+              {{ submitting ? '正在提交…' : mode === 'login' ? '登录知己' : '注册账户' }}
             </button>
           </form>
 
           <p class="fish-auth-footnote">
-            {{ mode === 'login' ? '登录后，你的衣橱和推荐记录会继续保留。' : '创建账户后会自动进入你的衣橱。' }}
+            {{ mode === 'login' ? '衣橱与搭配记录关联当前账户，登录后即可查看。' : '注册成功后自动登录，可开始完善资料与衣橱。' }}
           </p>
         </div>
       </section>
@@ -721,11 +721,11 @@ onBeforeUnmount(() => {
       <canvas ref="canvasRef" class="fish-auth-canvas" aria-hidden="true"></canvas>
 
       <footer class="fish-auth-footer" aria-live="polite">
-        <span>双鱼登录 · 知己认证</span>
+        <span>知己 · 账户服务</span>
         <span>{{ statusText }}</span>
       </footer>
 
-      <p v-if="phase === 'loading'" class="fish-auth-loading" role="status">正在加载双鱼…</p>
+      <p v-if="phase === 'loading'" class="fish-auth-loading" role="status">正在加载登录页面…</p>
     </div>
   </main>
 </template>

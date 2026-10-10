@@ -1,0 +1,36 @@
+# Real-provider integration only. Use a dedicated project and separate data volumes.
+name: fashion-profile-live-local
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:5534:5432"
+  minio:
+    ports: !override
+      - "127.0.0.1:9100:9000"
+      - "127.0.0.1:9101:9001"
+  backend:
+    ports: !override
+      - "127.0.0.1:8108:8080"
+    environment:
+      AUTH_REGISTRATION_ENABLED: "true"
+      CORS_ALLOWED_ORIGINS: http://localhost:8190,http://127.0.0.1:8190
+      BAILIAN_ENABLED: "true"
+      BAILIAN_VISION_ENABLED: "true"
+      BAILIAN_IMAGE_ENABLED: "true"
+      # The fictional avatar is for profile analysis only; keep photographic model references for outfit generation.
+      BAILIAN_IMAGE_PROTOTYPE_MALE: classpath:reference_photo/model-male.png
+      BAILIAN_IMAGE_PROTOTYPE_FEMALE: classpath:reference_photo/model-female.png
+      TREND_CONFIGURED_DEMO_ENABLED: "false"
+      TREND_JSON_URL: ""
+      TREND_DOUYIN_URL: ""
+      TREND_WEIBO_URL: ""
+      TREND_WEB_URLS: ""
+      TREND_EDITORIAL_ENABLED: "false"
+      TREND_HOT_BOARDS_ENABLED: "false"
+      TREND_IMPORT_DIRECTORY: ""
+      WEATHER_CONFIGURED_DEMO_ENABLED: "false"
+    volumes: !override
+      - ./output/live-profile/fixtures:/app/live-fixture:ro
+  frontend:
+    ports: !override
+      - "127.0.0.1:8190:80"

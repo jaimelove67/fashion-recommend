@@ -1,5 +1,6 @@
 <script setup>
 import { ArrowUpRight, Flame } from '@lucide/vue'
+import { externalTrendSourceUrl, trendPlatformName } from '../utils/trendSources.js'
 
 defineProps({
   item: { type: Object, required: true },
@@ -13,11 +14,11 @@ defineEmits(['select'])
   <article class="trend-card" :class="{ active }" @click="$emit('select', item)">
     <img class="trend-image" :src="item.imageUrl" :alt="item.title" />
     <div class="trend-copy">
-      <div class="trend-meta"><span>{{ item.platform }}</span><span>更新时间 {{ new Date(item.fetchedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span></div>
+      <div class="trend-meta"><span>{{ trendPlatformName(item.platform) }}</span><span>更新时间 {{ new Date(item.fetchedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span></div>
       <h3>{{ item.title }}</h3>
       <p>{{ item.topicTags.join(' / ') }}</p>
     </div>
     <div class="trend-score"><Flame :size="16" />{{ item.heatScore }}</div>
-    <a class="source-link" :href="item.sourceUrl" target="_blank" rel="noreferrer" @click.stop><ArrowUpRight :size="17" /></a>
+    <a v-if="externalTrendSourceUrl(item)" class="source-link" :href="externalTrendSourceUrl(item)" target="_blank" rel="noreferrer" @click.stop><ArrowUpRight :size="17" /></a>
   </article>
 </template>

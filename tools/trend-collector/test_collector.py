@@ -1,5 +1,5 @@
 from contextlib import redirect_stdout
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import io
 import json
 from pathlib import Path
@@ -51,9 +51,20 @@ class CollectorTests(unittest.TestCase):
                 normalize({**self.row(), **update}, "weibo")
 
     def test_rejects_red_carpet_runway_and_celebrity_editorial_content(self):
-        for title in ["艾美奖红毯礼服造型", "2026 春夏时装周秀场趋势", "明星时装大片造型"]:
+        for title in ["艾美奖红毯礼服造型", "2026 春夏时装周秀场趋势", "明星时装大片造型",
+                      "Vogue 杂志封面穿搭", "秋季时尚画报大片"]:
             with self.subTest(title=title), self.assertRaises(ValueError):
                 normalize({**self.row(), "title": title}, "weibo")
+
+    def test_only_explicitly_reviewed_image_enters_gallery_contract(self):
+        row = self.row()
+        self.assertIsNone(normalize(row, "weibo")["evidence"]["fullBodyImageUrl"])
+        reviewed = {**row, "full_body_image_url": "https://img.example/b.jpg",
+                    "full_body_image_verified": True}
+        self.assertEqual(normalize(reviewed, "weibo")["evidence"]["fullBodyImageUrl"],
+                         "https://img.example/b.jpg")
+        unknown = {**reviewed, "full_body_image_url": "https://img.example/other.jpg"}
+        self.assertIsNone(normalize(unknown, "weibo")["evidence"]["fullBodyImageUrl"])
 
     def test_deduplicates_and_preserves_previous_feed_on_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -124,9 +135,55 @@ class CollectorTests(unittest.TestCase):
         weibo = normalize({**row, "note_url": "https://m.weibo.cn/detail/123", "image_list": ""}, "weibo")
         self.assertIsNone(weibo["imageUrl"])
 
-    def statuses(self, output):
+    def statuses(self, output, now=None):
         with redirect_stdout(io.StringIO()):
-            return {row["platform"]: row for row in report(output)}
+            return {row["platform"]: row for row in report(output, now=now)}
+
+    def test_status_counts_recent_items_and_marks_old_feed_stale(self):
+        fixed_now = datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            old = self.weibo_row("old", (fixed_now - timedelta(days=8)).timestamp(), "旧的通勤穿搭")
+            with redirect_stdout(io.StringIO()):
+                write_feed([old], "weibo", output, now=fixed_now)
+            stale = self.statuses(output, now=fixed_now)["weibo"]
+            self.assertEqual(stale["state"], "stale")
+            self.assertEqual(stale["eligibleItems"], 0)
+            self.assertIn("不会进入最近 7 天趋势", stale["note"])
+
+            fresh = self.weibo_row("fresh", (fixed_now - timedelta(days=2)).timestamp(), "新的通勤穿搭")
+            with redirect_stdout(io.StringIO()):
+                write_feed([fresh], "weibo", output, now=fixed_now)
+            ready = self.statuses(output, now=fixed_now)["weibo"]
+            self.assertEqual(ready["state"], "ready")
+            self.assertEqual(ready["eligibleItems"], 1)
+            self.assertEqual(ready["newestPublishedAt"],
+                             (fixed_now - timedelta(days=2)).isoformat())
+
+    def test_strict_import_rejects_stale_rows_without_overwriting_previous_feed(self):
+        fixed_now = datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc)
+        stale = self.weibo_row("old", (fixed_now - timedelta(days=8)).timestamp(), "旧的通勤穿搭")
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            with redirect_stdout(io.StringIO()):
+                write_feed([stale], "weibo", output, now=fixed_now)
+            target = output / "weibo.json"
+            before = target.read_bytes()
+            with self.assertRaisesRegex(ValueError, "last 168 hours"):
+                write_feed([stale], "weibo", output, require_fresh_hours=168, now=fixed_now)
+            self.assertEqual(target.read_bytes(), before)
+
+    def test_default_import_remains_compatible_with_stale_rows(self):
+        fixed_now = datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc)
+        stale = self.weibo_row("old", (fixed_now - timedelta(days=8)).timestamp(), "旧的通勤穿搭")
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            with redirect_stdout(io.StringIO()) as captured:
+                write_feed([stale], "weibo", output, now=fixed_now)
+            result = json.loads(captured.getvalue())
+            self.assertEqual(result["items"], 1)
+            self.assertEqual(result["freshItems"], 0)
+            self.assertTrue((output / "weibo.json").is_file())
 
     def test_status_distinguishes_missing_ready_oversized_and_unreadable_feeds(self):
         with tempfile.TemporaryDirectory() as tmp:

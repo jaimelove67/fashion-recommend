@@ -7,5 +7,6 @@ public record RecommendationPage(
         long totalElements,
         int page,
         int size,
-        boolean hasNext) {
+        boolean hasNext,
+        RecommendationStatistics statistics) {
 }

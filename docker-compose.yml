@@ -50,6 +50,15 @@ services:
       mc anonymous set none local/$$MINIO_BUCKET"
     restart: "no"
 
+  trend-collector:
+    profiles: ["app"]
+    build:
+      context: ./tools/trend-collector
+    restart: unless-stopped
+    shm_size: 256mb
+    volumes:
+      - ./tools/trend-collector/data:/app/data
+
   backend:
     profiles: ["app"]
     build:
@@ -76,9 +85,10 @@ services:
       BAILIAN_ENABLED: ${BAILIAN_ENABLED:-true}
       BAILIAN_VISION_ENABLED: ${BAILIAN_VISION_ENABLED:-false}
       BAILIAN_VISION_MODEL: ${BAILIAN_VISION_MODEL:-qwen-vl-plus}
+      BAILIAN_PROFILE_ANALYSIS_READ_TIMEOUT: ${BAILIAN_PROFILE_ANALYSIS_READ_TIMEOUT:-30s}
       BAILIAN_ENDPOINT: ${BAILIAN_ENDPOINT:-https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
       BAILIAN_CONNECT_TIMEOUT: ${BAILIAN_CONNECT_TIMEOUT:-3s}
-      BAILIAN_READ_TIMEOUT: ${BAILIAN_READ_TIMEOUT:-8s}
+      BAILIAN_READ_TIMEOUT: ${BAILIAN_READ_TIMEOUT:-30s}
       BAILIAN_IMAGE_ENABLED: ${BAILIAN_IMAGE_ENABLED:-true}
       BAILIAN_IMAGE_MODEL: ${BAILIAN_IMAGE_MODEL:-wan2.6-image}
       BAILIAN_IMAGE_ENDPOINT: ${BAILIAN_IMAGE_ENDPOINT:-https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation}
@@ -87,19 +97,21 @@ services:
       BAILIAN_IMAGE_PROTOTYPE_FEMALE: ${BAILIAN_IMAGE_PROTOTYPE_FEMALE:-classpath:reference_photo/model-female.png}
       BAILIAN_IMAGE_REFERENCE_BASE_URL: ${BAILIAN_IMAGE_REFERENCE_BASE_URL:-}
       BAILIAN_IMAGE_CONNECT_TIMEOUT: ${BAILIAN_IMAGE_CONNECT_TIMEOUT:-5s}
-      BAILIAN_IMAGE_READ_TIMEOUT: ${BAILIAN_IMAGE_READ_TIMEOUT:-15s}
+      BAILIAN_IMAGE_READ_TIMEOUT: ${BAILIAN_IMAGE_READ_TIMEOUT:-120s}
       BAILIAN_IMAGE_TASK_TIMEOUT: ${BAILIAN_IMAGE_TASK_TIMEOUT:-90s}
       BAILIAN_IMAGE_POLL_INTERVAL: ${BAILIAN_IMAGE_POLL_INTERVAL:-2s}
       TREND_JSON_URL: ${TREND_JSON_URL:-}
-      TREND_EDITORIAL_ENABLED: ${TREND_EDITORIAL_ENABLED:-true}
+      TREND_CONFIGURED_DEMO_ENABLED: ${TREND_CONFIGURED_DEMO_ENABLED:-false}
+      TREND_EDITORIAL_ENABLED: ${TREND_EDITORIAL_ENABLED:-false}
       TREND_EDITORIAL_FEEDS: ${TREND_EDITORIAL_FEEDS:-https://www.vogue.com/feed/rss,https://hypebeast.cn/feed,https://www.toodaylab.com/feed}
       TREND_HOT_BOARDS_ENABLED: ${TREND_HOT_BOARDS_ENABLED:-false}
       TREND_MAINSTREAM_FOLLOWERS: ${TREND_MAINSTREAM_FOLLOWERS:-100000}
       TREND_NICHE_SHARE: ${TREND_NICHE_SHARE:-0.25}
       TREND_IMPORT_DIRECTORY: /app/trend-data
-      TREND_DOUYIN_URL: ${TREND_DOUYIN_URL:-}
-      TREND_WEIBO_URL: ${TREND_WEIBO_URL:-}
-      TREND_REFRESH_INTERVAL: ${TREND_REFRESH_INTERVAL:-21600000}
+      TREND_DOUYIN_URL: ${TREND_DOUYIN_URL:-http://trend-collector:8766/douyin.json}
+      TREND_WEIBO_URL: ${TREND_WEIBO_URL:-http://trend-collector:8766/weibo.json}
+      TREND_XIAOHONGSHU_URL: ${TREND_XIAOHONGSHU_URL:-http://trend-collector:8766/xiaohongshu.json}
+      TREND_REFRESH_CRON: ${TREND_REFRESH_CRON:-0 0 12 * * *}
       TREND_PLATFORM: ${TREND_PLATFORM:-configured-feed}
       TREND_WEB_URLS: ${TREND_WEB_URLS:-}
       TREND_WEB_PLATFORM: ${TREND_WEB_PLATFORM:-web-scrape}
@@ -111,8 +123,8 @@ services:
       WEATHER_PRIMARY_BASE_URL: ${WEATHER_PRIMARY_BASE_URL:-https://wttr.in}
       WEATHER_FALLBACK_GEOCODING_BASE_URL: ${WEATHER_FALLBACK_GEOCODING_BASE_URL:-https://geocoding-api.open-meteo.com}
       WEATHER_FALLBACK_FORECAST_BASE_URL: ${WEATHER_FALLBACK_FORECAST_BASE_URL:-https://api.open-meteo.com}
-      WEATHER_CONNECT_TIMEOUT: ${WEATHER_CONNECT_TIMEOUT:-3s}
-      WEATHER_READ_TIMEOUT: ${WEATHER_READ_TIMEOUT:-3s}
+      WEATHER_CONNECT_TIMEOUT: ${WEATHER_CONNECT_TIMEOUT:-5s}
+      WEATHER_READ_TIMEOUT: ${WEATHER_READ_TIMEOUT:-15s}
       WEATHER_CACHE_TTL: ${WEATHER_CACHE_TTL:-15m}
       WEATHER_CACHE_MAX_SIZE: ${WEATHER_CACHE_MAX_SIZE:-500}
       WEATHER_CONFIGURED_DEMO_ENABLED: ${WEATHER_CONFIGURED_DEMO_ENABLED:-false}
@@ -127,6 +139,8 @@ services:
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8088}:8080"
     depends_on:
+      trend-collector:
+        condition: service_started
       postgres:
         condition: service_healthy
       minio-init:
