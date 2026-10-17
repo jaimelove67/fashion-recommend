@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { verifiedFullBodyImageUrl } from '../utils/trendGallery.js'
+import { trendGalleryImageUrl } from '../utils/trendGallery.js'
 import { trendImageCandidates, trendDisplayImageUrl } from '../utils/trendImage.js'
 const AUTOPLAY_INTERVAL_MS = 2000
 const GALLERY_POOL_SIZE = 10
@@ -12,7 +12,9 @@ const fallbackTrendImages = [
 
 const props = defineProps({
   trends: { type: Array, default: () => [] },
-  selectedId: { type: [String, Number], default: null }
+  selectedId: { type: [String, Number], default: null },
+  paused: { type: Boolean, default: false },
+  historical: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['select'])
@@ -34,9 +36,9 @@ let galleryReducedMotion = false
 const galleryImages = computed(() => {
   const seen = new Set()
   return props.trends.flatMap((item) => {
-    const verifiedUrl = verifiedFullBodyImageUrl(item)
-    if (!verifiedUrl) return []
-    const url = trendImageCandidates(verifiedUrl).map(trendDisplayImageUrl)
+    const imageUrl = trendGalleryImageUrl(item)
+    if (!imageUrl) return []
+    const url = trendImageCandidates(imageUrl).map(trendDisplayImageUrl)
       .find((candidate) => !unavailableImageUrls.value.has(candidate))
     if (!url || seen.has(url)) return []
     seen.add(url)
@@ -131,6 +133,7 @@ function startGalleryAutoplay() {
   stopGalleryAutoplay()
   if (
     !galleryMounted
+    || props.paused
     || !galleryReady.value
     || galleryKeyboardFocused
     || galleryReducedMotion
@@ -217,15 +220,20 @@ onBeforeUnmount(() => {
   motionPreference?.removeEventListener?.('change', handleGalleryMotionPreference)
   document.removeEventListener('visibilitychange', handleGalleryVisibility)
 })
+
+watch(() => props.paused, paused => {
+  if (paused) stopGalleryAutoplay()
+  else startGalleryAutoplay()
+})
 </script>
 
 <template>
   <section ref="gallerySection" class="trend-gallery" aria-labelledby="trend-gallery-title">
     <header class="gallery-heading">
       <div>
-        <h2 id="trend-gallery-title">趋势穿搭精选</h2>
-        <p v-if="galleryImages.length">{{ galleryImages.length }} 张可用趋势图片</p>
-        <p v-else-if="galleryReady && props.trends.length">趋势图片暂不可用</p>
+        <h2 id="trend-gallery-title">{{ historical ? '穿搭分析示例' : '穿搭鉴赏' }}</h2>
+        <p v-if="galleryImages.length">{{ historical ? `${galleryImages.length} 套历史作品 · 点击图片查看简析` : `${galleryImages.length} 张可用穿搭图片` }}</p>
+        <p v-else-if="galleryReady && props.trends.length">穿搭图片暂不可用</p>
         <p v-else>图片待加载</p>
       </div>
     </header>
@@ -236,7 +244,7 @@ onBeforeUnmount(() => {
       class="gallery-stage"
       :style="{ '--gallery-card-width': `${galleryCardWidth}px` }"
       role="region"
-      aria-label="趋势穿搭画廊"
+      aria-label="穿搭鉴赏画廊"
       aria-roledescription="3D 画廊"
       aria-keyshortcuts="ArrowLeft ArrowRight Home End"
       @keydown="handleKeydown"
@@ -269,19 +277,20 @@ onBeforeUnmount(() => {
           <span class="gallery-card-image">
             <img
               :src="url"
-              :alt="item.title || '趋势穿搭图片'"
+              :alt="item.title || '穿搭鉴赏图片'"
               loading="lazy"
               referrerpolicy="no-referrer"
               @error="markImageUnavailable"
             />
           </span>
+          <span v-if="item.dailySlot" class="gallery-outfit-category">{{ item.dailySlot.label }}</span>
         </button>
       </TransitionGroup>
     </div>
     <div v-else-if="galleryReady && props.trends.length && !galleryImages.length" class="gallery-empty gallery-empty-reference" role="status">
       <div class="gallery-empty-copy">
-        <strong>趋势图片暂时无法显示</strong>
-        <span>以下为本地穿搭参考图片，非实时趋势内容。</span>
+        <strong>穿搭图片暂时无法显示</strong>
+        <span>以下为本地穿搭参考图片，非实时采集内容。</span>
       </div>
       <div class="gallery-empty-images" aria-label="本地穿搭参考">
         <figure v-for="image in fallbackTrendImages" :key="image.src">
@@ -290,15 +299,17 @@ onBeforeUnmount(() => {
         </figure>
       </div>
     </div>
-    <div v-else-if="galleryReady && !galleryImages.length" class="gallery-empty" role="status">暂无可展示的趋势图片</div>
-    <div v-else class="gallery-measuring" role="status">正在加载趋势画廊…</div>
+    <div v-else-if="galleryReady && !galleryImages.length" class="gallery-empty" role="status">暂无可展示的穿搭图片</div>
+    <div v-else class="gallery-measuring" role="status">正在加载穿搭鉴赏画廊…</div>
   </section>
 </template>
 
 <style scoped>
 .trend-gallery {
-  padding: 14px 0 48px;
+  padding: 8px 0 var(--trend-section-gap, 40px);
 }
+
+.gallery-outfit-category { position:absolute; top:14px; left:14px; max-width:calc(100% - 28px); border:1px solid var(--line); border-radius:6px; padding:5px 9px; background:var(--surface); color:var(--accent); font-size:11px; line-height:1.5; pointer-events:none; }
 
 .gallery-heading {
   display: flex;
@@ -310,9 +321,9 @@ onBeforeUnmount(() => {
 .gallery-heading h2 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(26px, 3.1vw, 36px);
-  font-weight: 500;
-  line-height: 1.2;
+  font-size: var(--trend-section-title-size, clamp(28px, 2.5vw, 34px));
+  font-weight: 600;
+  line-height: 1.3;
 }
 
 .gallery-heading p {
@@ -512,7 +523,7 @@ onBeforeUnmount(() => {
   }
 
   .gallery-heading h2 {
-    font-size: 31px;
+    font-size: var(--trend-section-title-size, 28px);
   }
 
   .gallery-stage {

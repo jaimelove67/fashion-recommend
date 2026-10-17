@@ -34,6 +34,9 @@ app:
     connect-timeout: 100ms
     read-timeout: 100ms
     cache-ttl: 1m
+  techniques:
+    enabled: false
+    initial-delay: 3600000
   weather:
     primary-base-url: https://wttr.in
     fallback-geocoding-base-url: https://geocoding-api.open-meteo.com

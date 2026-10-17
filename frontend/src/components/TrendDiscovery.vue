@@ -18,7 +18,7 @@ const demoMode = computed(() => Boolean(state.value.trendMeta?.demoMode))
 const tag = ref('')
 const broken = ref(new Set())
 const names = { douyin: '抖音', weibo: '微博', xiaohongshu: '小红书', editorial: '时尚编辑', 'configured-demo': '穿搭参考', 'configured-feed': '已连接数据源', 'web-scrape': '公开网页' }
-const creatorTierNames = { mainstream: '主流博主', niche: '小众博主', unclassified: '粉丝数量未提供' }
+const creatorTierNames = { mainstream: '高粉博主', niche: '低粉博主', unclassified: '粉丝数量未提供' }
 const states = { ready: '已连接', unavailable: '采集失败', unconfigured: '未配置', pending: '等待采集' }
 const matches = item => (item.topicTags || []).filter(t => (state.value.profile?.stylePreferences || []).some(p => p.includes(t) || t.includes(p)))
 const items = computed(() => [...state.value.trends.filter(i => !tag.value || i.topicTags?.includes(tag.value))].sort((a, b) => matches(b).length - matches(a).length).slice(0, props.limit || undefined))
@@ -54,11 +54,11 @@ async function filter(key, value) {
 <template>
   <section class="trend-discovery" :class="{ 'controls-only': controlsOnly }" aria-label="热门穿搭与流行风格">
     <header v-if="!controlsOnly && !postsOnly" class="discovery-heading">
-      <div><h2>{{ controlsOnly ? '趋势筛选' : '穿搭内容精选' }}</h2><p v-if="!controlsOnly">浏览已收录内容，按时间、来源与风格筛选。</p></div>
+      <div><h2>{{ controlsOnly ? '穿搭筛选' : '穿搭内容精选' }}</h2><p v-if="!controlsOnly">浏览已收录内容，按时间、来源与风格筛选。</p></div>
       <button type="button" class="text-action" :disabled="state.trendsLoading" @click="app.loadTrends()"><RefreshCw :size="16" />重新加载</button>
     </header>
     <div v-if="!postsOnly" class="discovery-filters">
-      <div class="period-switch" role="group" aria-label="趋势时间范围">
+      <div class="period-switch" role="group" aria-label="鉴赏时间范围">
         <button type="button" aria-pressed="true" @click="filter('trendPeriod', 'day')">近 24 小时</button>
       </div>
       <label>内容来源<select :value="state.trendPlatform" :disabled="demoMode" @change="filter('trendPlatform', $event.target.value)"><option value="">全部来源</option><option value="douyin">抖音</option><option value="weibo">微博</option><option value="xiaohongshu">小红书</option></select></label>
@@ -69,7 +69,7 @@ async function filter(key, value) {
       <button v-for="style in state.trendStyles" :key="style.name" type="button" :aria-pressed="tag === style.name" @click="selectTag(style.name)"><strong>{{ style.name }}</strong><span>{{ style.contentCount }} 篇提及</span></button>
     </div>
     <p v-if="!controlsOnly && state.trendError" class="discovery-message" role="alert">{{ state.trendError }}<button type="button" @click="app.loadTrends()">重试</button></p>
-    <p v-else-if="!controlsOnly && state.trendsLoading" class="discovery-message" role="status">正在加载穿搭趋势…</p>
+    <p v-else-if="!controlsOnly && state.trendsLoading" class="discovery-message" role="status">正在加载穿搭鉴赏…</p>
     <div v-else-if="!controlsOnly && !state.trends.length" class="discovery-empty" role="status"><h3>当前筛选范围暂无穿搭内容</h3><p>可更换来源或稍后重新加载，并在下方查看数据源状态。</p></div>
     <div v-if="!controlsOnly && !state.trendsLoading && !state.trendError" class="discovery-looks">
       <article v-for="item in items" :key="item.id" class="discovery-look">
@@ -103,9 +103,9 @@ async function filter(key, value) {
 </template>
 <style scoped>
 .trend-discovery {
-  color:#202923;
+  color:var(--ink);
   padding:36px 0;
-  border-top:1px solid #dddcd3
+  border-top:1px solid var(--line)
 }
 .trend-discovery.controls-only {
   padding:14px 0 0;
@@ -133,7 +133,7 @@ async function filter(key, value) {
   margin:0 0 10px
 }
 .discovery-heading p,.look-meta,.look-tags,.updated,.source-details {
-  color:#596259;
+  color:var(--muted);
   font-size:13px;
   line-height:1.65
 }
@@ -150,13 +150,13 @@ button:disabled {
   cursor:wait
 }
 button:focus-visible,a:focus-visible,select:focus-visible,summary:focus-visible {
-  outline:2px solid #345647;
+  outline:2px solid var(--accent);
   outline-offset:4px
 }
 .text-action {
   border:0;
   background:transparent;
-  color:#345647;
+  color:var(--accent);
   display:inline-flex;
   align-items:center;
   gap:8px;
@@ -171,7 +171,7 @@ button:focus-visible,a:focus-visible,select:focus-visible,summary:focus-visible 
 }
 .period-switch {
   display:inline-flex;
-  border:1px solid #c3c7bd;
+  border:1px solid var(--line-strong);
   border-radius:24px;
   padding:3px
 }
@@ -181,11 +181,11 @@ button:focus-visible,a:focus-visible,select:focus-visible,summary:focus-visible 
   border-radius:20px;
   padding:0 16px;
   background:transparent;
-  color:#344137
+  color:var(--ink)
 }
 .period-switch button[aria-pressed=true] {
-  background:#263e32;
-  color:#fff
+  background:var(--accent-strong);
+  color:var(--surface)
 }
 .discovery-filters label {
   display:flex;
@@ -196,9 +196,9 @@ button:focus-visible,a:focus-visible,select:focus-visible,summary:focus-visible 
 .discovery-filters select {
   font:inherit;
   min-height:42px;
-  border:1px solid #c3c7bd;
+  border:1px solid var(--line-strong);
   border-radius:6px;
-  background:#fbfaf6;
+  background:var(--surface);
   padding:8px;
   color:inherit
 }
@@ -219,15 +219,15 @@ button:focus-visible,a:focus-visible,select:focus-visible,summary:focus-visible 
   border:0;
   border-bottom:1px solid transparent;
   background:none;
-  color:#344137;
+  color:var(--ink);
   padding:6px 0
 }
 .style-strip button[aria-pressed=true] {
-  border-color:#345647
+  border-color:var(--accent)
 }
 .style-strip span {
   font-size:12px;
-  color:#596259
+  color:var(--muted)
 }
 .discovery-looks {
   display:grid;
@@ -243,8 +243,8 @@ button:focus-visible,a:focus-visible,select:focus-visible,summary:focus-visible 
   position:relative;
   aspect-ratio:3/4;
   overflow:hidden;
-  background:#e4e7df;
-  color:#345647
+  background:var(--surface-soft);
+  color:var(--accent)
 }
 .look-picture img {
   width:100%;
@@ -268,7 +268,7 @@ button:focus-visible,a:focus-visible,select:focus-visible,summary:focus-visible 
   position:absolute;
   left:12px;
   bottom:12px;
-  background:#fbfaf6;
+  background:var(--surface);
   padding:6px 10px;
   font-size:12px
 }
@@ -293,15 +293,15 @@ button:focus-visible,a:focus-visible,select:focus-visible,summary:focus-visible 
   flex-wrap:wrap;
   gap:6px;
   margin:10px 0;
-  color:#345647;
+  color:var(--accent);
   font-size:12px
 }
 .look-badges span {
-  border:1px solid #c3c7bd;
+  border:1px solid var(--line-strong);
   padding:3px 8px
 }
 .match-reason {
-  color:#345647;
+  color:var(--accent);
   font-size:13px
 }
 .look-actions {
@@ -317,15 +317,15 @@ button:focus-visible,a:focus-visible,select:focus-visible,summary:focus-visible 
   gap:8px;
   min-height:44px;
   padding:10px 14px;
-  border:1px solid #345647;
+  border:1px solid var(--accent);
   background:transparent;
-  color:#263e32
+  color:var(--accent-strong)
 }
 .look-actions button:hover {
-  background:#e6ece2
+  background:var(--accent-soft)
 }
 .look-actions a {
-  color:#345647;
+  color:var(--accent);
   padding:10px
 }
 .more-trends {
@@ -338,12 +338,12 @@ button:focus-visible,a:focus-visible,select:focus-visible,summary:focus-visible 
   font-size:20px
 }
 .discovery-empty p {
-  color:#596259
+  color:var(--muted)
 }
 .source-details {
   margin-top:28px;
   padding-top:16px;
-  border-top:1px solid #dddcd3
+  border-top:1px solid var(--line)
 }
 .source-details summary {
   cursor:pointer;

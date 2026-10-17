@@ -13,7 +13,7 @@ const recommendation = { id: 7, city: '长沙', occasion: '通勤', temperatureC
   summary: '米白与深蓝的简洁通勤搭配', reason: '米白与深蓝的配色简洁，适合日常通勤。',
   items: wardrobe, engine: 'llm', saved: false }
 
-async function openApp(page, view = 'home', options = {}) {
+async function openApp(page, view = 'recommend', options = {}) {
   const errors = []
   const requests = []
   let generated = null
@@ -63,12 +63,12 @@ function assistantDialog(page) {
 
 test('the navigation icon opens the assistant from every user page without changing the page', async ({ page }) => {
   const { errors } = await openApp(page)
-  for (const view of ['home', 'trend', 'recommend', 'wardrobe', 'history', 'profile']) {
+  for (const view of ['recommend', 'wardrobe', 'trend', 'history', 'profile']) {
     await page.evaluate((nextView) => { window.location.hash = nextView }, view)
     await expect(page).toHaveURL(new RegExp(`#${view}$`))
     if (view === 'profile') await expect(page.locator('.profile-button')).toHaveClass(/active/)
     else await expect(page.locator(`.pill-nav-desktop button[aria-current="page"]`)).toHaveAttribute('aria-label', {
-      home: '首页', trend: '穿搭趋势', recommend: '穿搭推荐', wardrobe: '我的衣橱', history: '搭配记录'
+      trend: '穿搭鉴赏', recommend: '穿搭推荐', wardrobe: '我的衣橱', history: '搭配记录'
     }[view])
     const opener = page.getByRole('button', { name: '打开知己 AI 助手', exact: true })
     await opener.click()
@@ -96,7 +96,7 @@ test('a wardrobe-page recommendation and unfinished draft survive navigation and
   await expect(dialog.getByRole('button', { name: '已收藏', exact: true })).toBeDisabled()
   await dialog.getByRole('textbox', { name: '穿搭需求' }).fill('下一套想更轻松一点')
   await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: '穿搭趋势', exact: true }).click()
+  await page.getByRole('button', { name: '穿搭鉴赏', exact: true }).click()
   await page.getByRole('button', { name: '打开知己 AI 助手', exact: true }).click()
   await expect(dialog.locator('.assistant-message-user')).toHaveText('长沙通勤，希望简洁得体')
   await expect(dialog.getByRole('textbox', { name: '穿搭需求' })).toHaveValue('下一套想更轻松一点')
@@ -153,7 +153,7 @@ test('the mobile icon closes the page menu and opens a drawer inside the viewpor
   expect(bounds.y).toBeGreaterThanOrEqual(0)
   expect(bounds.y + bounds.height).toBeLessThanOrEqual(844)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-  expect(await dialog.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe('rgb(255, 254, 250)')
+  expect(await dialog.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe('rgb(252, 250, 245)')
   await mkdir(reviewDir, { recursive: true })
   await page.screenshot({ path: reviewDir + '/mobile.png', animations: 'disabled' })
   await page.keyboard.press('Escape')
@@ -172,7 +172,8 @@ test('session expiry during generation dismisses the global window and releases 
   await expect(dialog.getByRole('status')).toContainText('正在生成搭配方案')
   releaseGeneration()
   await expect(dialog).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '点击图标，进入知己', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '登录知己', exact: true })).toBeVisible()
+  await expect(page.getByRole('alert')).toContainText('登录已过期')
   await expect(page.locator('body')).not.toHaveClass(/assistant-is-open/)
   await expect(page.locator('.app-shell')).toHaveCount(0)
   await expect(page.locator('.assistant-result-card')).toHaveCount(0)

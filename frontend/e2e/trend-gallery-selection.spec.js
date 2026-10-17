@@ -45,10 +45,11 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('pressing a gallery photo keeps it on track, then rotates it into the center', async ({ page }) => {
-  const gallery = page.getByRole('region', { name: '趋势穿搭画廊' })
+  const gallery = page.getByRole('region', { name: '穿搭鉴赏画廊' })
   const clickedCard = gallery.getByRole('button', { name: '查看第 2 张图片：画廊回归样例 2' })
   const centerCard = gallery.locator('.gallery-card[data-gallery-center="true"]')
   await expect(clickedCard).toBeVisible()
+  await clickedCard.scrollIntoViewIfNeeded()
   const centerSlot = await centerCard.boundingBox()
   const originalSlot = await clickedCard.boundingBox()
   expect(Math.abs(originalSlot.x - centerSlot.x)).toBeGreaterThan(100)
@@ -88,12 +89,12 @@ test('pressing a gallery photo keeps it on track, then rotates it into the cente
 })
 
 test('does not render manual arrow controls', async ({ page }) => {
-  await expect(page.getByRole('button', { name: '上一条趋势' })).toHaveCount(0, { timeout: 1000 })
-  await expect(page.getByRole('button', { name: '下一条趋势' })).toHaveCount(0, { timeout: 1000 })
+  await expect(page.getByRole('button', { name: '上一套穿搭' })).toHaveCount(0, { timeout: 1000 })
+  await expect(page.getByRole('button', { name: '下一套穿搭' })).toHaveCount(0, { timeout: 1000 })
 })
 
 test('shows five larger gallery images with symmetric edge previews on desktop', async ({ page }) => {
-  const gallery = page.getByRole('region', { name: '趋势穿搭画廊' })
+  const gallery = page.getByRole('region', { name: '穿搭鉴赏画廊' })
   const cards = gallery.locator('.gallery-card')
   const edgeCards = gallery.locator('.gallery-card[data-gallery-edge="true"]')
   await expect(cards).toHaveCount(5)
@@ -132,7 +133,7 @@ test('shows five larger gallery images with symmetric edge previews on desktop',
 })
 
 test('cycles through ten unique images while showing five cards at a time', async ({ page }) => {
-  const gallery = page.getByRole('region', { name: '趋势穿搭画廊' })
+  const gallery = page.getByRole('region', { name: '穿搭鉴赏画廊' })
   const cards = gallery.locator('.gallery-card')
   await expect(cards).toHaveCount(5)
   await expect(cards.first()).toHaveAttribute('aria-setsize', '10')
@@ -163,12 +164,12 @@ test('uses only the daily image pool from the selected source filter', async ({ 
   })
 
   await page.reload()
-  const gallery = page.getByRole('region', { name: '趋势穿搭画廊' })
+  const gallery = page.getByRole('region', { name: '穿搭鉴赏画廊' })
   const cards = gallery.locator('.gallery-card')
   await expect(cards).toHaveCount(5)
   await expect(cards.first()).toHaveAttribute('aria-setsize', '10')
   expect(requestedPeriods).toEqual(['day'])
-  await expect(page.getByText(/10 张可用趋势图片/)).toBeVisible()
+  await expect(page.getByText(/10 张可用穿搭图片/)).toBeVisible()
 })
 
 test('keeps old unreviewed covers and publisher images out of the gallery', async ({ page }) => {
@@ -192,7 +193,7 @@ test('keeps old unreviewed covers and publisher images out of the gallery', asyn
 })
 
 test('keeps one focal image centered and larger than its side images', async ({ page }) => {
-  const gallery = page.getByRole('region', { name: '趋势穿搭画廊' })
+  const gallery = page.getByRole('region', { name: '穿搭鉴赏画廊' })
   const focalCard = gallery.locator('.gallery-card[data-gallery-center="true"]')
   const sideCard = gallery.locator('.gallery-card[data-gallery-index="1"]')
   await expect(focalCard).toBeVisible()
@@ -209,7 +210,7 @@ test('keeps one focal image centered and larger than its side images', async ({ 
 })
 
 test('keeps an outgoing boundary image mounted while it fades away', async ({ page }) => {
-  const gallery = page.getByRole('region', { name: '趋势穿搭画廊' })
+  const gallery = page.getByRole('region', { name: '穿搭鉴赏画廊' })
   const outgoingCard = gallery.locator('.gallery-card[data-gallery-index="8"]')
   await expect(outgoingCard).toBeVisible()
   const outgoingHandle = await outgoingCard.elementHandle()
@@ -226,7 +227,7 @@ test('keeps an outgoing boundary image mounted while it fades away', async ({ pa
 })
 
 test('autoplays while the pointer rests over the 3D track without changing the selected detail', async ({ page }) => {
-  const gallery = page.getByRole('region', { name: '趋势穿搭画廊' })
+  const gallery = page.getByRole('region', { name: '穿搭鉴赏画廊' })
   await expect(gallery.locator('.gallery-card')).not.toHaveCount(0)
   await gallery.locator('.gallery-card[data-gallery-center="true"]').hover()
   const visibleIndexes = await gallery.locator('.gallery-card').evaluateAll((cards) =>
@@ -239,7 +240,7 @@ test('autoplays while the pointer rests over the 3D track without changing the s
 })
 
 test('shows the selected outfit analysis directly after the gallery without duplicate post cards', async ({ page }) => {
-  const gallery = page.getByRole('region', { name: '趋势穿搭画廊' })
+  const gallery = page.getByRole('region', { name: '穿搭鉴赏画廊' })
   await expect(gallery).toBeVisible()
   await expect(page.locator('.discovery-look')).toHaveCount(0)
   expect(await gallery.evaluate(element => element.closest('.trend-gallery').nextElementSibling?.classList.contains('trend-breakdown'))).toBe(true)

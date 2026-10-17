@@ -21,7 +21,7 @@ const demoItems = [
   }
 ]
 
-test('shows only the daily range without demo banners and preserves reference images', async ({ page }) => {
+test('keeps daily retrieval and reference images without the removed trend toolbar', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.route('**/api/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname
@@ -63,14 +63,11 @@ test('shows only the daily range without demo banners and preserves reference im
 
   await expect(page.locator('.trend-demo-banner')).toHaveCount(0)
   await expect(page.locator('.demo-notice')).toHaveCount(0)
-  await expect(page.locator('.updated')).toHaveText('每日 12:00 更新（北京时间） · 穿搭参考')
-  await expect(page.locator('.period-switch button')).toHaveCount(1)
-  await expect(page.locator('.period-switch button')).toHaveText('近 24 小时')
-  await expect(page.locator('.period-switch button')).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByRole('button', { name: '近 7 天', exact: true })).toHaveCount(0)
-  await expect(page.locator('.discovery-filters select')).toBeDisabled()
+  await expect(page.getByRole('group', { name: '鉴赏时间范围' })).toHaveCount(0)
+  await expect(page.getByLabel('内容来源')).toHaveCount(0)
+  await expect(page.locator('.updated, .control-refresh')).toHaveCount(0)
 
-  const gallery = page.getByRole('region', { name: '趋势穿搭画廊' })
+  const gallery = page.getByRole('region', { name: '穿搭鉴赏画廊' })
   await expect(gallery.locator('.gallery-card')).toHaveCount(2)
   await expect(gallery.locator('.gallery-card-image img').first()).toHaveAttribute('src', '/assets/look-urban.jpg')
   await expect(page.locator('.trend-breakdown .source-link')).toHaveCount(0)

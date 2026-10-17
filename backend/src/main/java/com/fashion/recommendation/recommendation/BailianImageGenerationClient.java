@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.Semaphore;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.MemoryCacheImageInputStream;
@@ -49,6 +50,7 @@ public class BailianImageGenerationClient {
     private static final int MAX_REFERENCE_IMAGES = 3;
     private static final int MIN_IMAGE_DIMENSION = 240;
     private static final int MAX_IMAGE_DIMENSION = 8_000;
+    private static final int MAX_REFERENCE_DIMENSION = 2_048;
     private static final int MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
     private final RestClient restClient;
@@ -66,6 +68,7 @@ public class BailianImageGenerationClient {
     private final Duration taskTimeout;
     private final Duration pollInterval;
     private final AiModelConfigurationService modelConfigurationService;
+    private final Semaphore generationPermit = new Semaphore(1);
 
     @Autowired
     public BailianImageGenerationClient(
@@ -169,6 +172,9 @@ public class BailianImageGenerationClient {
         if (normalizedGender == null) {
             return unavailable("请在个人形象档案中设置模特性别。", config.model());
         }
+        if (!generationPermit.tryAcquire()) {
+            return failed(null, "穿搭效果图生成服务繁忙，请稍后重试。", config.model());
+        }
 
         try {
             String prototype = personalPhoto == null ? prototypeDataUri(normalizedGender) : referenceDataUri(personalPhoto.content());
@@ -204,6 +210,8 @@ public class BailianImageGenerationClient {
         } catch (Exception exception) {
             log.warn("Bailian image generation failed: {}", exception.getMessage());
             return failed(null, "穿搭效果图生成失败，请稍后重试。", config.model());
+        } finally {
+            generationPermit.release();
         }
     }
 
@@ -355,7 +363,11 @@ public class BailianImageGenerationClient {
                 if (width < 1 || height < 1 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
                     throw new IOException("Reference image dimensions exceed the limit");
                 }
-                source = reader.read(0);
+                // Bound the decoded reference before allocating the RGB copy, including for 8K photos.
+                int subsampling = (Math.max(width, height) + MAX_REFERENCE_DIMENSION - 1) / MAX_REFERENCE_DIMENSION;
+                var readParam = reader.getDefaultReadParam();
+                readParam.setSourceSubsampling(subsampling, subsampling, 0, 0);
+                source = reader.read(0, readParam);
             } finally {
                 reader.dispose();
             }
@@ -363,7 +375,7 @@ public class BailianImageGenerationClient {
         double scale = Math.max(1.0, (double) MIN_IMAGE_DIMENSION / Math.min(source.getWidth(), source.getHeight()));
         int width = (int) Math.ceil(source.getWidth() * scale);
         int height = (int) Math.ceil(source.getHeight() * scale);
-        if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+        if (width > MAX_REFERENCE_DIMENSION || height > MAX_REFERENCE_DIMENSION) {
             throw new IOException("Reference image aspect ratio prevents safe resizing");
         }
         BufferedImage rgb = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);

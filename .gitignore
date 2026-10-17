@@ -1,5 +1,6 @@
 .env
 .env.local
+.env.cloud
 .env.*.local
 
 # Operating system and IDE files

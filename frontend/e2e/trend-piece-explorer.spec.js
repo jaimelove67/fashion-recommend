@@ -1,111 +1,128 @@
 import { expect, test } from '@playwright/test'
+import { outfitTechniques } from '../src/data/outfitTechniques.js'
 
-const trends = [
-  {
-    id: 'weibo:raw-denim',
-    platform: 'weibo',
-    title: '黑色原牛搭白衬衫',
-    summary: '日常穿搭分享',
-    topicTags: ['丹宁'],
-    sourceUrl: 'https://example.com/raw-denim',
-    publishedAt: '2026-09-21T09:00:00+08:00',
-    evidence: { mediaType: 'post', images: [] }
-  },
-  {
-    id: 'douyin:raw-denim',
-    platform: 'douyin',
-    title: '黑原牛和乐福鞋',
-    summary: '第二条单品线索',
-    topicTags: ['复古'],
-    sourceUrl: 'https://example.com/second-look',
-    publishedAt: '2026-09-21T10:00:00+08:00',
-    evidence: { mediaType: 'post', images: [] }
-  },
-  {
-    id: 'weibo:generic-denim',
-    platform: 'weibo',
-    title: '丹宁风格穿搭',
-    summary: '只谈风格，没有具体单品',
-    topicTags: ['丹宁'],
-    sourceUrl: 'https://example.com/denim-style',
-    publishedAt: '2026-09-21T11:00:00+08:00',
-    evidence: { mediaType: 'post', images: [] }
-  },
-  {
-    id: 'weibo:sweater',
-    platform: 'weibo',
-    title: '把童装改造成成人穿的熊图案毛衣',
-    summary: '针织单品改造分享',
-    topicTags: ['针织', '秋季穿搭'],
-    publishedAt: '2026-09-23T09:00:00+08:00',
-    stale: false,
-    evidence: { mediaType: 'post', images: [] }
-  },
-  {
-    id: 'douyin:tights',
-    platform: 'douyin',
-    title: '光腿神器穿搭测评：连脚款还是踩脚款',
-    summary: '对比两种打底袜款式',
-    topicTags: ['打底袜', '穿搭测评'],
-    publishedAt: '2026-09-23T10:00:00+08:00',
-    stale: false,
-    evidence: { mediaType: 'video', images: [] }
-  }
-]
+const sourcedTechniques = outfitTechniques.filter(technique => technique.sources?.length)
 
-test('derives items from social trends and shows item-only images with seasonal pairings', async ({ page }) => {
-  await page.route('**/api/**', async (route) => {
-    const pathname = new URL(route.request().url()).pathname
+async function openTechniques(page, { feedFails = false } = {}) {
+  const writes = []
+  await page.route('**/api/**', async route => {
+    const request = route.request()
+    const pathname = new URL(request.url()).pathname
+    if (!['GET', 'HEAD'].includes(request.method())) writes.push(pathname)
+    if (pathname === '/api/v1/trends' && feedFails) {
+      return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ code: 503, message: '来源暂时不可用' }) })
+    }
     let data = {}
-    if (pathname === '/api/v1/auth/csrf') data = { token: 'qa', headerName: 'X-XSRF-TOKEN' }
-    else if (pathname === '/api/v1/auth/me') data = { username: 'piece-qa', authorities: [] }
-    else if (pathname === '/api/v1/trends') {
-      const platform = new URL(route.request().url()).searchParams.get('platform')
-      data = { items: trends.filter((item) => !platform || item.platform === platform), styles: [], fetchedAt: '2026-09-21T11:00:00+08:00', demoMode: false, sources: [] }
-    } else if (pathname === '/api/v1/me/wardrobe') data = []
+    if (pathname === '/api/v1/auth/csrf') data = { token: 'technique-qa', headerName: 'X-XSRF-TOKEN' }
+    else if (pathname === '/api/v1/auth/me') data = { username: 'technique-qa', authorities: [] }
+    else if (pathname === '/api/v1/trends') data = { items: [], styles: [], demoMode: false, sources: [] }
+    else if (pathname === '/api/v1/me/wardrobe') data = []
     else if (pathname === '/api/v1/me/recommendations') data = { content: [], totalElements: 0, page: 0, hasNext: false }
     else if (pathname === '/api/v1/me/style-profile') data = null
-
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, message: 'ok', data }) })
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 0, data }) })
   })
-
-  await page.goto('/#trend')
-  const explorer = page.getByRole('region', { name: '趋势单品解析' })
+  const trendResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/trends')
+  if (new URL(page.url()).hash === '#trend') await page.reload()
+  else await page.goto('/#trend')
+  expect((await trendResponse).status()).toBe(feedFails ? 503 : 200)
+  const explorer = page.getByRole('region', { name: '穿搭技巧', exact: true })
   await expect(explorer).toBeVisible()
-  await expect(explorer.getByRole('button', { name: /黑色原牛.*查看搭配/ })).toBeVisible()
-  await expect(explorer.getByRole('button', { name: /白衬衫.*查看搭配/ })).toBeVisible()
-  await expect(explorer.getByRole('button', { name: /毛衣.*查看搭配/ })).toBeVisible()
-  await expect(explorer.getByRole('button', { name: /光腿神器.*查看搭配/ })).toBeVisible()
-  await expect(explorer.getByRole('img', { name: '黑色原牛单品图' })).toBeVisible()
-  await expect.poll(() => explorer.getByRole('img', { name: '黑色原牛单品图' }).evaluate((image) => image.naturalWidth)).toBeGreaterThan(0)
-  const photoFrame = await explorer.locator('.identity-photo').boundingBox()
-  const detailImage = await explorer.getByRole('img', { name: '黑色原牛单品图' }).boundingBox()
-  expect(detailImage.x).toBeGreaterThanOrEqual(photoFrame.x - 1)
-  expect(detailImage.x + detailImage.width).toBeLessThanOrEqual(photoFrame.x + photoFrame.width + 1)
-  expect(detailImage.y).toBeGreaterThanOrEqual(photoFrame.y - 1)
-  expect(detailImage.y + detailImage.height).toBeLessThanOrEqual(photoFrame.y + photoFrame.height + 1)
-  await expect(explorer.getByRole('img', { name: /穿搭参考图/ })).toHaveCount(0)
-  await expect(explorer.getByText('只谈风格，没有具体单品')).toHaveCount(0)
-  await expect(explorer.getByText('相关来源')).toHaveCount(0)
+  return { explorer, writes }
+}
 
-  await explorer.getByRole('button', { name: /白衬衫.*查看搭配/ }).click()
-  await expect(explorer.locator('#piece-detail')).toContainText('白衬衫')
-  await expect(explorer.locator('#piece-detail')).toContainText('直筒牛仔裤')
-  await expect(explorer.getByRole('img', { name: '白衬衫单品图' })).toBeVisible()
+test('sourced technique filters change the lesson and reset the self-check when another lesson is selected', async ({ page }) => {
+  const { explorer } = await openTechniques(page)
+  const filters = explorer.getByRole('navigation', { name: '按技巧主题筛选' })
+  const choices = explorer.locator('.technique-choice')
+  const detail = explorer.locator('article.technique-detail')
+  expect(sourcedTechniques.length).toBeGreaterThan(1)
+  await expect(choices).toHaveCount(sourcedTechniques.length)
+  const category = sourcedTechniques[1].category
+  await filters.getByRole('button', { name: category, exact: true }).click()
+  await expect(choices).toHaveCount(sourcedTechniques.filter(technique => technique.category === category).length)
+  await expect(choices.first()).toHaveAttribute('aria-pressed', 'true')
+  for (const text of ['原帖要点（转述）', '归纳的方法', '为什么这样搭', '调整前', '调整后', '适合什么时候', '注意取舍', '参考原帖']) {
+    await expect(detail.getByText(text, { exact: true })).toBeVisible()
+  }
+  await expect(detail.locator('.technique-example-note')).toContainText('编辑推演，非原帖对照实验')
+  await detail.getByRole('button', { name: '展开自查提示', exact: true }).click()
+  await expect(detail.getByRole('button', { name: '收起自查提示', exact: true })).toHaveAttribute('aria-expanded', 'true')
+  await expect(detail.locator('.technique-checklist')).toBeVisible()
+  await expect(detail.getByRole('heading', { name: '穿好后检查', exact: true })).toBeVisible()
+  await expect(detail.locator('.technique-checklist')).not.toBeEmpty()
+  await filters.getByRole('button', { name: '全部', exact: true }).click()
+  await expect(choices).toHaveCount(sourcedTechniques.length)
+  if (await detail.getByRole('button', { name: '收起自查提示', exact: true }).count()) {
+    await detail.getByRole('button', { name: '收起自查提示', exact: true }).click()
+  }
+  await detail.getByRole('button', { name: '展开自查提示', exact: true }).click()
+  await expect(detail.locator('.technique-checklist')).toBeVisible()
+  const previousLesson = await detail.getByRole('heading').first().textContent()
+  await explorer.locator('.technique-choice:not([aria-pressed="true"])').first().click()
+  await expect(detail.getByRole('heading').first()).not.toHaveText(previousLesson)
+  await expect(detail.locator('.technique-checklist')).toBeHidden()
+  await expect(detail.getByRole('button', { name: '展开自查提示', exact: true })).toHaveAttribute('aria-expanded', 'false')
+})
 
-  await explorer.getByRole('button', { name: /乐福鞋.*查看搭配/ }).click()
-  await expect(explorer.getByRole('img', { name: /穿搭参考图/ })).toHaveCount(0)
+test('post summaries retain attributable source notes and links with an empty or unavailable trend feed', async ({ page }) => {
+  const empty = await openTechniques(page)
+  await expect(empty.explorer.locator('.technique-choice')).toHaveCount(sourcedTechniques.length)
+  await expect(empty.explorer.locator('article.technique-detail')).toContainText('原帖要点（转述）')
 
-  await explorer.getByRole('button', { name: '裤装', exact: true }).click()
-  await expect(explorer.getByRole('button', { name: /白衬衫.*查看搭配/ })).toHaveCount(0)
-  await expect(explorer.locator('#piece-detail')).toContainText('长袖衬衫')
-  await expect(explorer.locator('#piece-detail')).toContainText('腰围略松时')
-  await expect(explorer.locator('#piece-detail')).toContainText('新黑色原牛可能发生摩擦掉色')
-  await expect(explorer.getByRole('img', { name: '黑色原牛单品图' })).toBeVisible()
+  await page.unroute('**/api/**')
+  const { explorer } = await openTechniques(page, { feedFails: true })
+  await expect(explorer.locator('.technique-choice')).toHaveCount(sourcedTechniques.length)
+  for (const technique of sourcedTechniques) {
+    const choice = explorer.locator('.technique-choice').filter({ has: page.getByText(technique.title, { exact: true }) })
+    await expect(choice.locator('.technique-source-count')).toHaveText(`${technique.sources.length} 篇原帖`)
+    await choice.click()
+    const detail = explorer.locator('article.technique-detail')
+    await expect(detail.getByRole('heading', { name: technique.sources.length > 1 ? '跨帖归纳' : '本帖归纳', exact: true })).toBeVisible()
+    await expect(detail.locator('.technique-synthesis')).toContainText(technique.synthesisNote)
+    const sources = detail.locator('.technique-source-list li')
+    await expect(sources).toHaveCount(technique.sources.length)
+    for (const [index, source] of technique.sources.entries()) {
+      const url = new URL(source.url)
+      expect(['http:', 'https:']).toContain(url.protocol)
+      expect(url.username || url.password).toBe('')
+      const sourceRow = sources.nth(index)
+      const link = sourceRow.getByRole('link', { name: source.title, exact: true })
+      await expect(link).toHaveAttribute('href', url.href)
+      await expect(link).toHaveAttribute('target', '_blank')
+      await expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+      await expect(sourceRow).toContainText(source.author)
+      await expect(sourceRow).toContainText(source.platform)
+      await expect(sourceRow).toContainText(source.scope)
+      await expect(sourceRow).toContainText(source.readAt)
+    }
+    expect(technique.sourceNotes.length).toBeGreaterThan(0)
+    for (const note of technique.sourceNotes) {
+      const source = technique.sources.find(item => item.id === note.sourceId)
+      expect(source).toBeTruthy()
+      const noteRow = detail.locator('.technique-note-list li').filter({ hasText: note.point })
+      await expect(noteRow).toContainText(note.point)
+      await expect(noteRow.getByRole('link')).toContainText(source.author)
+      await expect(noteRow.getByRole('link')).toHaveAttribute('href', new URL(source.url).href)
+    }
+  }
+  await expect(explorer.getByRole('button', { name: '去我的衣橱练习', exact: true })).toBeEnabled()
+})
 
-  await page.getByLabel('内容来源').selectOption('douyin')
-  await expect(page.locator('.trend-count')).toContainText('2 条')
-  await expect(explorer.getByRole('button', { name: /毛衣.*查看搭配/ })).toHaveCount(0)
-  await expect(explorer.getByRole('button', { name: /黑色原牛.*查看搭配/ })).toBeVisible()
-  await expect(explorer.locator('#piece-detail')).toContainText('黑色原牛')
+test('mobile techniques stay within the screen and wardrobe practice only navigates', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const { explorer, writes } = await openTechniques(page)
+  await explorer.getByRole('navigation', { name: '按技巧主题筛选' }).getByRole('button', { name: sourcedTechniques.at(-1).category, exact: true }).click()
+  await explorer.getByRole('button', { name: '展开自查提示', exact: true }).click()
+  const detail = explorer.locator('article.technique-detail')
+  await detail.scrollIntoViewIfNeeded()
+  for (const element of [explorer, detail]) {
+    const bounds = await element.boundingBox()
+    expect(bounds.x).toBeGreaterThanOrEqual(0)
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(390)
+  }
+  expect(await detail.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true)
+  await explorer.getByRole('button', { name: '去我的衣橱练习', exact: true }).click()
+  await expect(page).toHaveURL(/#wardrobe$/)
+  await expect(page.getByRole('heading', { name: '我的衣橱', exact: true, level: 1 })).toBeVisible()
+  expect(writes).toEqual([])
 })

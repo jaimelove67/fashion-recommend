@@ -1,229 +1,216 @@
 import { expect, test } from '@playwright/test'
+import { createServer, request as proxyRequest } from 'node:http'
 
 const PROVIDER = 'https://anywear.decart.ai'
 const PHOTO = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0S8AAAAASUVORK5CYII=', 'base64')
-const trends = [{ id: 'weibo:try-on', platform: 'weibo', title: '黑色原牛搭白衬衫，乐福鞋与光腿神器',
-  summary: '试穿入口测试', sourceUrl: 'https://example.com/trend-look', stale: false,
-  publishedAt: '2026-10-10T09:00:00+08:00', evidence: { mediaType: 'post', images: [] } }]
+const favorite = { id: 1, name: '白衬衫', category: '上装', imageUrl: '/api/v1/me/try-on-favorites/1/image',
+  sourceKind: 'TREND_ILLUSTRATION', sourceUrl: 'https://example.com/trend-look' }
+const favoriteSelection = [favorite,
+  { ...favorite, id: 2, name: '直筒牛仔裤', category: '下装', imageUrl: '/api/v1/me/try-on-favorites/2/image' },
+  { ...favorite, id: 3, name: '乐福鞋', category: '鞋履', imageUrl: '/api/v1/me/try-on-favorites/3/image' }]
 
-async function setup(page, { view = 'trend', mode = 'normal', failImage = false, delayImage = false } = {}) {
-  const providerRequests = []
-  const imageReads = []
-  const errors = [], favoriteWrites = []
-  let delayedRoute = null
+async function setup(page, { view = 'favorites', initialFavorites = favoriteSelection, baseURL = test.info().project.use.baseURL } = {}) {
+  const providerRequests = [], imageReads = [], errors = [], favoriteWrites = [], favoriteReads = []
+  let authenticated = true
   page.on('pageerror', error => errors.push(error.message))
   await page.addInitScript(() => localStorage.setItem('fashion.weather.city', '长沙'))
-  await page.context().addCookies([{ name: 'JSESSIONID', value: 'private-test-session', url: test.info().project.use.baseURL, httpOnly: true }])
+  await page.context().addCookies([{ name: 'JSESSIONID', value: 'private-test-session', url: baseURL, httpOnly: true }])
   await page.route(PROVIDER + '/**', async route => {
     providerRequests.push(route.request().url())
-    // Exercises the real postMessage contract. This fixture never opens a camera,
-    // contacts inference servers or claims to produce a virtual try-on video.
-    await route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><body>
-      <p>Anywear protocol fixture · no generated video</p><script>
-      window.messages = [];
-      window.addEventListener('message', event => {
-        window.messages.push(event.data);
-        if (event.data.type === 'DECART_AUTO_START' && '${mode}' !== 'silent') {
-          parent.postMessage({ type: 'DECART_TRACK_EVENT', event: '${mode === 'queue' ? 'queue_entered' : 'first_frame_rendered'}', properties: { tryon_id: event.data.tryonId } }, event.origin);
-        }
-      });
-      </script></body></html>` })
-  })
-  await page.route('**/assets/trend-pieces/**', async route => {
-    const request = route.request()
-    if (request.resourceType() === 'fetch') {
-      imageReads.push({ path: new URL(request.url()).pathname, cookie: request.headers().cookie })
-      if (delayImage) { delayedRoute = route; return }
-      if (failImage) return route.fulfill({ status: 404, body: 'Image unavailable' })
-    }
-    return route.fulfill({ contentType: 'image/png', body: PHOTO })
+    // Keep the service's embedding restriction. This fixture never opens a camera
+    // or calls inference; the project must guide users to the extension instead.
+    await route.fulfill({ contentType: 'text/html', headers: { 'Content-Security-Policy': "frame-ancestors 'self'" },
+      body: '<!doctype html><p>Inert service fixture; no camera or inference</p>' })
   })
   await page.route('**/api/**', async route => {
-    const request = route.request()
-    const path = new URL(request.url()).pathname
+    const request = route.request(), path = new URL(request.url()).pathname
     if (path.endsWith('/image')) {
-      if (request.resourceType() === 'fetch') {
-        imageReads.push({ path, cookie: request.headers().cookie })
-        if (delayImage) { delayedRoute = route; return }
-        if (failImage) return route.fulfill({ status: 401, body: 'Session expired' })
-      }
+      imageReads.push({ path, cookie: request.headers().cookie })
       return route.fulfill({ contentType: 'image/png', body: PHOTO })
     }
     let data = null
-    if (path.endsWith('/auth/me')) data = { username: 'try-on-test', authorities: ['ROLE_USER'] }
+    if (path.endsWith('/auth/me')) {
+      if (!authenticated) return route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ code: 401 }) })
+      data = { username: 'try-on-test', authorities: ['ROLE_USER'] }
+    } else if (path.endsWith('/auth/logout')) authenticated = false
     else if (path.endsWith('/auth/csrf')) data = { token: 'test', headerName: 'X-XSRF-TOKEN' }
     else if (path.endsWith('/wardrobe')) data = []
     else if (path.endsWith('/style-profile')) data = { gender: null, styleTags: [], analysis: null }
-    else if (path.endsWith('/trends')) data = { items: trends, sources: [], styles: [] }
-    else if (path.endsWith('/try-on-favorites') && request.method() === 'POST') {
-      favoriteWrites.push({ body: request.postDataBuffer().toString(), headers: request.headers() })
-      data = { id: 1, name: '白衬衫', category: '上装', imageUrl: '/api/v1/me/try-on-favorites/1/image',
-        sourceKind: 'TREND_ILLUSTRATION', sourceUrl: 'https://example.com/trend-look' }
-    }
-    else if (path.endsWith('/try-on-favorites')) data = []
+    else if (path.endsWith('/trends')) data = { items: [], sources: [], styles: [] }
+    else if (path.endsWith('/try-on-favorites') && request.method() === 'POST') favoriteWrites.push(request.postData())
+    else if (path.endsWith('/try-on-favorites')) { favoriteReads.push(path); data = initialFavorites }
     else if (path.includes('/weather/')) data = { city: '长沙', temperatureC: 25, apparentTemperatureC: 25, weatherCode: 0, source: 'open-meteo' }
     else if (path.endsWith('/recommendations')) data = { content: [], page: 0, totalElements: 0, hasNext: false, statistics: { total: 0 } }
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 0, data }) })
   })
-  await page.goto('/#' + view)
+  await page.goto(new URL('/#' + view, baseURL).href)
   await expect(page.locator('.app-shell')).toBeVisible()
-  return { providerRequests, imageReads, errors, favoriteWrites, releaseImage: async () => delayedRoute?.fulfill({ contentType: 'image/png', body: PHOTO }).catch(() => {}) }
+  return { providerRequests, imageReads, errors, favoriteWrites, favoriteReads }
 }
 
 async function openDialog(page) {
-  const explorer = page.getByRole('region', { name: '趋势单品解析' })
-  await explorer.getByRole('button', { name: /白衬衫.*查看搭配/ }).click()
-  await explorer.getByRole('button', { name: '实时试穿', exact: true }).click()
+  const card = page.locator('.favorite-card').filter({ has: page.getByRole('heading', { name: favorite.name, exact: true }) })
+  await card.getByRole('button', { name: '再次试穿', exact: true }).click()
   await expect(page.getByRole('dialog', { name: '实时试衣', exact: true })).toBeVisible()
 }
 
-test('trend entry requires consent, sends image bytes and removes the frame when closed', async ({ page }) => {
+test('blocked inline try-on offers extension setup without loading the provider', async ({ page }) => {
   const api = await setup(page)
   await openDialog(page)
-  expect(api.providerRequests).toEqual([])
-  expect(api.imageReads).toEqual([])
-  await expect(page.getByRole('combobox', { name: '试穿单品' }).locator('option')).toHaveCount(2)
+  await expect(page.getByText('请使用配套扩展试穿', { exact: true })).toBeVisible()
+  await expect(page.getByRole('dialog')).toContainText('桌面版 Chrome / Edge')
   await expect(page.getByRole('dialog')).toContainText('非原帖商品图')
-  await page.getByRole('button', { name: '同意并开始试衣', exact: true }).click()
-  await expect(page.getByRole('status').filter({ hasText: '实时试穿中' })).toBeVisible()
-  const iframe = page.frameLocator('iframe[title="Anywear 实时试衣窗口"]')
-  const message = await iframe.locator('body').evaluate(() => window.messages.find(item => item.type === 'DECART_AUTO_START'))
-  expect(message.productImageUrl).toBe('data:image/png;base64,' + PHOTO.toString('base64'))
-  expect(JSON.stringify(message)).not.toContain('private-test-session')
-  expect(JSON.stringify(message)).not.toContain('try-on-test')
-  expect(JSON.stringify(message)).not.toContain('/api/v1/me/')
-  expect(api.imageReads[0].cookie).toContain('JSESSIONID=private-test-session')
-  await expect(page.locator('iframe')).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin')
-  await page.getByRole('button', { name: '关闭实时试衣', exact: true }).click()
   await expect(page.locator('iframe')).toHaveCount(0)
-  await openDialog(page)
-  await expect(page.getByRole('button', { name: '同意并开始试衣', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '关闭实时试衣', exact: true }).click()
-  expect(api.errors).toEqual([])
-})
-
-test('trend entry only includes current supported items and selection changes stop the previous frame', async ({ page }) => {
-  const api = await setup(page)
-  await openDialog(page)
-  await page.getByRole('button', { name: '同意并开始试衣', exact: true }).click()
-  await expect(page.getByRole('status').filter({ hasText: '实时试穿中' })).toBeVisible()
-  await page.getByRole('combobox', { name: '试穿单品' }).selectOption('black-raw-denim')
-  await expect(page.locator('iframe')).toHaveCount(0)
-  await page.getByRole('button', { name: '开始试穿此衣物', exact: true }).click()
-  await expect(page.getByRole('status').filter({ hasText: '实时试穿中' })).toBeVisible()
-  expect(api.imageReads.map(item => item.path)).toEqual(['/assets/trend-pieces/white-shirt.png', '/assets/trend-pieces/black-raw-denim.png'])
-  expect(api.errors).toEqual([])
-})
-
-test('failed image reads prevent loading the provider and allow retry', async ({ page }) => {
-  const api = await setup(page, { failImage: true })
-  await openDialog(page)
-  await page.getByRole('button', { name: '同意并开始试衣', exact: true }).click()
-  await expect(page.getByRole('alert').filter({ hasText: '无法读取衣物图片' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '同意并开始试衣', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: '下载所选单品图片', exact: true })).toHaveAttribute('download', '')
+  await page.getByRole('button', { name: '查看扩展安装引导', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: '实时试衣', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('dialog', { name: '几步准备，开启试穿浮窗' })).toBeVisible()
   expect(api.providerRequests).toEqual([])
-  await expect(page.getByRole('button', { name: '开始试穿此衣物', exact: true })).toBeEnabled()
+  expect(api.favoriteWrites).toEqual([])
+  expect(api.errors).toEqual([])
 })
 
-test('a rendered trend try-on can be liked with an explicit illustration source and account check', async ({ page }) => {
+test('selection previews only supported items and updates the selected image download', async ({ page }) => {
   const api = await setup(page)
   await openDialog(page)
-  const like = page.getByRole('button', { name: '喜欢，保存到项目', exact: true })
-  await expect(like).toBeDisabled()
-  await page.getByRole('button', { name: '同意并开始试衣', exact: true }).click()
-  await expect(like).toBeEnabled()
-  await like.click()
-  await expect(page.getByRole('button', { name: '已保存到喜欢穿搭' })).toBeDisabled()
-  expect(api.favoriteWrites).toHaveLength(1)
-  expect(api.favoriteWrites[0].body).toContain('TREND_ILLUSTRATION')
-  expect(api.favoriteWrites[0].body).toContain('https://example.com/trend-look')
-  expect(api.favoriteWrites[0].body).toContain('try-on-test')
-  expect(api.favoriteWrites[0].headers['x-xsrf-token']).toBe('test')
+  const select = page.getByRole('combobox', { name: '试穿单品' })
+  await expect(select.locator('option')).toHaveCount(2)
+  await expect(select.locator('option')).toHaveText(['白衬衫 · 上装', '直筒牛仔裤 · 下装'])
+  const download = page.getByRole('link', { name: '下载所选单品图片', exact: true })
+  const original = await download.getAttribute('href')
+  await select.selectOption({ index: 1 })
+  await expect(download).not.toHaveAttribute('href', original)
+  await expect(page.locator('.try-on-garment')).toHaveAttribute('src', await download.getAttribute('href'))
+  await page.getByRole('button', { name: '关闭实时试衣', exact: true }).click()
+  await openDialog(page)
+  await expect(download).toHaveAttribute('href', original)
+  expect(api.providerRequests).toEqual([])
 })
 
-test('a provider session end unmounts its frame and keeps the tried item available for liking', async ({ page }) => {
+test('unavailable preview images cannot be downloaded and changing the selection allows recovery', async ({ page }) => {
   const api = await setup(page)
   await openDialog(page)
-  await page.getByRole('button', { name: '同意并开始试衣', exact: true }).click()
-  await expect(page.getByRole('status').filter({ hasText: '实时试穿中' })).toBeVisible()
-  const provider = page.frames().find(frame => frame.url().startsWith(PROVIDER))
-  await provider.evaluate(() => {
-    const start = window.messages.find(message => message.type === 'DECART_AUTO_START')
-    parent.postMessage({ type: 'DECART_TRACK_EVENT', event: 'session_ended', properties: { tryon_id: start.tryonId } }, '*')
+  await page.locator('.try-on-garment').dispatchEvent('error')
+  await expect(page.getByRole('alert')).toContainText('这张单品图片暂时无法读取')
+  await expect(page.getByRole('link', { name: '下载所选单品图片', exact: true })).toHaveCount(0)
+  await page.getByRole('combobox', { name: '试穿单品' }).selectOption({ index: 1 })
+  await expect(page.getByRole('link', { name: '下载所选单品图片', exact: true })).toBeVisible()
+  expect(api.providerRequests).toEqual([])
+})
+
+test('a favorite image downloads through its own account without sending it to the provider', async ({ page }) => {
+  const imageCookies = [], appURL = test.info().project.use.baseURL
+  // Chrome's native download can reissue the URL outside page.route. Serve the
+  // private image over real same-origin HTTP so success includes its bytes and cookie.
+  const server = createServer((request, response) => {
+    if (request.url === favorite.imageUrl) {
+      imageCookies.push(request.headers.cookie || '')
+      const authorized = imageCookies.at(-1).includes('JSESSIONID=private-test-session')
+      response.writeHead(authorized ? 200 : 401, {
+        'Content-Type': 'image/png', 'Cache-Control': 'private, no-store'
+      })
+      response.end(authorized ? PHOTO : '')
+      return
+    }
+    const upstream = proxyRequest(new URL(request.url, appURL), {
+      method: request.method, headers: { ...request.headers, host: new URL(appURL).host }
+    }, forwarded => { response.writeHead(forwarded.statusCode, forwarded.headers); forwarded.pipe(response) })
+    upstream.on('error', () => { response.writeHead(502); response.end() })
+    request.pipe(upstream)
   })
-  await expect(page.locator('iframe')).toHaveCount(0)
-  await expect(page.getByRole('status').filter({ hasText: '本次试穿已结束' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '开始试穿此衣物', exact: true })).toBeEnabled()
-  await page.getByRole('button', { name: '喜欢，保存到项目', exact: true }).click()
-  await expect(page.getByRole('button', { name: '已保存到喜欢穿搭' })).toBeDisabled()
-  expect(api.favoriteWrites).toHaveLength(1)
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const baseURL = `http://127.0.0.1:${server.address().port}`
+    const api = await setup(page, { view: 'favorites', initialFavorites: [favorite], baseURL })
+    await page.getByRole('button', { name: '再次试穿', exact: true }).click()
+    const downloading = page.waitForEvent('download')
+    await page.getByRole('link', { name: '下载所选单品图片', exact: true }).click()
+    const download = await downloading
+    expect(await download.failure()).toBeNull()
+    expect(imageCookies.at(-1)).toContain('JSESSIONID=private-test-session')
+    expect(api.providerRequests).toEqual([])
+    expect(api.favoriteWrites).toEqual([])
+  } finally {
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(resolve))
+  }
 })
 
-test('a cancelled image read cannot open a frame after the dialog closes', async ({ page }) => {
-  const api = await setup(page, { delayImage: true })
-  await openDialog(page)
-  await page.getByRole('button', { name: '同意并开始试衣', exact: true }).click()
-  await expect.poll(() => api.imageReads.length).toBe(1)
-  await page.getByRole('button', { name: '关闭实时试衣', exact: true }).click()
-  await api.releaseImage()
-  await expect(page.locator('dialog')).toHaveCount(0)
-  await expect(page.locator('iframe')).toHaveCount(0)
+test('liked items retain history search and refresh and can open setup from a cached appreciation view', async ({ page }) => {
+  const api = await setup(page, { view: 'trend', initialFavorites: [favorite] })
+  const navigation = page.locator('.app-pill-nav')
+  await navigation.getByRole('button', { name: '搭配记录', exact: true }).click()
+  const sections = page.getByRole('group', { name: '切换穿搭历史内容' })
+  await sections.getByRole('button', { name: '喜欢的穿搭', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '搭配记录', level: 1 })).toBeVisible()
+  await expect(navigation.getByRole('button', { name: '搭配记录', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.locator('.stats-band')).toBeHidden()
+  const card = page.locator('.favorite-card')
+  await expect(card.getByRole('link', { name: '查看穿搭来源' })).toHaveAttribute('href', favorite.sourceUrl)
+  const search = page.getByRole('searchbox', { name: '搜索喜欢的单品' })
+  await search.fill('白衬衫')
+  await sections.getByRole('button', { name: '穿搭历史', exact: true }).click()
+  await sections.getByRole('button', { name: '喜欢的穿搭', exact: true }).click()
+  await expect(search).toHaveValue('白衬衫')
+  await search.fill('不存在的单品')
+  await expect(page.getByText('没有找到匹配的单品', { exact: true })).toBeVisible()
+  await search.fill('')
+  const reads = api.favoriteReads.length
+  await page.getByRole('button', { name: '刷新收藏', exact: true }).click()
+  await expect.poll(() => api.favoriteReads.length).toBe(reads + 1)
+  await card.getByRole('button', { name: '再次试穿', exact: true }).click()
+  await expect(page.getByRole('dialog')).toContainText('请使用配套扩展试穿')
+  await page.getByRole('button', { name: '查看扩展安装引导', exact: true }).click()
+  await expect(page).toHaveURL(/#trend$/)
+  await expect(page.getByRole('dialog', { name: '几步准备，开启试穿浮窗' })).toBeVisible()
   expect(api.providerRequests).toEqual([])
+  expect(api.errors).toEqual([])
 })
 
-test('a nonresponsive provider times out without leaving the camera frame mounted', async ({ page }) => {
-  await page.clock.install()
-  await setup(page, { mode: 'silent' })
-  await openDialog(page)
-  await page.getByRole('button', { name: '同意并开始试衣', exact: true }).click()
-  await expect(page.getByRole('status').filter({ hasText: '正在连接' })).toBeVisible()
-  await page.clock.fastForward(46000)
-  await expect(page.getByRole('alert').filter({ hasText: '试衣服务未及时响应' })).toBeVisible()
-  await expect(page.locator('iframe')).toHaveCount(0)
+test('legacy favorites links open the history section on mobile and survive reload', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const api = await setup(page, { view: 'favorites', initialFavorites: [{ ...favorite,
+    name: '购物白衬衫', sourceKind: 'SHOPPING', sourceUrl: 'https://example.com/product/white-shirt' }] })
+  await expect(page.getByRole('heading', { name: '搭配记录', level: 1 })).toBeVisible()
+  await expect(page.getByRole('button', { name: '喜欢的穿搭', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('link', { name: '查看原商品' })).toHaveAttribute('href', 'https://example.com/product/white-shirt')
+  await page.reload()
+  await expect(page.locator('.favorite-card')).toContainText('购物白衬衫')
+  const bounds = await page.locator('.favorites-page').boundingBox()
+  expect(bounds.x).toBeGreaterThanOrEqual(16)
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(374)
+  expect(api.errors).toEqual([])
 })
 
-test('queued sessions can close, and forged provider events are ignored', async ({ page }) => {
-  await setup(page, { mode: 'queue' })
+test('navigation and logout dismiss the preview and extension setup', async ({ page }) => {
+  const api = await setup(page)
   await openDialog(page)
-  await page.getByRole('button', { name: '同意并开始试衣', exact: true }).click()
-  await expect(page.getByRole('status').filter({ hasText: '服务正在排队' })).toBeVisible()
-  await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
-    origin: 'https://anywear.decart.ai', source: window,
-    data: { type: 'DECART_TRACK_EVENT', event: 'first_frame_rendered' }
-  })))
-  await expect(page.getByRole('status').filter({ hasText: '服务正在排队' })).toBeVisible()
-  await page.getByRole('button', { name: '关闭实时试衣', exact: true }).click()
-  await expect(page.locator('iframe')).toHaveCount(0)
-})
-
-test('navigation and logout dispose the provider frame', async ({ page }) => {
-  await setup(page)
-  await openDialog(page)
-  await page.getByRole('button', { name: '同意并开始试衣', exact: true }).click()
-  await expect(page.getByRole('status').filter({ hasText: '实时试穿中' })).toBeVisible()
   await page.evaluate(() => { window.location.hash = '#home' })
-  await expect(page.locator('iframe')).toHaveCount(0)
-  await page.goto('/#trend')
+  await expect(page).toHaveURL(/#recommend$/)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await page.goto('/#favorites')
   await openDialog(page)
-  await page.getByRole('button', { name: '同意并开始试衣', exact: true }).click()
-  await expect(page.getByRole('status').filter({ hasText: '实时试穿中' })).toBeVisible()
-  // Simulate a logout arriving while the modal is active, such as an auth action
-  // initiated before it opened. The native modal makes the background inert.
+  await page.getByRole('button', { name: '查看扩展安装引导', exact: true }).click()
+  // A logout can complete after a modal opens; it must remove the cached guide.
   await page.evaluate(() => document.querySelector('[aria-label="退出登录"]').click())
-  await expect(page.locator('iframe')).toHaveCount(0)
-  await expect(page.locator('.app-shell')).toHaveCount(0)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.locator('.guest-header')).toBeVisible()
+  expect(api.providerRequests).toEqual([])
+  expect(api.errors).toEqual([])
 })
 
-test('mobile dialog stays within the viewport and unsupported trend pieces cannot start try-on', async ({ page }) => {
+test('mobile favorite try-on guidance stays inside the viewport and only offers supported garments', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await setup(page)
-  const explorer = page.getByRole('region', { name: '趋势单品解析' })
-  await explorer.getByRole('button', { name: /乐福鞋.*查看搭配/ }).click()
-  await expect(explorer.getByRole('button', { name: '实时试穿', exact: true })).toBeDisabled()
-  await explorer.getByRole('button', { name: /光腿神器.*查看搭配/ }).click()
-  await expect(explorer.getByRole('button', { name: '实时试穿', exact: true })).toBeDisabled()
+  const unsupported = page.locator('.favorite-card').filter({ has: page.getByRole('heading', { name: '乐福鞋', exact: true }) })
+  await expect(unsupported.getByRole('button', { name: '再次试穿', exact: true })).toBeDisabled()
   await openDialog(page)
-  const bounds = await page.getByRole('dialog').boundingBox()
+  const dialog = page.getByRole('dialog', { name: '实时试衣', exact: true })
+  await expect(dialog.getByRole('combobox', { name: '试穿单品' }).locator('option')).toHaveText(['白衬衫 · 上装', '直筒牛仔裤 · 下装'])
+  const bounds = await dialog.boundingBox()
   expect(bounds.x).toBeGreaterThanOrEqual(0)
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(390)
-  await page.screenshot({ path: '../output/anywear-integration/mobile-consent.png', fullPage: true })
+  await expect(page.getByRole('button', { name: '查看扩展安装引导', exact: true })).toBeVisible()
+  await page.screenshot({ path: '../output/review/fix-mobile-try-on-guidance.png', fullPage: true })
 })

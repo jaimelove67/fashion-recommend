@@ -25,7 +25,7 @@ public class BailianGarmentRecognitionService implements GarmentRecognitionServi
     private static final String PROMPT = """
             识别这张图片中的主要衣物，只返回 JSON，不要 Markdown 或额外文字。
             JSON 只能包含 name、category、color、style 四个字符串字段；无法确定的字段返回空字符串。
-            category 只能从 上装、下装、鞋履、外套、配饰 中选择。
+            category 只能从 上装、下装、连体装、鞋履、外套、配饰 中选择。
             """;
 
     private final RestClient restClient;

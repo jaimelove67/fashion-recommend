@@ -1,5 +1,6 @@
 package com.fashion.recommendation.auth;
 
+import jakarta.servlet.http.HttpSession;
 import java.nio.charset.StandardCharsets;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -18,21 +19,25 @@ public class AuthService {
     private final JdbcUserDetailsManager users;
     private final PasswordEncoder passwordEncoder;
     private final boolean registrationEnabled;
+    private final RegistrationCaptchaService captchaService;
 
     public AuthService(
             JdbcUserDetailsManager users,
             PasswordEncoder passwordEncoder,
+            RegistrationCaptchaService captchaService,
             @Value("${app.auth.registration-enabled:true}") boolean registrationEnabled) {
         this.users = users;
         this.passwordEncoder = passwordEncoder;
         this.registrationEnabled = registrationEnabled;
+        this.captchaService = captchaService;
     }
 
     @Transactional
-    public AuthUserResponse register(AuthRegistrationRequest request) {
+    public AuthUserResponse register(AuthRegistrationRequest request, HttpSession session) {
         if (!registrationEnabled) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前未开放账号注册");
         }
+        captchaService.verifyAndConsume(session, request.captcha());
         if (request.password().getBytes(StandardCharsets.UTF_8).length > BCRYPT_MAX_PASSWORD_BYTES) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "密码不能超过 72 个字节");
         }

@@ -12,7 +12,8 @@ const TREND_SOURCE_STATES = {
   stale: '已过期',
   unavailable: '采集失败',
   unconfigured: '未配置',
-  pending: '等待采集'
+  pending: '等待采集',
+  'pending-review': '待复核'
 }
 
 const EXCLUSION_REASON_NAMES = {

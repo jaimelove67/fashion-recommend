@@ -12,7 +12,13 @@ public record TrendFeed(
         String period,
         List<TrendStyle> styles,
         List<TrendSourceStatus> sources,
-        String notice) {
+        String notice,
+        TrendDailySelection.Summary dailySelection) {
+
+    public TrendFeed(String primarySource, Instant fetchedAt, boolean demoMode, List<TrendItem> items,
+            String scoreLabel, String period, List<TrendStyle> styles, List<TrendSourceStatus> sources, String notice) {
+        this(primarySource, fetchedAt, demoMode, items, scoreLabel, period, styles, sources, notice, null);
+    }
 
     public TrendFeed(String primarySource, Instant fetchedAt, boolean demoMode, List<TrendItem> items, String scoreLabel) {
         this(primarySource, fetchedAt, demoMode, items, scoreLabel, "week", List.of(), List.of(), "");

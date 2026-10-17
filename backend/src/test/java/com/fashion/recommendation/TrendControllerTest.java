@@ -40,6 +40,11 @@ class TrendControllerTest {
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.primarySource").value("multi-source"))
                 .andExpect(jsonPath("$.data.demoMode").value(false))
+                .andExpect(jsonPath("$.data.period").value("day"))
+                .andExpect(jsonPath("$.data.dailySelection.target").value(5))
+                .andExpect(jsonPath("$.data.dailySelection.missing.menswear").value(2))
+                .andExpect(jsonPath("$.data.dailySelection.missing.womenswear").value(2))
+                .andExpect(jsonPath("$.data.dailySelection.missing.niche").value(1))
                 .andExpect(jsonPath("$.data.items.length()").value(0));
     }
 }

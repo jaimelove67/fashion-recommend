@@ -16,8 +16,7 @@ import { useFashionApp } from './composables/useFashionApp'
 import PillNav from './components/PillNav.vue'
 import RecommendationAssistant from './components/RecommendationAssistant.vue'
 import LiveTryOnDialog from './components/LiveTryOnDialog.vue'
-import { canTryOnGarment, trendTryOnItem } from './utils/liveTryOn.js'
-import { collectTrendPieces, resolveSeason } from './data/trendPieces.js'
+import { canTryOnGarment } from './utils/liveTryOn.js'
 import { favoriteTryOnItem } from './utils/tryOnFavorites.js'
 import { disconnectTryOnExtension } from './utils/extensionBridge.js'
 import HomeView from './views/HomeView.vue'
@@ -25,33 +24,29 @@ import TrendView from './views/TrendView.vue'
 import WardrobeView from './views/WardrobeView.vue'
 import RecommendationView from './views/RecommendationView.vue'
 import HistoryView from './views/HistoryView.vue'
-import FavoritesView from './views/FavoritesView.vue'
 import ProfileView from './views/ProfileView.vue'
 import LoginView from './views/LoginView.vue'
 import AdminView from './views/AdminView.vue'
 
 const fashion = reactive(useFashionApp())
+const guestLoginOpen = ref(false)
 const searchInput = ref(null)
 const weatherOpen = ref(false)
 const assistantOpen = ref(false)
 const assistantRef = ref(null)
 const tryOnOpen = ref(false)
+const currentViewRef = ref(null)
 const tryOnItemIds = ref([])
-const trendTryOnItems = computed(() => collectTrendPieces(fashion.state.trends, resolveSeason(fashion.state.weather))
-  .map(trendTryOnItem)
-  .filter(canTryOnGarment))
 const tryOnItems = computed(() => tryOnItemIds.value
-  .map(id => (fashion.state.activeView === 'favorites' ? fashion.state.tryOnFavorites.map(favoriteTryOnItem) : trendTryOnItems.value)
+  .map(id => fashion.state.tryOnFavorites.map(favoriteTryOnItem)
     .find(item => item.id === id))
   .filter(canTryOnGarment))
 
 const baseNavigation = [
-  { id: 'home', label: '首页', href: '#home' },
-  { id: 'trend', label: '穿搭趋势', href: '#trend' },
   { id: 'recommend', label: '穿搭推荐', href: '#recommend' },
   { id: 'wardrobe', label: '我的衣橱', href: '#wardrobe' },
-  { id: 'history', label: '搭配记录', href: '#history' },
-  { id: 'favorites', label: '喜欢穿搭', href: '#favorites' }
+  { id: 'trend', label: '穿搭鉴赏', href: '#trend' },
+  { id: 'history', label: '搭配记录', href: '#history', keywords: '穿搭历史' }
 ]
 
 const isAdminWorkspace = computed(() => fashion.isAdmin && fashion.state.activeView === 'admin')
@@ -63,27 +58,31 @@ const navigation = computed(() => {
 })
 
 const viewComponents = {
-  home: HomeView,
   trend: TrendView,
   recommend: RecommendationView,
   wardrobe: WardrobeView,
   history: HistoryView,
-  favorites: FavoritesView,
+  favorites: HistoryView,
   profile: ProfileView,
   admin: AdminView
 }
 
-const currentView = computed(() => viewComponents[fashion.state.activeView] || HomeView)
+const currentView = computed(() => viewComponents[fashion.state.activeView] || RecommendationView)
 const normalizedQuery = computed(() => fashion.state.globalQuery.trim().toLocaleLowerCase('zh-CN'))
 const searchResults = computed(() => {
   const query = normalizedQuery.value
   if (!query) return []
-  const views = navigation.value
-    .filter((item) => item.label.includes(query))
-    .map((item) => ({ id: `view-${item.id}`, type: 'view', view: item.id, title: item.label, meta: '页面' }))
+  const searchableViews = isAdminWorkspace.value ? navigation.value : [
+    ...navigation.value,
+    { id: 'favorites', label: '喜欢的穿搭', keywords: '喜欢穿搭' }
+  ]
+  const views = searchableViews
+    .filter((item) => `${item.label} ${item.keywords || ''}`.includes(query))
+    .map((item) => ({ id: `view-${item.id}`, type: 'view', view: item.id, title: item.label,
+      meta: item.id === 'favorites' ? '搭配记录' : '页面' }))
   const trends = fashion.state.trends
     .filter((item) => `${item.title} ${(item.topicTags || []).join(' ')}`.toLocaleLowerCase('zh-CN').includes(query))
-    .map((item) => ({ id: `trend-${item.id}`, type: 'trend', view: 'trend', trendId: item.id, title: item.title, meta: '穿搭趋势' }))
+    .map((item) => ({ id: `trend-${item.id}`, type: 'trend', view: 'trend', trendId: item.id, title: item.title, meta: '穿搭鉴赏' }))
   const garments = fashion.state.wardrobe
     .filter((item) => `${item.name} ${item.category} ${item.color} ${item.style || ''}`.toLocaleLowerCase('zh-CN').includes(query))
     .map((item) => ({ id: `garment-${item.id}`, type: 'garment', view: 'wardrobe', title: item.name, meta: `${item.category} · ${item.color}` }))
@@ -137,6 +136,25 @@ function handleNavigationClick(item) {
   if (item?.id && viewComponents[item.id]) fashion.selectView(item.id)
 }
 
+function openGuestLogin(view) {
+  if (fashion.state.authPhase !== 'guest') return
+  if (view) void fashion.selectView(view, { instant: true })
+  else window.scrollTo({ top: 0, behavior: 'auto' })
+  guestLoginOpen.value = true
+}
+
+function returnToGuestHome() {
+  guestLoginOpen.value = false
+  void fashion.selectView('home', { instant: true })
+}
+
+function browseGuestSection(id) {
+  document.getElementById(id)?.scrollIntoView({
+    behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    block: 'start'
+  })
+}
+
 function openSearchResult(result) {
   if (result.trendId) fashion.state.selectedTrendId = result.trendId
   fashion.state.globalQuery = ''
@@ -161,7 +179,7 @@ function toggleAssistant() {
 }
 
 function openTryOn(selection) {
-  if (!['trend', 'favorites'].includes(fashion.state.activeView) || fashion.state.authPhase !== 'authenticated') return
+  if (fashion.state.activeView !== 'favorites' || fashion.state.authPhase !== 'authenticated') return
   tryOnItemIds.value = [...new Set((Array.isArray(selection) ? selection : [selection]).map(item => item?.id))]
   if (!tryOnItems.value.length) return
   closePanels()
@@ -174,12 +192,25 @@ function closeTryOn() {
   tryOnItemIds.value = []
 }
 
+async function openTryOnSetup() {
+  closeTryOn()
+  void fashion.selectView('trend')
+  await nextTick()
+  if (fashion.state.authPhase === 'authenticated' && fashion.state.activeView === 'trend') {
+    currentViewRef.value?.openTryOnSetup?.()
+  }
+}
+
 watch(() => [fashion.state.authPhase, fashion.state.authUser?.username, fashion.state.activeView,
   fashion.state.trendPlatform, fashion.state.trendPeriod, fashion.state.trends], closeTryOn)
 
 watch(() => [fashion.state.authPhase, fashion.state.authUser?.username], (_value, previous) => {
   assistantOpen.value = false
-  if (previous?.[0] === 'authenticated') disconnectTryOnExtension()
+  if (fashion.state.authPhase === 'authenticated') guestLoginOpen.value = false
+  if (previous?.[0] === 'authenticated') {
+    disconnectTryOnExtension()
+    guestLoginOpen.value = fashion.state.authPhase === 'guest' && Boolean(fashion.state.authError)
+  }
 })
 
 function onExtensionMessage(event) {
@@ -194,13 +225,46 @@ onBeforeUnmount(() => fashion.dispose())
 </script>
 
 <template>
-  <main v-if="fashion.state.authPhase === 'checking'" class="session-gate" role="status" aria-live="polite">
-    <div class="session-gate-brand"><strong>知己</strong><span>穿搭推荐</span></div>
-    <LoaderCircle class="spinning" :size="23" aria-hidden="true" />
-    <span>正在验证登录状态…</span>
-  </main>
+  <LoginView
+    v-if="fashion.state.authPhase === 'guest' && guestLoginOpen"
+    :app="fashion"
+    direct-entry
+    @browse="returnToGuestHome"
+  />
 
-  <LoginView v-else-if="fashion.state.authPhase === 'guest'" :app="fashion" />
+  <div v-else-if="fashion.state.authPhase !== 'authenticated'" class="app-shell guest-shell">
+    <header class="guest-header">
+      <button class="guest-brand" type="button" aria-label="返回游客首页" @click="returnToGuestHome">
+        <img src="/assets/zhiji-logo.png" alt="" width="40" height="40" />
+        <span><strong>知己</strong><small>穿搭推荐</small></span>
+      </button>
+      <nav class="guest-navigation" aria-label="游客导航">
+        <button type="button" @click="browseGuestSection('guest-inspiration')">穿搭示例</button>
+        <button type="button" @click="browseGuestSection('home-features')">功能介绍</button>
+      </nav>
+      <button
+        class="guest-login-button"
+        type="button"
+        :disabled="fashion.state.authPhase === 'checking'"
+        @click="openGuestLogin()"
+      >
+        <LoaderCircle v-if="fashion.state.authPhase === 'checking'" class="spinning" :size="15" aria-hidden="true" />
+        {{ fashion.state.authPhase === 'checking' ? '正在确认登录…' : '登录 / 注册' }}
+      </button>
+    </header>
+    <main class="app-main">
+      <HomeView
+        :app="fashion"
+        guest
+        @request-login="openGuestLogin"
+        @browse-examples="browseGuestSection('guest-inspiration')"
+      />
+    </main>
+    <footer class="guest-footer">
+      <span>知己 · 让日常穿搭更懂你</span>
+      <span>登录后，开启你的个人穿搭空间</span>
+    </footer>
+  </div>
 
   <div v-else class="app-shell" :class="{ 'admin-workspace-shell': isAdminWorkspace }" @keydown.esc="closePanels">
     <header class="app-header">
@@ -210,13 +274,14 @@ onBeforeUnmount(() => fashion.dispose())
         logo-alt="知己"
         :logo-expanded="assistantOpen"
         :items="navigation"
-        :active-href="`#${fashion.state.activeView}`"
+        :active-href="fashion.state.activeView === 'favorites' ? '#history' : `#${fashion.state.activeView}`"
         :on-item-click="handleNavigationClick"
         ease="power3.out"
-        base-color="var(--accent-strong)"
+        base-color="var(--nav-bg)"
         pill-color="var(--surface)"
-        hovered-pill-text-color="var(--surface)"
-        pill-text-color="var(--accent)"
+        active-pill-color="var(--nav-active-bg)"
+        hovered-pill-text-color="var(--accent-strong)"
+        pill-text-color="var(--ink)"
         @logo-click="toggleAssistant"
       />
 
@@ -225,7 +290,7 @@ onBeforeUnmount(() => fashion.dispose())
           <CloudSun :size="19" />
           <span v-if="fashion.state.weather" class="weather-nav-value">{{ Number(fashion.state.weather.temperatureC).toFixed(0) }}°</span>
         </button>
-        <button class="utility-button" type="button" aria-label="搜索页面、穿搭趋势或衣物" :aria-expanded="fashion.state.searchOpen" @click="toggleSearch">
+        <button class="utility-button" type="button" aria-label="搜索页面、穿搭鉴赏或衣物" :aria-expanded="fashion.state.searchOpen" @click="toggleSearch">
           <X v-if="fashion.state.searchOpen" :size="19" />
           <Search v-else :size="19" />
         </button>
@@ -254,7 +319,7 @@ onBeforeUnmount(() => fashion.dispose())
     <section v-if="fashion.state.searchOpen" class="header-panel search-panel" aria-label="搜索">
       <div class="search-field">
         <Search :size="18" aria-hidden="true" />
-        <input ref="searchInput" v-model="fashion.state.globalQuery" type="search" placeholder="搜索页面、穿搭趋势或衣物" aria-label="搜索页面、穿搭趋势或衣物" />
+        <input ref="searchInput" v-model="fashion.state.globalQuery" type="search" placeholder="搜索页面、穿搭鉴赏或衣物" aria-label="搜索页面、穿搭鉴赏或衣物" />
       </div>
       <div v-if="normalizedQuery" class="search-results">
         <button v-for="result in searchResults" :key="result.id" type="button" @click="openSearchResult(result)">
@@ -262,7 +327,7 @@ onBeforeUnmount(() => fashion.dispose())
         </button>
         <p v-if="!searchResults.length">未找到匹配内容，请调整关键词。</p>
       </div>
-      <p v-else class="panel-hint">支持按页面名称、衣物名称、类别、颜色或趋势标签搜索。</p>
+      <p v-else class="panel-hint">支持按页面名称、衣物名称、类别、颜色或风格标签搜索。</p>
     </section>
 
     <section v-if="weatherOpen" class="header-panel weather-panel" aria-label="当前天气">
@@ -336,7 +401,7 @@ onBeforeUnmount(() => fashion.dispose())
 
     <main class="app-main">
       <KeepAlive>
-        <component :is="currentView" :app="fashion" @open-assistant="openAssistant" @open-try-on="openTryOn" />
+        <component :is="currentView" ref="currentViewRef" :app="fashion" @open-assistant="openAssistant" @open-try-on="openTryOn" />
       </KeepAlive>
     </main>
     <RecommendationAssistant
@@ -350,8 +415,135 @@ onBeforeUnmount(() => fashion.dispose())
       :key="fashion.state.authUser?.username"
       :items="tryOnItems"
       :initial-item-id="tryOnItems[0]?.id"
-      :save-favorite="fashion.saveTryOnFavorite"
       @close="closeTryOn"
+      @setup-extension="openTryOnSetup"
     />
   </div>
 </template>
+
+<style scoped>
+.guest-header,
+.guest-footer {
+  width: min(calc(100% - 64px), var(--page-width));
+  margin: 0 auto;
+}
+
+.guest-header {
+  display: grid;
+  min-height: 76px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.guest-brand {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+}
+
+.guest-brand img {
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+.guest-brand span {
+  display: grid;
+  gap: 2px;
+}
+
+.guest-brand strong {
+  font: 600 23px/1.2 var(--font-display);
+}
+
+.guest-brand small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.guest-navigation {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.guest-navigation button {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.guest-navigation button:hover {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.guest-login-button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  gap: 8px;
+  border: 1px solid var(--accent-strong);
+  border-radius: var(--radius);
+  padding: 10px 18px;
+  color: var(--surface);
+  background: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.guest-login-button:hover:not(:disabled) {
+  background: var(--accent);
+}
+
+.guest-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 20px;
+  border-top: 1px solid var(--line);
+  padding: 22px 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+@media (max-width: 760px) {
+  .guest-header,
+  .guest-footer {
+    width: calc(100% - 40px);
+  }
+
+  .guest-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+    padding: 14px 0 6px;
+  }
+
+  .guest-navigation {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+@media (max-width: 480px) {
+  .guest-header,
+  .guest-footer {
+    width: calc(100% - 32px);
+  }
+}
+</style>

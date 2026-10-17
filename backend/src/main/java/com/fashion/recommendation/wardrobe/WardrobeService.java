@@ -140,6 +140,6 @@ public class WardrobeService {
     }
 
     private static boolean isRecognizedCategory(String category) {
-        return List.of("上装", "下装", "鞋履", "外套", "配饰").contains(category);
+        return List.of("上装", "下装", "连体装", "鞋履", "外套", "配饰").contains(category);
     }
 }

@@ -26,3 +26,18 @@ export function verifiedFullBodyImageUrl(item) {
   if (EXCLUDED_CONTENT.test(`${item.title || ''} ${item.summary || ''} ${(item.topicTags || []).join(' ')}`)) return ''
   return url
 }
+
+export function trendGalleryImageUrl(item) {
+  const verifiedUrl = verifiedFullBodyImageUrl(item)
+  if (verifiedUrl) return verifiedUrl
+  if (['editorial', 'configured-demo'].includes(item?.platform)) return ''
+  if (!['image', 'photo'].includes(item?.evidence?.mediaType)) return ''
+  if (EXCLUDED_CONTENT.test(`${item.title || ''} ${item.summary || ''} ${(item.topicTags || []).join(' ')}`)) return ''
+  try {
+    const url = new URL(item.imageUrl)
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return ''
+    return url.href
+  } catch {
+    return ''
+  }
+}

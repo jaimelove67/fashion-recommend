@@ -1,0 +1,140 @@
+// Original written posts were read on 2026-10-16; evidence and exclusions are in docs/research.
+// sourceNotes paraphrase the authors. Other fields are editorial synthesis, not quotations,
+// independently verified image analysis or current-day trend evidence.
+const readAt = '2026-10-16'
+const textScope = '已核读文字正文；未独立查看原图或观看视频。历史方法参考。'
+const sources = {
+  colorMistakes: {
+    id: 'ding-color-mistakes', author: '一只马丁靴（页面署名）', platform: '搜狐号',
+    title: '这3个配色误区，只恨我踩雷不自知！',
+    url: 'https://www.sohu.com/a/456631792_686674', publishedAt: '2021-03-21', readAt,
+    scope: textScope + '未另行核验该账号与其他平台的认证关联。'
+  },
+  faceColor: {
+    id: 'dingslook-face-color', author: '陈一丁Dingslook', platform: '哔哩哔哩专栏',
+    title: '黄皮穿什么显白？这份「显白」手册可能要颠覆你的认知！',
+    url: 'https://www.bilibili.com/opus/226551922775757220', publishedAt: '2019-03-03', readAt, scope: textScope
+  },
+  proportions: {
+    id: 'zhizhi-proportions', author: '吱吱子吱吱', platform: '哔哩哔哩专栏',
+    title: '如何系统提高颜值 穿搭篇(一)',
+    url: 'https://www.bilibili.com/opus/108579547793079512', publishedAt: '2018-04-19', readAt,
+    scope: textScope + '文中部分示例注明来自其他资料，不计为独立实穿验证。'
+  },
+  coolStyle: {
+    id: 'dingslook-cool-style', author: '陈一丁Dingslook', platform: '哔哩哔哩专栏',
+    title: '风格解析系列干货：穿搭方向之【酷感大姐姐风】 | 最系统最全面的审美干货',
+    url: 'https://www.bilibili.com/opus/458939619478049081', publishedAt: '2020-11-18', readAt,
+    scope: textScope + '针对具体读者的风格个案，不推广为所有人的体型规则。'
+  },
+  shoeVolume: {
+    id: 'crompton-trainer-design', author: 'Simon Crompton', platform: 'Permanent Style · 作者博客',
+    title: 'How to wear trainers – 1: Design',
+    url: 'https://www.permanentstyle.com/2016/04/how-to-wear-trainers-1-design.html', publishedAt: '2016-04-20', readAt,
+    scope: textScope + '英文正文中文转述；讨论经典男装语境。'
+  },
+  outfitStructure: {
+    id: 'derek-outfit-structure', author: 'Derek Guy', platform: 'Put This On · 作者文章',
+    title: 'How to Put Together a Successful Outfit',
+    url: 'https://www.putthison.com/how-to-put-together-a-successful-outfit/', publishedAt: '2018-02-25', readAt,
+    scope: textScope + '英文正文中文转述；不把文中品牌偏好当购买要求。'
+  },
+  layers: {
+    id: 'martin-layering', author: '一只马丁靴（页面署名）', platform: '百度百科 · TA说',
+    title: '叠穿要如何搭配才好看？这4个底层逻辑帮你掌握时尚密码！',
+    url: 'https://wapbaike.baidu.com/tashuo/browse/content?id=e6d27944a7368e735dd29b9b',
+    publishedAt: '2021-10-19', readAt,
+    scope: textScope + '页面标注该署名作者及授权发布；仅按本篇论述整理。'
+  },
+  shoeFormality: {
+    id: 'boyfriend-shoe-trouser', author: '男友范儿', platform: '哔哩哔哩专栏',
+    title: '男生的鞋子+裤子怎么搭，才不容易像乱穿？',
+    url: 'https://www.bilibili.com/opus/329083022740115220', publishedAt: '2019-12-04', readAt,
+    scope: textScope + '发布账号在正文自述原发公众号；年代性搭配偏好不作硬性禁令。'
+  }
+}
+
+export const outfitTechniqueCategories = ['全部', '配色', '比例', '轮廓', '叠穿', '风格']
+
+export const outfitTechniques = [
+  {
+    id: 'color-context-from-posts', category: '配色', title: '配色不顺，先分清是衣服冲突还是近脸对比',
+    summary: '把两篇文章的问题分开处理：衣服之间检查饱和度和冷暖；靠脸的区域比较明暗与面积。',
+    sources: [sources.colorMistakes, sources.faceColor],
+    sourceNotes: [
+      { sourceId: sources.colorMistakes.id, point: '文章提出：撞色太强时可降低饱和度或改用相邻颜色；即使白色与棕色，也需要区分冷暖底调。' },
+      { sourceId: sources.faceColor.id, point: '作者讨论近脸配色时，建议比较衣物与肤色的明暗差，也可通过内搭或围巾局部调整，而非立即更换整套。' }
+    ],
+    synthesisNote: '前一篇讨论衣物之间的协调，后一篇讨论近脸区域的对比。归纳时分别检查这两个关系，不把它们合并成某种肤色不能穿某种颜色的清单。',
+    steps: ['先判断不满意的是全身色块，还是靠脸的一小块颜色。', '全身冲突时，只换一件颜色更柔和或底调接近的单品；其余保持不变。', '若只想调整领口，比较已有浅色与深色内搭，固定光线再选自己喜欢的一版。'],
+    reason: '颜色名称相同，深浅和底调仍可能不同；靠脸的小面积变化与整套撞色回答的也不是同一个问题。先定位关系，才知道该改哪一件。',
+    example: { before: '蓝上衣配高饱和红包，自己觉得包过于抢眼。', after: '先换成已有的低饱和色包比较；若问题其实在领口，则保留包，只比较内搭明暗。' },
+    suitable: '喜欢现有衣服的颜色，却不清楚整套哪里不协调，或希望调整近脸区域时。',
+    limit: '两篇文章的肤色、脸部风格分类属于作者审美框架；这里保留可比较的操作，不要求追求显白，也不据此判定个人风格。',
+    check: '这次是否只改了一个位置？变化更符合自己的目标，还是仅换成了另一种强对比？'
+  },
+  {
+    id: 'proportion-goal-from-posts', category: '比例', title: '先选腰线清楚还是上下连贯，再调整比例',
+    summary: '原帖对轮廓提出了不同方向：有的强调腰线，有的用同色减弱分界，先明确自己要哪一种效果。',
+    sources: [sources.proportions, sources.coolStyle],
+    sourceNotes: [
+      { sourceId: sources.proportions.id, point: '文章分别给出强调腰线、调整上装松紧及选择A字裙、阔腿裤等建议；同色搭配也可通过深浅变化保留层次。' },
+      { sourceId: sources.coolStyle.id, point: '在具体读者案例中，作者用上下同色减弱腰部分界，并把面料挺度、肩线和下摆形状一起纳入调整。' }
+    ],
+    synthesisNote: '两篇提供的是不同目标下的选择，不构成“腰线越高越好”的统一结论。腰部色差、衣摆与面料可以一起比较，先确定想强调还是弱化分界。',
+    steps: ['先用自己的话说清目标：希望上下分界明显，还是颜色更连贯。', '固定上衣和鞋，比较有色差与近色的两条下装；尽量保持版型与裤长接近。', '再单独调整衣摆或收腰程度，坐下、抬手确认不需要反复整理。'],
+    reason: '色差会影响上下是否容易被区分，衣摆和面料又决定实体边缘。一次同时换多件衣物，难以判断是哪个因素产生变化。',
+    example: { before: '浅色上装配深色下装，自己觉得腰部分界过于明显。', after: '先换近色、近似版型的下装比较连贯感，再决定是否调整衣摆；不把多项变化都归给颜色。' },
+    suitable: '对现有搭配的分界或轮廓不满意，希望有目标地比较衣摆与上下装关系时。',
+    limit: '来源包含针对特定读者的个案；不按身形强制分配穿法，也不承诺同色或高腰一定显高显瘦。',
+    check: '能否指出自己想保留的分界位置？如果版型、裤长也变了，是否把这些差异一起考虑了？'
+  },
+  {
+    id: 'shoe-trouser-from-posts', category: '轮廓', title: '裤脚堆起来，先把鞋也纳入检查',
+    summary: '结合裤脚与鞋体积的讨论，以及合身自查方法，先观察裤料怎样落在鞋上，再决定是否改裤长。',
+    sources: [sources.shoeVolume, sources.outfitStructure],
+    sourceNotes: [
+      { sourceId: sources.shoeVolume.id, point: 'Simon在经典男装语境中指出，较厚大的鞋可能顶起裤料；鞋型的体积会影响裤脚能否自然落下。' },
+      { sourceId: sources.outfitStructure.id, point: 'Derek把脚踝积料和衣物拉扯列为合身检查项，并强调试穿时需要坐下、抬手等活动测试。' }
+    ],
+    synthesisNote: '共同可用的检查顺序是把裤子与鞋看作一组。原文偏经典、利落的轮廓；本文据此整理换鞋对比步骤，不将厚鞋或刻意堆叠直接判错。',
+    steps: ['穿好同一条裤子，先看正面与侧面的积料位置，并实际走几步。', '用已有的两双不同体积鞋比较，裤腰位置与裤脚处理保持相同。', '若换鞋后仍不合心意，再考虑调整裤脚；同时保留步行空间和喜欢的轮廓。'],
+    reason: '裤脚最终停在哪里，同时受裤长、裤口与鞋面支撑影响。先排查鞋的影响，可以避免把所有问题都归于裤子太长。',
+    example: { before: '同一条裤子落在较厚鞋面上，脚踝处形成较多积料。', after: '换一双较低鞋面的已有鞋比较；如果裤脚仍拖地，再单独处理裤长。' },
+    suitable: '希望裤腿线条更利落，或换鞋后突然出现脚踝堆积时。',
+    limit: '作者的经典男装偏好不能覆盖街头宽松搭配；也不为追求纤细鞋型牺牲足部舒适度。',
+    check: '换鞋后积料是否改变？行走时会不会踩到裤脚？这是否符合你主动选择的松量？'
+  },
+  {
+    id: 'layering-from-post', category: '叠穿', title: '叠穿先检查中间层空间，再整理领口',
+    summary: '从一只马丁靴的完整叠穿文章提炼两个检查点：内层别挤坏外层轮廓，领口之间要有可辨认的高度差。',
+    sources: [sources.layers],
+    sourceNotes: [
+      { sourceId: sources.layers.id, point: '作者建议中间层选择较薄、体积较小的款式，给外层肩背留空间；叠好后抬手检查紧绷。' },
+      { sourceId: sources.layers.id, point: '文章还讨论了材质软硬与厚薄的配合，并用逐层错开的领口避免多个边缘堆在颈部。' }
+    ],
+    synthesisNote: '本条是单篇长文的方法整理，不标作多博主共识。先解决容量和活动余量，再处理可见领口，比只统计穿了几件更便于排查问题。',
+    steps: ['先试穿内搭和中间层，检查肩背与腋下是否已经紧绷。', '加入外层后抬手、坐下；若牵扯明显，先换更薄的中间层或减少一层。', '最后把各层领口整理出高度差，观察是否挤在同一位置，再决定配色。'],
+    reason: '中间层占用外套内部空间；领口边缘则集中在很小的区域。容量和边缘各自检查，比一味加衣服更容易定位不舒服或不清楚的层次。',
+    example: { before: '厚开衫夹在衬衫和外套之间，肩背紧，几个领口同时堆起。', after: '先换已有薄开衫或去掉一层，再拉开领口高度；分别比较活动空间与边缘。' },
+    suitable: '换季需要穿多层，却觉得肩背拥挤或领口凌乱时。',
+    limit: '原帖提出的领口、材质偏好是搭配思路；温度、活动和自己的覆盖需求优先，不规定所有叠穿必须三层。',
+    check: '抬手后领口能自然复位吗？肩背是否仍舒适？换薄一层后，原来不满意的地方是否减少？'
+  },
+  {
+    id: 'formality-from-posts', category: '风格', title: '鞋裤先统一正式度，再决定是否混搭',
+    summary: '两篇男装帖都把搭配放回使用语境：同叫西裤或球鞋，面料、剪裁和细节不同，正式程度也不同。',
+    sources: [sources.shoeFormality, sources.outfitStructure],
+    sourceNotes: [
+      { sourceId: sources.shoeFormality.id, point: '男友范儿按水洗细节区分牛仔裤的休闲程度，并区分正装西裤与休闲西裤，再讨论对应鞋型。' },
+      { sourceId: sources.outfitStructure.id, point: 'Derek建议先明确使用场合与想表达的风格，入门时让单品处于接近的正式程度，再逐步增加变化。' }
+    ],
+    synthesisNote: '可归纳的起点是先协调，再有意识地保留反差；不是永久禁止西裤搭球鞋。两篇均偏入门与经典男装，混搭效果仍取决于具体单品。',
+    steps: ['先确定当天场合的着装要求和步行需求。', '不只看单品名称，逐件检查面料、破坏处理、裤线及鞋面细节的正式程度。', '选出较协调的一组后，只换鞋或外套中的一件，判断反差是否符合自己的表达。'],
+    reason: '单品名称不能完整说明风格。干净深色牛仔和磨白破洞牛仔表达不同，正装西裤与休闲西裤也不应套同一条鞋子规则。',
+    example: { before: '只因都叫西裤，就给不同面料和剪裁的裤子固定配同一双鞋。', after: '先区分当天场合与裤装细节，再比较已有皮鞋和简洁休闲鞋，保留满足需求的一组。' },
+    suitable: '从单件都喜欢到整套却不协调，或希望把熟悉搭配调整为通勤、周末版本时。',
+    limit: '2018、2019年的入门文章不构成当下所有风格的禁令；有明确着装规范的场合也不能仅靠换一双鞋满足要求。',
+    check: '能否具体说出反差来自哪里，而不是只说“西裤配球鞋”？场合要求与实际舒适度是否都满足？'
+  }
+]

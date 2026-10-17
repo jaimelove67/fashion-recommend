@@ -1,31 +1,37 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { CircleAlert, Eye, EyeOff, LoaderCircle, LogIn, UserRoundPlus } from '@lucide/vue'
+import { CircleAlert, Eye, EyeOff, LoaderCircle, LogIn, RefreshCw, UserRoundPlus } from '@lucide/vue'
 
 const props = defineProps({
   app: {
     type: Object,
     required: true
-  }
+  },
+  directEntry: { type: Boolean, default: false }
 })
+const emit = defineEmits(['browse'])
 
 const form = reactive({
   username: '',
   password: '',
-  confirmPassword: ''
+  confirmPassword: '',
+  captcha: ''
 })
 const mode = ref('login')
 const showPassword = ref(false)
 const validationError = ref('')
-const phase = ref('loading')
-const statusText = ref('正在加载登录页面…')
-const introVisible = ref(true)
-const loginVisible = ref(false)
+const phase = ref(props.directEntry ? 'login' : 'loading')
+const statusText = ref(props.directEntry ? '等待登录' : '正在加载登录页面…')
+const introVisible = ref(!props.directEntry)
+const loginVisible = ref(props.directEntry)
 const assetsError = ref('')
 const motionReduced = ref(false)
 const canvasRef = ref(null)
 const startButton = ref(null)
 const usernameInput = ref(null)
+const captchaImage = ref('')
+const captchaLoading = ref(false)
+const captchaError = ref('')
 
 const submitting = computed(() => props.app.state.authSubmitting)
 const errorMessage = computed(() => validationError.value || props.app.state.authError)
@@ -35,6 +41,7 @@ let atlasImage = null
 let logoImage = null
 let motionMedia = null
 let animationFrame = 0
+let disposed = false
 let focusTimer = 0
 let width = 0
 let height = 0
@@ -439,7 +446,26 @@ function selectMode(nextMode) {
   clearAuthError()
   form.password = ''
   form.confirmPassword = ''
+  form.captcha = ''
+  if (nextMode === 'register') refreshCaptcha()
   scheduleFocus()
+}
+
+async function refreshCaptcha() {
+  if (captchaLoading.value) return
+  captchaLoading.value = true
+  captchaError.value = ''
+  captchaImage.value = ''
+  form.captcha = ''
+  try {
+    const captcha = await props.app.loadRegistrationCaptcha()
+    if (!captcha?.image?.startsWith('data:image/png;base64,')) throw new Error('验证码加载失败，请点击重试。')
+    if (!disposed) captchaImage.value = captcha.image
+  } catch (cause) {
+    if (!disposed) captchaError.value = cause instanceof Error ? cause.message : '验证码加载失败，请点击重试。'
+  } finally {
+    if (!disposed) captchaLoading.value = false
+  }
 }
 
 async function submit() {
@@ -464,6 +490,10 @@ async function submit() {
     validationError.value = '两次输入的密码不一致，请重新确认。'
     return
   }
+  if (mode.value === 'register' && (!captchaImage.value || !/^[a-z0-9]{5}$/i.test(form.captcha.trim()))) {
+    validationError.value = '请输入图片中的 5 位验证码。'
+    return
+  }
 
   form.username = username
   clearAuthError()
@@ -471,7 +501,7 @@ async function submit() {
 
   try {
     const success = mode.value === 'register'
-      ? await props.app.register({ username, password: form.password })
+      ? await props.app.register({ username, password: form.password, captcha: form.captcha.trim() })
       : await props.app.login({ username, password: form.password })
 
     if (success) return
@@ -484,6 +514,10 @@ async function submit() {
     validationError.value = cause instanceof Error ? cause.message : '服务暂时不可用，请稍后再试。'
     loginVisible.value = true
     setPhase('login', '请求失败，请重试')
+  } finally {
+    if (!disposed && mode.value === 'register' && props.app.state.authPhase !== 'authenticated') {
+      await refreshCaptcha()
+    }
   }
 }
 
@@ -502,6 +536,7 @@ function handleMotionChange(event) {
 }
 
 onMounted(() => {
+  if (props.directEntry) scheduleFocus()
   context = canvasRef.value?.getContext('2d')
   motionMedia = window.matchMedia('(prefers-reduced-motion: reduce)')
   motionReduced.value = motionMedia.matches
@@ -522,13 +557,16 @@ onMounted(() => {
     loadImage('/prototypes/zhiji-fish/assets/original-logo.png')
   ])
     .then(([atlas, logo]) => {
+      if (disposed) return
       atlasImage = atlas
       logoImage = logo
       resizeCanvas()
-      resetScene()
+      if (!props.directEntry) resetScene()
     })
     .catch(() => {
+      if (disposed) return
       assetsError.value = '开场动画加载失败，可直接使用登录表单。'
+      if (props.directEntry) return
       introVisible.value = false
       loginVisible.value = true
       setPhase('login', '等待登录')
@@ -537,6 +575,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   window.removeEventListener('resize', resizeCanvas)
   if (motionMedia?.removeEventListener) motionMedia.removeEventListener('change', handleMotionChange)
   else motionMedia?.removeListener(handleMotionChange)
@@ -554,7 +593,16 @@ onBeforeUnmount(() => {
           <small>穿搭推荐</small>
         </div>
         <button
-          v-if="!loginVisible"
+          v-if="directEntry"
+          class="fish-auth-text-button"
+          type="button"
+          :disabled="submitting"
+          @click="emit('browse')"
+        >
+          返回首页
+        </button>
+        <button
+          v-else-if="!loginVisible"
           class="fish-auth-text-button"
           type="button"
           :disabled="phase === 'loading' || submitting"
@@ -704,7 +752,41 @@ onBeforeUnmount(() => {
               />
             </label>
 
-            <button class="fish-auth-submit" type="submit" :disabled="submitting">
+            <div v-if="mode === 'register'" class="fish-auth-field">
+              <label for="fish-captcha">图形验证码</label>
+              <div class="fish-auth-captcha">
+                <input
+                  id="fish-captcha"
+                  v-model="form.captcha"
+                  name="captcha"
+                  autocomplete="off"
+                  autocapitalize="characters"
+                  spellcheck="false"
+                  maxlength="5"
+                  pattern="[a-zA-Z0-9]{5}"
+                  required
+                  :disabled="submitting || captchaLoading || !captchaImage"
+                  aria-describedby="fish-captcha-hint"
+                  placeholder="输入验证码"
+                />
+                <button
+                  class="fish-auth-captcha-refresh"
+                  type="button"
+                  :disabled="submitting || captchaLoading"
+                  :aria-label="captchaError ? '重新加载验证码' : '刷新验证码'"
+                  title="点击换一张验证码"
+                  @click="refreshCaptcha"
+                >
+                  <LoaderCircle v-if="captchaLoading" class="spinning" :size="20" aria-hidden="true" />
+                  <img v-else-if="captchaImage" :src="captchaImage" alt="注册验证码" width="160" height="52" />
+                  <span v-else><RefreshCw :size="16" aria-hidden="true" />点击重试</span>
+                </button>
+              </div>
+              <small id="fish-captcha-hint">5 位字母或数字，不区分大小写；3 分钟内有效，点击图片可刷新。</small>
+              <small v-if="captchaError" class="fish-auth-captcha-error" role="alert">{{ captchaError }}</small>
+            </div>
+
+            <button class="fish-auth-submit" type="submit" :disabled="submitting || (mode === 'register' && (captchaLoading || !captchaImage))">
               <LoaderCircle v-if="submitting" class="spinning" :size="18" aria-hidden="true" />
               <LogIn v-else-if="mode === 'login'" :size="18" aria-hidden="true" />
               <UserRoundPlus v-else :size="18" aria-hidden="true" />
@@ -732,11 +814,11 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .fish-auth {
-  --fish-ink: #214d3b;
-  --fish-muted: #627467;
+  --fish-ink: var(--ink);
+  --fish-muted: var(--muted);
   --fish-gold: #ac8951;
-  --fish-line: #dce5dc;
-  --fish-paper: #fbfcf8;
+  --fish-line: var(--line);
+  --fish-paper: var(--surface);
   --fish-danger: #8b3c34;
   position: relative;
   min-height: 100dvh;
@@ -751,6 +833,7 @@ onBeforeUnmount(() => {
   min-height: 100dvh;
   overflow: hidden;
   isolation: isolate;
+  background: var(--fish-paper);
 }
 
 .fish-auth-header {
@@ -791,7 +874,7 @@ onBeforeUnmount(() => {
 
 .fish-auth-text-button {
   padding: 9px 0;
-  border-bottom: 1px solid #d6ded5;
+  border-bottom: 1px solid var(--line);
   color: var(--fish-muted);
   font-size: 12px;
 }
@@ -808,6 +891,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   pointer-events: none;
+  mix-blend-mode: multiply;
 }
 
 .fish-auth-intro {
@@ -845,7 +929,7 @@ onBeforeUnmount(() => {
 }
 
 .fish-auth-logo-trigger:hover:not(:disabled) {
-  background: radial-gradient(ellipse, #e9f0e520, transparent 65%);
+  background: radial-gradient(ellipse, rgba(128, 101, 79, .08), transparent 65%);
 }
 
 .fish-auth-wordmark {
@@ -881,7 +965,7 @@ onBeforeUnmount(() => {
 
 .fish-auth-note {
   margin: 15px 0 0;
-  color: #788477;
+  color: var(--muted);
   font-size: 11px;
   letter-spacing: 0.08em;
 }
@@ -899,7 +983,7 @@ onBeforeUnmount(() => {
   pointer-events: none;
   transform: translate(-50%, calc(-50% + 18px));
   transition: opacity 700ms cubic-bezier(.22, 1, .36, 1), transform 700ms cubic-bezier(.22, 1, .36, 1), visibility 700ms;
-  scrollbar-color: #c8d3c8 transparent;
+  scrollbar-color: var(--line-strong) transparent;
 }
 
 .fish-auth-login.is-visible {
@@ -956,7 +1040,7 @@ onBeforeUnmount(() => {
   bottom: -1px;
   left: 0;
   height: 2px;
-  background: var(--fish-ink);
+  background: var(--accent-strong);
   content: "";
   opacity: 0;
   transform: scaleX(0.35);
@@ -965,7 +1049,7 @@ onBeforeUnmount(() => {
 }
 
 .fish-auth-tabs button.active {
-  color: var(--fish-ink);
+  color: var(--accent-strong);
 }
 
 .fish-auth-tabs button.active::after {
@@ -979,7 +1063,7 @@ onBeforeUnmount(() => {
 }
 
 .fish-auth-tabs button.active small {
-  color: var(--fish-gold);
+  color: var(--accent-strong);
 }
 
 .fish-auth-assets-error,
@@ -997,7 +1081,7 @@ onBeforeUnmount(() => {
 
 .fish-auth-assets-error {
   color: var(--fish-muted);
-  background: #f4f5ee;
+  background: var(--surface-soft);
 }
 
 .fish-auth-error {
@@ -1039,17 +1123,60 @@ onBeforeUnmount(() => {
 }
 
 .fish-auth-field input::placeholder {
-  color: #788575;
+  color: var(--muted);
 }
 
 .fish-auth-field input:focus {
-  border-color: var(--fish-ink);
+  border-color: var(--accent-strong);
   background: #fff;
-  box-shadow: 0 0 0 3px rgba(33, 77, 59, .11);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .fish-auth-password {
   position: relative;
+}
+
+.fish-auth-captcha {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 144px;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.fish-auth-captcha input {
+  min-width: 0;
+  padding-right: 8px;
+  padding-left: 10px;
+}
+
+.fish-auth-captcha-refresh {
+  display: flex;
+  height: 48px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--fish-line);
+  border-radius: 5px;
+  padding: 0;
+  color: var(--fish-muted);
+  background: #f7f5ee;
+}
+
+.fish-auth-captcha-refresh img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.fish-auth-captcha-refresh span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fish-auth-field > .fish-auth-captcha-error {
+  color: var(--fish-danger);
 }
 
 .fish-auth-password input {
@@ -1075,20 +1202,20 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid var(--fish-ink);
+  border: 1px solid var(--accent-strong);
   border-radius: 5px;
   margin-top: 2px;
   color: #fff;
-  background: var(--fish-ink);
+  background: var(--accent-strong);
   font-size: 13px;
   font-weight: 700;
-  box-shadow: 0 10px 24px rgba(33, 77, 59, .14);
+  box-shadow: 0 10px 24px rgba(82, 72, 55, .14);
 }
 
 .fish-auth-submit:hover:not(:disabled) {
-  border-color: #316147;
-  background: #316147;
-  box-shadow: 0 13px 28px rgba(33, 77, 59, .22);
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 13px 28px rgba(82, 72, 55, .22);
 }
 
 .fish-auth-footnote {
@@ -1118,7 +1245,7 @@ onBeforeUnmount(() => {
 }
 
 .fish-auth-footer span:last-child {
-  color: var(--fish-gold);
+  color: var(--muted);
 }
 
 .fish-auth-loading {

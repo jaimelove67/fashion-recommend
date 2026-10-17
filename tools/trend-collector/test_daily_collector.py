@@ -57,6 +57,24 @@ class DailyCollectorTests(unittest.TestCase):
         self.assertEqual('穿搭博主', items[0]['author'])
         self.assertIsNone(collector.weibo_date('未知时间', self.now))
 
+    def test_weibo_visible_absolute_dates_and_today_without_space(self):
+        now = datetime(2026, 10, 15, 2, 0, tzinfo=timezone.utc)
+        for raw, expected in (
+                ('今天01:32', '2026-10-14T17:32:00+00:00'),
+                ('今天 09:40', '2026-10-15T01:40:00+00:00'),
+                ('26-10-15 09:40', '2026-10-15T01:40:00+00:00')):
+            with self.subTest(raw=raw):
+                self.assertEqual(expected, collector.weibo_date(raw, now))
+        # Relative labels do not provide an exact publication time; read the original post instead.
+        self.assertIsNone(collector.weibo_date('11分钟前', now))
+        self.assertIsNone(collector.weibo_date('40秒前 转赞人数超过50', now))
+
+    def test_weibo_prefers_full_text_without_duplicating_collapsed_preview(self):
+        page = Selector('<div class="card-wrap" action-type="feed_list_item" mid="1234567890">'
+                        '<p node-type="feed_list_content">穿搭预览 展开</p>'
+                        '<p node-type="feed_list_content_full">完整的针织穿搭正文</p></div>')
+        self.assertEqual('完整的针织穿搭正文', collector.parse_weibo(page, self.now)[0]['content'])
+
     def test_douyin_search_payload_deduplicates_and_rejects_video(self):
         post = {'aweme_id': '1234567890', 'create_time': int(self.now.timestamp()), 'desc': '秋季穿搭',
                 'images': [{'url_list': ['https://images.test/look.jpg']}], 'author': {'nickname': '博主'}}
@@ -73,6 +91,41 @@ class DailyCollectorTests(unittest.TestCase):
             self.assertIsNone(data['items'][0]['evidence']['fullBodyImageUrl'])
             self.assertEqual(data, json.loads((Path(folder) / 'weibo.json').read_text(encoding='utf-8')))
 
+    def test_default_queries_cover_audiences_and_style_without_labels_from_query(self):
+        for platform in collector.PLATFORMS:
+            with self.subTest(platform=platform):
+                queries = []
+                def searched(source_platform, query, *args):
+                    queries.append((source_platform, query))
+                    return [dict(self.item, platform=source_platform, author='男士穿搭哥特风博主')]
+                with tempfile.TemporaryDirectory() as folder:
+                    data = collector.collect(platform, Path(folder), search_fn=searched)
+                self.assertEqual([(platform, query) for query in collector.DAILY_KEYWORDS], queries)
+                self.assertEqual(1, len(data['items']))
+                self.assertEqual(['穿搭灵感'], data['items'][0]['topicTags'])
+
+    def test_explicit_keyword_preserves_existing_single_search_entrypoint(self):
+        queries = []
+        with tempfile.TemporaryDirectory() as folder:
+            collector.collect('weibo', Path(folder), keyword='指定穿搭',
+                              search_fn=lambda platform, query, *args: queries.append(query) or [])
+        self.assertEqual(['指定穿搭'], queries)
+
+    def test_candidate_limit_is_shared_not_five_per_platform_and_keeps_each_query(self):
+        def searched(platform, query, *args):
+            offset = collector.DAILY_KEYWORDS.index(query) * 100
+            titles = ['男士衬衫穿搭', '女士针织穿搭', '哥特风穿搭']
+            return [dict(self.item, id=str(1234567890 + offset + index),
+                         title=titles[collector.DAILY_KEYWORDS.index(query)]) for index in range(50)]
+        with tempfile.TemporaryDirectory() as folder:
+            data = collector.collect('weibo', Path(folder), search_fn=searched)
+            status = json.loads((Path(folder) / 'weibo-collection-status.json').read_text(encoding='utf-8'))
+        self.assertEqual(50, len(data['items']))
+        for tag in ('男装穿搭', '女装穿搭', '小众穿搭'):
+            self.assertGreaterEqual(sum(tag in item['topicTags'] for item in data['items']), 16)
+        self.assertEqual(3, status['queriesCompleted'])
+        self.assertTrue(status['contentReviewRequired'])
+
     def test_failure_preserves_prior_feed_and_records_unavailable(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)
@@ -85,6 +138,19 @@ class DailyCollectorTests(unittest.TestCase):
             status = json.loads((path / 'weibo-collection-status.json').read_text(encoding='utf-8'))
             self.assertEqual('unavailable', status['state'])
             self.assertEqual('login-or-verification-required', status['reason'])
+
+    def test_later_query_failure_never_overwrites_feed_with_partial_categories(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)
+            (path / 'weibo.json').write_text('previous-complete-feed', encoding='utf-8')
+            with self.assertRaises(RuntimeError):
+                collector.collect('weibo', path,
+                                  search_fn=unittest.mock.Mock(side_effect=[[self.item],
+                                      ValueError('search-content-unavailable')]))
+            self.assertEqual('previous-complete-feed', (path / 'weibo.json').read_text(encoding='utf-8'))
+            status = json.loads((path / 'weibo-collection-status.json').read_text(encoding='utf-8'))
+        self.assertEqual(1, status['queriesCompleted'])
+        self.assertEqual('unavailable', status['state'])
 
     def test_successful_search_with_no_recent_posts_publishes_empty_result(self):
         with tempfile.TemporaryDirectory() as folder:

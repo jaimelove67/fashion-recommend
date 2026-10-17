@@ -28,6 +28,16 @@ class PublicCollectionTests(unittest.TestCase):
         self.item['publishedAt'] = None
         self.assertEqual('missing-or-invalid-publication-time', collector.eligible(self.item, self.now))
 
+    def test_blocks_suggestive_copy_in_full_text_but_keeps_normal_half_body_and_item_details(self):
+        for text in ('OOTD 胸部特写', '穿搭 擦边福利', '时尚 性暗示', 'OnlyFans 穿搭'):
+            with self.subTest(text=text):
+                self.item['content'] = '日常针织 ' * 100 + text
+                self.assertEqual('body-focused-or-suggestive', collector.eligible(self.item, self.now))
+        for text in ('正常半身针织衫穿搭', '衬衫胸前口袋细节', '珍珠项链搭配细节', '吊带配开衫', '大胸女生衬衫尺码与版型建议'):
+            with self.subTest(text=text):
+                self.item['content'] = text
+                self.assertIsNone(collector.eligible(self.item, self.now))
+
     def test_video_and_missing_images_are_rejected(self):
         self.item['mediaType'] = 'video'
         self.assertEqual('not-image-post', collector.eligible(self.item, self.now))
@@ -67,6 +77,80 @@ class PublicCollectionTests(unittest.TestCase):
     def test_full_content_is_not_exported_to_the_feed(self):
         item = dict(self.item, platform='weibo', sourceUrl='https://weibo.com/2/detail/123', content='原始正文')
         self.assertNotIn('content', collector.feed_item(item, self.now))
+
+    def test_outfit_categories_require_explicit_clothing_copy_and_specific_style(self):
+        for value, expected in (
+                ('男士衬衫穿搭', ['男装穿搭']),
+                ('男士穿搭 衬衫配牛仔裤', ['男装穿搭']),
+                ('女士穿搭 针织裙', ['女装穿搭']),
+                ('男装与女装搭配对比', ['男女装']),
+                ('这不是男装穿搭', []),
+                ('并非女装穿搭', []),
+                ('不是男装穿搭，而是女装穿搭', ['女装穿搭']),
+                ('男装穿搭，男女同款', ['男女装']),
+                ('男装穿搭，无性别穿搭', ['男女装']),
+                ('男装穿搭，男女通穿', ['男女装']),
+                ('男装穿搭，unisex outfit', ['男女装']),
+                ('男装穿搭，不是男女同款', ['男装穿搭']),
+                ('小众品牌日常通勤穿搭 粉丝少', []),
+                ('日常穿搭，这不是哥特风', []),
+                ('日常穿搭，并非蒸汽朋克', []),
+                ('非洛丽塔穿搭', []),
+                ('衬衫日常穿搭，在哥特建筑前拍照', []),
+                ('通勤穿搭，背景是赛博朋克', []),
+                ('不是哥特风，是蒸汽朋克穿搭', ['小众穿搭', '蒸汽朋克']),
+                ('男装哥特风穿搭', ['男装穿搭', '小众穿搭', '哥特风']),
+                ('洛丽塔穿搭欣赏', ['小众穿搭', '洛丽塔']),
+                ('蒸汽朋克穿搭', ['小众穿搭', '蒸汽朋克'])):
+            with self.subTest(value=value):
+                self.assertEqual(expected, collector.outfit_topic_tags(value))
+
+    def test_feed_labels_use_full_copy_but_never_author_name_or_followers(self):
+        item = dict(self.item, platform='weibo', sourceUrl='https://weibo.com/2/detail/1234567890',
+                    author='男装洛丽塔', authorFollowers=100, content='日常衣服 ' * 60 + '女士穿搭 赛博朋克')
+        self.assertEqual(['女装穿搭', '小众穿搭', '赛博朋克', '穿搭灵感'], collector.feed_item(item, self.now)['topicTags'])
+        item['content'] = '秋季通勤穿搭'
+        self.assertEqual(['穿搭灵感'], collector.feed_item(item, self.now)['topicTags'])
+
+    def test_audience_requires_outfit_target_not_photographer_or_viewer_role(self):
+        for value, expected in (
+                ('男生帮我拍的穿搭', []),
+                ('女生拍摄的穿搭', []),
+                ('男士摄影穿搭', []),
+                ('女士眼中的穿搭', []),
+                ('男生眼中的穿搭，衬衫配西裤', []),
+                ('女生镜头下的穿搭', []),
+                ('男生帮我拍的女装穿搭', ['女装穿搭']),
+                ('女生帮我拍的男士衬衫穿搭', ['男装穿搭']),
+                ('男生拍摄女生日常通勤穿搭', ['女装穿搭']),
+                ('男士衬衫穿搭', ['男装穿搭']),
+                ('女士针织衫搭配', ['女装穿搭']),
+                ('男生日常穿搭', ['男装穿搭']),
+                ('女生的通勤穿搭', ['女装穿搭'])):
+            with self.subTest(value=value):
+                self.assertEqual(expected, collector.outfit_topic_tags(value))
+                item = dict(self.item, platform='weibo', sourceUrl='https://weibo.com/2/detail/1234567890',
+                            title=value)
+                self.assertEqual(expected + ['穿搭灵感'], collector.feed_item(item, self.now)['topicTags'])
+
+    def test_full_copy_ambiguity_survives_short_export_and_never_emits_single_audience(self):
+        for detail in ('男女同款', '无性别穿搭', '女装穿搭'):
+            with self.subTest(detail=detail):
+                item = dict(self.item, platform='weibo', sourceUrl='https://weibo.com/2/detail/1234567890',
+                            title='男装穿搭', summary='男装穿搭', content='针织 ' * 100 + detail)
+                result = collector.feed_item(item, self.now)
+                self.assertEqual('男装穿搭', result['title'])
+                self.assertEqual('男装穿搭', result['summary'])
+                self.assertNotIn('content', result)
+                self.assertEqual(['男女装', '穿搭灵感'], result['topicTags'])
+
+    def test_weibo_id_is_stable_across_search_and_original_permalink(self):
+        item = dict(self.item, id='5354217775563442', platform='weibo',
+                    sourceUrl='https://weibo.com/1645752321/RmKs1nliW')
+        from_browser = collector.feed_item(item, self.now)
+        item['sourceUrl'] = 'https://weibo.com/2/detail/5354217775563442'
+        self.assertEqual('weibo:5354217775563442', from_browser['id'])
+        self.assertEqual(from_browser['id'], collector.feed_item(item, self.now)['id'])
 
     def test_chinese_page_dates_preserve_timezone(self):
         self.assertEqual(datetime(2026, 10, 7, 2, 0, tzinfo=timezone.utc),

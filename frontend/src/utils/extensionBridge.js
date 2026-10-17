@@ -11,7 +11,9 @@ export function requestTryOnExtension(type, payload = {}, timeoutMs = 5000) {
     }
     const timer = setTimeout(() => {
       cleanup()
-      reject(new Error('请安装扩展，在本项目网页的浏览器工具栏点击“知己跨站试穿”，选择“连接此项目网站”，再点击开启。'))
+      const error = new Error('未检测到扩展连接。请按引导安装并连接本站；如果已安装，打开浏览器工具栏中的“知己 · 跨站试穿”，选择“连接此项目网站”，再重试。')
+      error.code = 'EXTENSION_UNAVAILABLE'
+      reject(error)
     }, timeoutMs)
     window.addEventListener('message', receive)
     window.postMessage({ channel: 'ZHIJI_TRY_ON_WEB', type, requestId, ...payload }, location.origin)

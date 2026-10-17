@@ -52,9 +52,9 @@ async function regenerate(replaced = null) {
 ul { padding: 0; list-style: none; }
 li { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 li span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-button { flex-shrink: 0; border: 1px solid #aaa99a; border-radius: 6px; padding: 7px 10px; color: inherit; background: transparent; cursor: pointer; }
-button[aria-pressed="true"] { background: #e4e9dd; }
+button { flex-shrink: 0; border: 1px solid var(--line-strong); border-radius: 6px; padding: 7px 10px; color: inherit; background: transparent; cursor: pointer; }
+button[aria-pressed="true"] { background: var(--accent-soft); }
 button:disabled { opacity: .5; cursor: default; }
-button:focus-visible { outline: 2px solid #566b43; outline-offset: 2px; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [role="alert"] { color: #963b2a; }
 </style>

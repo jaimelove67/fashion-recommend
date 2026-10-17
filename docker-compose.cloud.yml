@@ -1,0 +1,82 @@
+# Overlay for the 4-core Linux host (3654 MiB usable RAM).
+# Use with docker-compose.yml.
+# The default entry point stays on loopback for an SSH-tunnel acceptance check.
+# Supply unique POSTGRES_PASSWORD / MINIO_ROOT_PASSWORD (never the development
+# defaults) and a persistent random 32-byte Base64 AI_SETTINGS_ENCRYPTION_KEY.
+# PUBLIC_ORIGIN must match the browser URL exactly, including a nonstandard port.
+name: fashion-recommendation-cloud
+
+x-cloud-logging: &cloud-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: ${CLOUD_POSTGRES_IMAGE:-public.ecr.aws/docker/library/postgres:16-alpine@sha256:3c5c8892d184f738f4fe282d14ddaa613a38f00f4189d2d94725ebe6f2909ddb}
+    restart: unless-stopped
+    mem_limit: 384m
+    logging: *cloud-logging
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a unique cloud database password}
+
+  minio:
+    image: ${CLOUD_MINIO_IMAGE:-quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e}
+    restart: unless-stopped
+    mem_limit: 384m
+    logging: *cloud-logging
+    environment:
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set a unique cloud object-storage password}
+      # Standard Go runtime soft limit, supported by this image's Go 1.24.6.
+      # Leave native allocations and other process overhead below the hard cap.
+      GOMEMLIMIT: 300MiB
+
+  minio-init:
+    image: ${CLOUD_MC_IMAGE:-quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727}
+    mem_limit: 128m
+    logging: *cloud-logging
+    environment:
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set a unique cloud object-storage password}
+
+  trend-collector:
+    init: true
+    restart: unless-stopped
+    mem_limit: 640m
+    cpus: 1.0
+    logging: *cloud-logging
+
+  backend:
+    restart: unless-stopped
+    mem_limit: 1152m
+    logging: *cloud-logging
+    environment:
+      JAVA_TOOL_OPTIONS: -Xms128m -Xmx640m -XX:+ExitOnOutOfMemoryError
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "6"
+      SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: "1"
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Set a unique cloud database password}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set a unique cloud object-storage password}
+      AI_SETTINGS_ENCRYPTION_KEY: ${AI_SETTINGS_ENCRYPTION_KEY:?Set and back up a persistent random 32-byte Base64 encryption key}
+      CORS_ALLOWED_ORIGINS: ${PUBLIC_ORIGIN:-http://localhost:8090}
+      # Only the frontend forwards browser requests. Its cloud configuration
+      # replaces client-supplied forwarding headers with connection facts.
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      # The TLS overlay forces true. Loopback HTTP is for SSH-tunnel checks only.
+      SESSION_COOKIE_SECURE: "false"
+    healthcheck:
+      start_period: 90s
+      interval: 10s
+      retries: 12
+
+  frontend:
+    restart: unless-stopped
+    mem_limit: 96m
+    logging: *cloud-logging
+    volumes:
+      - ./docker/cloud/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/cloud/locations.conf:/etc/nginx/cloud/locations.conf:ro
+
+# Steady-state limits: 2656 MiB. The one-shot minio-init adds at most 128 MiB,
+# leaving about 870 MiB of the measured 3654 MiB for the OS and Docker at startup.
+# Build images before deployment or sequentially: build processes are outside
+# these running-container budgets. Database and MinIO volumes remain unchanged.

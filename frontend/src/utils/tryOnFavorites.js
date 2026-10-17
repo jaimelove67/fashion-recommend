@@ -14,5 +14,5 @@ export function favoriteUploadForm(item, imageData, username) {
 
 export function favoriteTryOnItem(item) {
   return { ...item, imageSource: 'zhiji_saved_favorite', imageNote: item.sourceKind === 'TREND_ILLUSTRATION'
-    ? '趋势单品示意图 · 非原帖商品图' : '已收藏的商品图片' }
+    ? '穿搭单品示意图 · 非原帖商品图' : '已收藏的商品图片' }
 }

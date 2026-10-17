@@ -1,6 +1,7 @@
 import { computed, reactive, nextTick, watch } from 'vue'
-import { verifiedFullBodyImageUrl } from '../utils/trendGallery.js'
+import { trendGalleryImageUrl } from '../utils/trendGallery.js'
 import { isConfiguredDemoTrend } from '../utils/trendSources.js'
+import { isTrendAnalysisExample, trendOutfitAnalysis } from '../data/trendOutfitAnalyses.js'
 import { outfitModelReferenceKey } from '../utils/outfitModel.js'
 import { favoriteUploadForm } from '../utils/tryOnFavorites.js'
 
@@ -31,7 +32,7 @@ const TREND_GALLERY_SIZE = 10
 function uniqueTrendImages(items = []) {
   const seen = new Set()
   return items.filter((item) => {
-    const url = verifiedFullBodyImageUrl(item)
+    const url = trendGalleryImageUrl(item)
     if (!url || seen.has(url)) return false
     seen.add(url)
     return true
@@ -193,6 +194,10 @@ export function useFashionApp() {
     adminAiModels: [],
     adminAiModelsLoading: false,
     adminAiModelAction: null,
+    adminTrendReviews: [],
+    adminTrendReviewsLoading: false,
+    adminTrendReviewAction: null,
+    adminTrendReviewError: '',
     globalQuery: '',
     searchOpen: false,
     notificationsOpen: false,
@@ -272,6 +277,10 @@ export function useFashionApp() {
     state.adminAiModels = []
     state.adminAiModelsLoading = false
     state.adminAiModelAction = null
+    state.adminTrendReviews = []
+    state.adminTrendReviewsLoading = false
+    state.adminTrendReviewAction = null
+    state.adminTrendReviewError = ''
     state.globalQuery = ''
     state.searchOpen = false
     state.notificationsOpen = false
@@ -283,6 +292,21 @@ export function useFashionApp() {
   }
 
   const isAdmin = computed(() => state.authUser?.authorities?.includes('ROLE_ADMIN') === true)
+
+  function resolveView(view) {
+    const requestedView = VALID_VIEWS.has(view) ? view : 'home'
+    if (state.authPhase !== 'authenticated') return requestedView
+    if (requestedView === 'home') return isAdmin.value ? 'admin' : 'recommend'
+    if (requestedView === 'admin' && !isAdmin.value) return 'recommend'
+    return requestedView
+  }
+
+  function normalizeActiveView() {
+    const nextView = resolveView(state.activeView)
+    if (nextView === state.activeView) return
+    state.activeView = nextView
+    if (typeof window !== 'undefined') window.history?.replaceState?.(null, '', `#${nextView}`)
+  }
 
   function isCurrentSession(version) {
     return state.authPhase === 'authenticated' && version === sessionVersion
@@ -401,13 +425,7 @@ export function useFashionApp() {
     state.authUser = user
     state.authPhase = 'authenticated'
     state.authError = ''
-    if (state.activeView === 'admin' && !isAdmin.value) {
-      state.activeView = 'home'
-      window.history.replaceState(null, '', '#home')
-    } else if (isAdmin.value && state.activeView === 'home') {
-      state.activeView = 'admin'
-      window.history.replaceState(null, '', '#admin')
-    }
+    normalizeActiveView()
     await loadPrivateData()
   }
 
@@ -429,6 +447,10 @@ export function useFashionApp() {
     }
   }
 
+  async function loadRegistrationCaptcha() {
+    return request('/api/v1/auth/captcha', { cache: 'no-store' }, { allowUnauthorized: true })
+  }
+
   async function register(credentials) {
     if (state.authSubmitting) return false
     state.authSubmitting = true
@@ -436,7 +458,7 @@ export function useFashionApp() {
     try {
       await request('/api/v1/auth/register', {
         method: 'POST',
-        body: JSON.stringify({ username: credentials.username, password: credentials.password })
+        body: JSON.stringify({ username: credentials.username, password: credentials.password, captcha: credentials.captcha })
       }, { allowUnauthorized: true })
       await completeLogin(credentials.username, credentials.password)
       return true
@@ -481,7 +503,8 @@ export function useFashionApp() {
       const params = new URLSearchParams({ period, platform })
       const feed = await request(`/api/v1/trends?${params}`)
       if (version !== trendRequestVersion) return
-      const trendItems = feed.items || []
+      const slots = new Map((feed.dailySelection?.assignments || []).map(slot => [slot.id, slot]))
+      const trendItems = (feed.items || []).map(item => slots.has(item.id) ? { ...item, dailySlot: slots.get(item.id) } : item)
       let galleryItems = uniqueTrendImages(trendItems)
 
       if (version !== trendRequestVersion) return
@@ -494,14 +517,15 @@ export function useFashionApp() {
         demoMode: Boolean(feed.demoMode),
         scoreLabel: feed.scoreLabel || '来源内评分',
         sources: feed.sources || [],
-        notice: feed.notice || ''
+        notice: feed.notice || '',
+        dailySelection: feed.dailySelection || null
       }
       const visibleGalleryItems = galleryItems.slice(0, TREND_GALLERY_SIZE)
       if (!state.selectedTrendId || !visibleGalleryItems.some((item) => item.id === state.selectedTrendId)) {
         state.selectedTrendId = visibleGalleryItems[0]?.id || trendItems[0]?.id || null
       }
     } catch (cause) {
-      if (version === trendRequestVersion) state.trendError = '趋势暂时无法加载，请稍后重试。'
+      if (version === trendRequestVersion) state.trendError = '穿搭内容暂时无法加载，请稍后重试。'
     } finally {
       if (version === trendRequestVersion) state.trendsLoading = false
     }
@@ -509,9 +533,10 @@ export function useFashionApp() {
 
   async function useTrend(item) {
     state.selectedTrendReference = item
-    if (isConfiguredDemoTrend(item)) delete state.recommendationForm.trendId
+    if (isConfiguredDemoTrend(item) || isTrendAnalysisExample(item)) delete state.recommendationForm.trendId
     else state.recommendationForm.trendId = item.id
-    state.recommendationForm.styleHint = (item.topicTags || []).join('、').slice(0, 120)
+    state.recommendationForm.styleHint = [(item.topicTags || []).join('、'), trendOutfitAnalysis(item)?.applicationHint]
+      .filter(Boolean).join('；').slice(0, 120)
     await selectView('recommend')
     await nextTick()
     document.querySelector('.trend-reference-banner')?.focus()
@@ -807,6 +832,54 @@ export function useFashionApp() {
       return null
     } finally {
       if (isCurrentSession(version)) state.adminAiModelsLoading = false
+    }
+  }
+
+  async function loadAdminTrendReviews() {
+    if (!isAdmin.value || state.adminTrendReviewsLoading) return null
+    const version = sessionVersion
+    state.adminTrendReviewsLoading = true
+    state.adminTrendReviewError = ''
+    try {
+      const reviews = await request('/api/v1/admin/trends/review-queue?limit=20')
+      if (isCurrentSession(version)) state.adminTrendReviews = reviews || []
+      return isCurrentSession(version) ? reviews : null
+    } catch (cause) {
+      if (isCurrentSession(version)) state.adminTrendReviewError = cause.message || '待复核内容加载失败，请重试。'
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminTrendReviewsLoading = false
+    }
+  }
+
+  async function reviewAdminTrend(candidate, approved, note) {
+    if (!isAdmin.value || !candidate?.item?.id || !candidate.fingerprint
+      || state.adminTrendReviewAction || state.adminTrendReviewsLoading || !note?.trim()) return null
+    const version = sessionVersion
+    state.adminTrendReviewAction = candidate.item.id
+    state.adminTrendReviewError = ''
+    try {
+      const updated = await request('/api/v1/admin/trends/' + encodeURIComponent(candidate.item.id) + '/content-review', {
+        method: 'POST',
+        body: JSON.stringify({ approved, fingerprint: candidate.fingerprint, note: note.trim() })
+      })
+      if (!isCurrentSession(version)) return null
+      state.adminTrendReviews = state.adminTrendReviews.filter(review => review.item.id !== candidate.item.id)
+      await Promise.allSettled([loadAdminTrendReviews(), loadTrends(), loadAdminAuditLogs({ page: 0 })])
+      return isCurrentSession(version) ? updated : null
+    } catch (cause) {
+      if (!isCurrentSession(version)) return null
+      if (cause.status === 409) {
+        // The old confirmation never applies to a changed post or changed images.
+        state.adminTrendReviews = []
+        await loadAdminTrendReviews()
+        if (isCurrentSession(version)) state.adminTrendReviewError = '内容已变化，请重新检查最新文字和全部图片，再填写说明并提交。'
+      } else {
+        state.adminTrendReviewError = cause.message || '复核提交失败，请重试。'
+      }
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminTrendReviewAction = null
     }
   }
 
@@ -1384,10 +1457,7 @@ export function useFashionApp() {
   }
 
   async function selectView(view, options = {}) {
-    const requestedView = VALID_VIEWS.has(view) ? view : 'home'
-    const nextView = requestedView === 'admin' && state.authPhase === 'authenticated' && !isAdmin.value
-      ? 'home'
-      : requestedView
+    const nextView = resolveView(view)
     state.activeView = nextView
     state.searchOpen = false
     state.notificationsOpen = false
@@ -1400,12 +1470,7 @@ export function useFashionApp() {
 
   function syncViewFromLocation() {
     const view = window.location.hash.slice(1)
-    const requestedView = VALID_VIEWS.has(view) ? view : 'home'
-    const nextView = requestedView === 'admin' && state.authPhase === 'authenticated' && !isAdmin.value
-      ? 'home'
-      : requestedView === 'home' && state.authPhase === 'authenticated' && isAdmin.value
-        ? 'admin'
-        : requestedView
+    const nextView = resolveView(view)
     if (view !== nextView) window.history.replaceState(null, '', `#${nextView}`)
     selectView(nextView, { updateHistory: false, instant: true })
   }
@@ -1425,13 +1490,7 @@ export function useFashionApp() {
       state.authUser = user
       state.authPhase = 'authenticated'
       state.authError = ''
-      if (state.activeView === 'admin' && !isAdmin.value) {
-        state.activeView = 'home'
-        window.history.replaceState(null, '', '#home')
-      } else if (isAdmin.value && state.activeView === 'home') {
-        state.activeView = 'admin'
-        window.history.replaceState(null, '', '#admin')
-      }
+      normalizeActiveView()
       await loadPrivateData()
       await loadStartupWeather()
     } catch (cause) {
@@ -1471,6 +1530,7 @@ export function useFashionApp() {
     dispose,
     login,
     register,
+    loadRegistrationCaptcha,
     logout,
     clearError,
     clearWeather,
@@ -1490,6 +1550,8 @@ export function useFashionApp() {
     updateAdminFeedbackStatus,
     loadAdminAuditLogs,
     loadAdminAiModels,
+    loadAdminTrendReviews,
+    reviewAdminTrend,
     saveAdminAiModel,
     resetAdminAiModel,
     saveProfile,

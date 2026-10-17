@@ -460,7 +460,7 @@ defineExpose({ open: openAssistant })
 <style scoped>
 .weather-recovery { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; margin-bottom: 12px; }
 .weather-recovery p { width: 100%; margin: 0; }
-.weather-recovery button { padding: 6px 8px; border: 1px solid #c5c6bb; border-radius: 6px; background: transparent; color: inherit; }
+.weather-recovery button { padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: transparent; color: inherit; }
 .weather-recovery input { width: 120px; padding: 6px; margin-left: 8px; }
 .manual-weather-control { display: grid; gap: 8px; margin-bottom: 12px; font-size: 12px; }
 .manual-weather-control label { display: flex; align-items: center; gap: 8px; }
@@ -482,16 +482,16 @@ defineExpose({ open: openAssistant })
 }
 
 .assistant-layer {
-  --rec-bg: #f4f1eb;
-  --rec-paper: #fbfaf6;
-  --rec-paper-strong: #fffefa;
-  --rec-ink: #202923;
-  --rec-muted: #7a8179;
-  --rec-line: #dddcd3;
-  --rec-line-dark: #c3c7bd;
-  --rec-accent: #788a6b;
-  --rec-accent-soft: #e6ece2;
-  --rec-dark: #202b24;
+  --rec-bg: var(--bg);
+  --rec-paper: var(--surface);
+  --rec-paper-strong: var(--surface);
+  --rec-ink: var(--ink);
+  --rec-muted: var(--muted);
+  --rec-line: var(--line);
+  --rec-line-dark: var(--line-strong);
+  --rec-accent: var(--accent);
+  --rec-accent-soft: var(--accent-soft);
+  --rec-dark: var(--accent-strong);
   position: fixed;
   z-index: 100;
   inset: 0;
@@ -548,7 +548,7 @@ defineExpose({ open: openAssistant })
 
 .assistant-drawer-heading h2 {
   margin: 0;
-  color: var(--rec-dark);
+  color: var(--rec-ink);
   font-family: var(--font-display);
   font-size: 30px;
   font-weight: 650;
@@ -691,7 +691,7 @@ defineExpose({ open: openAssistant })
 
 .assistant-result-card h3 {
   margin: 13px 0 12px;
-  color: var(--rec-dark);
+  color: var(--rec-ink);
   font-family: var(--font-display);
   font-size: 19px;
   font-weight: 650;
@@ -884,7 +884,7 @@ defineExpose({ open: openAssistant })
 }
 
 .assistant-composer textarea::placeholder {
-  color: #878e86;
+  color: var(--muted);
 }
 
 .assistant-composer-footer {

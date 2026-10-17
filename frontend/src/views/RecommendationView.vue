@@ -656,22 +656,22 @@ watch(() => selectedLook.value?.visualKey, () => {
 </template>
 
 <style scoped>
-.trend-reference-banner { display:flex; flex-wrap:wrap; align-items:center; gap:20px; padding:24px; margin:20px 0; background:#e6ece2; color:#263e32; }
+.trend-reference-banner { display:flex; flex-wrap:wrap; align-items:center; gap:20px; padding:24px; margin:20px 0; background:var(--accent-soft); color:var(--accent-strong); }
 .trend-reference-banner > div { flex:1 1 260px; }
 .trend-reference-banner p { margin:8px 0; overflow-wrap:anywhere; }
-.trend-reference-banner button { cursor:pointer; min-height:44px; padding:10px 14px; color:inherit; border:1px solid #345647; background:transparent; }
+.trend-reference-banner button { cursor:pointer; min-height:44px; padding:10px 14px; color:inherit; border:1px solid var(--accent); background:transparent; }
 .recommendation-view {
-  --rec-bg: #f4f1eb;
-  --rec-paper: #fbfaf6;
-  --rec-paper-strong: #fffefa;
-  --rec-ink: #202923;
-  --rec-muted: #7a8179;
-  --rec-line: #dddcd3;
-  --rec-line-dark: #c3c7bd;
-  --rec-accent: #788a6b;
-  --rec-accent-soft: #e6ece2;
-  --rec-rust: #b96850;
-  --rec-dark: #202b24;
+  --rec-bg: var(--bg);
+  --rec-paper: var(--surface);
+  --rec-paper-strong: var(--surface);
+  --rec-ink: var(--ink);
+  --rec-muted: var(--muted);
+  --rec-line: var(--line);
+  --rec-line-dark: var(--line-strong);
+  --rec-accent: var(--accent);
+  --rec-accent-soft: var(--accent-soft);
+  --rec-rust: var(--coral);
+  --rec-dark: var(--accent-strong);
   min-height: calc(100vh - 76px);
   color: var(--rec-ink);
   background: var(--rec-bg);
@@ -784,7 +784,7 @@ watch(() => selectedLook.value?.visualKey, () => {
 .hero-copy h1 {
   max-width: 720px;
   margin-bottom: 22px;
-  color: var(--rec-dark);
+  color: var(--rec-ink);
   font-size: clamp(46px, 6vw, 76px);
   font-weight: 650;
   line-height: 1.03;
@@ -898,7 +898,7 @@ watch(() => selectedLook.value?.visualKey, () => {
 }
 
 .weather-brief-top strong {
-  color: var(--rec-dark);
+  color: var(--rec-ink);
   font-family: var(--font-display);
   font-size: 23px;
   font-weight: 650;
@@ -952,7 +952,7 @@ watch(() => selectedLook.value?.visualKey, () => {
 .overview-item strong {
   display: block;
   margin: 9px 0 6px;
-  color: var(--rec-dark);
+  color: var(--rec-ink);
   font-family: var(--font-mono);
   font-size: 29px;
   font-weight: 500;
@@ -1019,7 +1019,7 @@ watch(() => selectedLook.value?.visualKey, () => {
 .section-header h2,
 .panel-header h2 {
   margin-bottom: 8px;
-  color: var(--rec-dark);
+  color: var(--rec-ink);
   font-size: 29px;
   font-weight: 650;
   line-height: 1.1;
@@ -1124,7 +1124,7 @@ watch(() => selectedLook.value?.visualKey, () => {
   overflow: hidden;
   border: 1px solid rgba(255, 254, 250, .45);
   border-radius: 18px;
-  background: #141816;
+  background: var(--ink);
   box-shadow: 0 18px 38px rgba(32, 43, 36, .16);
 }
 
@@ -1304,7 +1304,7 @@ watch(() => selectedLook.value?.visualKey, () => {
 .ootd-detail h3 {
   max-width: 620px;
   margin: 18px 0 11px;
-  color: var(--rec-dark);
+  color: var(--rec-ink);
   font-size: 35px;
   font-weight: 650;
   line-height: 1.1;
@@ -1436,7 +1436,7 @@ watch(() => selectedLook.value?.visualKey, () => {
 
 .ootd-detail-palette strong {
   overflow: hidden;
-  color: var(--rec-dark);
+  color: var(--rec-ink);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0;
@@ -1536,7 +1536,7 @@ watch(() => selectedLook.value?.visualKey, () => {
 }
 
 .ootd-item-copy strong {
-  color: var(--rec-dark);
+  color: var(--rec-ink);
   font-size: 13px;
   font-weight: 650;
 }
@@ -1614,7 +1614,7 @@ watch(() => selectedLook.value?.visualKey, () => {
   padding: 54px 46px 36px;
   background:
     radial-gradient(circle at 50% 42%, rgba(255, 255, 255, .98), rgba(255, 255, 255, 0) 37%),
-    linear-gradient(145deg, #f8f8f6 0%, #f1f2ef 100%);
+    linear-gradient(145deg, var(--surface) 0%, var(--surface-soft) 100%);
   box-shadow: 0 24px 60px rgba(47, 57, 51, .09);
 }
 
@@ -1627,7 +1627,7 @@ watch(() => selectedLook.value?.visualKey, () => {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  color: #8a918b;
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: .06em;
@@ -1767,8 +1767,8 @@ watch(() => selectedLook.value?.visualKey, () => {
   flex: 0 0 auto;
   border-radius: 999px;
   padding: 5px 8px;
-  color: #7c827e;
-  background: #eceeeb;
+  color: var(--muted);
+  background: var(--surface-soft);
   font-size: 9px;
   white-space: nowrap;
 }
@@ -1937,7 +1937,7 @@ watch(() => selectedLook.value?.visualKey, () => {
 }
 
 .closet-score strong {
-  color: var(--rec-dark);
+  color: var(--rec-ink);
   font-family: var(--font-mono);
   font-size: 40px;
   font-weight: 500;
@@ -2106,7 +2106,7 @@ watch(() => selectedLook.value?.visualKey, () => {
 .generated-card h3 {
   max-width: 760px;
   margin: 20px 0 25px;
-  color: var(--rec-dark);
+  color: var(--rec-ink);
   font-size: 27px;
   font-weight: 650;
   line-height: 1.23;

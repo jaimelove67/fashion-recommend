@@ -10,5 +10,8 @@ public record AuthRegistrationRequest(
         String username,
         @NotBlank
         @Size(min = 8, max = 72)
-        String password) {
+        String password,
+        @NotBlank
+        @Size(max = 16)
+        String captcha) {
 }

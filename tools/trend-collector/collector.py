@@ -18,6 +18,7 @@ import json
 from pathlib import Path
 import re
 from urllib.parse import urlparse
+from collect_public import outfit_topic_tags
 
 PLATFORMS = {"dy": "douyin", "wb": "weibo"}
 # The backend rejects an import file larger than this, so status reports readiness the same way.
@@ -125,9 +126,12 @@ def normalize(row, platform, observed=None, now=None):
     description = text(row.get("desc") or row.get("content"))
     raw_tags = row.get("topicTags") or row.get("tags") or ""
     combined = title + " " + description + " " + text(raw_tags)
+    from content_scope import text_rejection
+    if text_rejection(combined):
+        raise ValueError("body-focused-or-suggestive")
     if excluded_show_or_celebrity(combined):
         raise ValueError("outside creator outfit trend scope")
-    tags = [tag for tag, keywords in RULES.items() if any(k in combined.lower() for k in keywords)]
+    tags = outfit_topic_tags(combined) + [tag for tag, keywords in RULES.items() if any(k in combined.lower() for k in keywords)]
     if not tags and not any(k in combined.lower() for k in ("穿搭", "搭配", "outfit", "ootd", "fashion")):
         raise ValueError("not fashion content")
     published = instant(row.get("time") or row.get("create_time"))

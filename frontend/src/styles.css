@@ -9,24 +9,26 @@
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --bg: #f3efe7;
   --surface: #fcfaf5;
-  --surface-soft: #e9eee7;
-  --ink: #1f2e28;
-  --muted: #626f67;
-  --line: #d7ded6;
-  --line-strong: #b9c7bd;
-  --accent: #174f42;
-  --accent-strong: #0b3028;
-  --accent-soft: #e3ece5;
-  --gold: #c6a061;
+  --surface-soft: #edece5;
+  --ink: #29332d;
+  --muted: #646e65;
+  --line: #d9ddd5;
+  --line-strong: #bcc8be;
+  --accent: #275548;
+  --accent-strong: #123d31;
+  --accent-soft: #e4ece5;
+  --nav-bg: #ecebe5;
+  --nav-active-bg: #dde7df;
+  --gold: #b19562;
   --green: var(--accent);
   --green-soft: var(--accent-soft);
-  --coral: #b76450;
+  --coral: #9b5d46;
   --danger: #a4473b;
   --radius: 12px;
   --page-width: 1240px;
   --serif: var(--font-display);
-  --shadow-soft: 0 18px 48px rgba(37, 59, 52, .08);
-  --shadow-pop: 0 26px 72px rgba(37, 59, 52, .14);
+  --shadow-soft: 0 18px 48px rgba(82, 72, 55, .07);
+  --shadow-pop: 0 26px 72px rgba(82, 72, 55, .12);
 }
 
 * {
@@ -166,9 +168,9 @@ img {
   align-items: center;
   border-bottom: 1px solid var(--line);
   padding: 0 max(24px, calc((100vw - var(--page-width)) / 2));
-  background: color-mix(in srgb, var(--surface) 95%, transparent);
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
   backdrop-filter: blur(18px);
-  box-shadow: 0 10px 28px rgba(37, 59, 52, .04);
+  box-shadow: 0 6px 20px rgba(82, 72, 55, .035);
 }
 
 .app-pill-nav {
@@ -208,9 +210,9 @@ img {
 .profile-button:hover,
 .profile-button.active {
   border-color: var(--line-strong);
-  background: var(--surface);
+  background: var(--surface-soft);
   color: var(--accent-strong);
-  box-shadow: 0 6px 16px rgba(37, 59, 52, .06);
+  box-shadow: 0 4px 12px rgba(82, 72, 55, .05);
 }
 
 .utility-button:disabled {
@@ -248,6 +250,13 @@ img {
   border-radius: 999px;
   padding: 0 12px;
   font-size: 12px;
+}
+
+.profile-button span {
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .header-panel {
@@ -561,6 +570,22 @@ img {
   to { transform: rotate(360deg); }
 }
 
+@media (max-width: 1100px) {
+  .app-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+  }
+
+  .app-pill-nav {
+    grid-column: 1;
+    justify-self: start;
+  }
+
+  .header-actions {
+    grid-column: 2;
+  }
+}
+
 @media (max-width: 920px) {
   .app-header {
     padding: 0 20px;
@@ -577,7 +602,7 @@ img {
   }
 }
 
-@media (max-width: 680px) {
+@media (max-width: 860px) {
   .app-header {
     grid-template-columns: minmax(0, 1fr);
     height: 126px;
@@ -612,7 +637,9 @@ img {
   .app-main {
     min-height: calc(100dvh - 126px);
   }
+}
 
+@media (max-width: 680px) {
   .page-wrap {
     width: min(calc(100% - 32px), var(--page-width));
     padding: 36px 0 60px;

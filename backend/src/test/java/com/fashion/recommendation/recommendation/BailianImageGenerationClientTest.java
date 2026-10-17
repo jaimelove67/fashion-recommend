@@ -18,13 +18,21 @@ import com.fashion.recommendation.wardrobe.WardrobeItem;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Base64;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.zip.CRC32;
+import java.util.zip.DeflaterOutputStream;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.http.MediaType;
@@ -36,6 +44,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 
 class BailianImageGenerationClientTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -298,6 +307,156 @@ class BailianImageGenerationClientTest {
         assertTrue(result.succeeded());
         assertEquals("configured-model", result.model());
         server.verify();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"2048, 240, 2048, 240", "2049, 2049, 1025, 1025", "8000, 8000, 2000, 2000", "8000, 1000, 2000, 250"})
+    void boundsLargePersonalPhotosBeforeSendingToTheProvider(
+            int width, int height, int expectedWidth, int expectedHeight) throws Exception {
+        RestClient.Builder builder = RestClient.builder().baseUrl("http://aliyun.test");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        var client = imageClient(builder.build());
+        server.expect(requestTo("http://aliyun.test/generate")).andExpect(request -> {
+            var body = (org.springframework.mock.http.client.MockClientHttpRequest) request;
+            String uri = objectMapper.readTree(body.getBodyAsString())
+                    .path("input").path("messages").get(0).path("content").get(1).path("image").asText();
+            BufferedImage image = ImageIO.read(new ByteArrayInputStream(
+                    Base64.getDecoder().decode(uri.substring(uri.indexOf(',') + 1))));
+            assertEquals(expectedWidth, image.getWidth());
+            assertEquals(expectedHeight, image.getHeight());
+            assertTrue(Math.min(image.getWidth(), image.getHeight()) >= 240);
+            assertTrue(Math.max(image.getWidth(), image.getHeight()) <= 2048);
+            assertFalse(image.getColorModel().hasAlpha());
+        }).andRespond(withSuccess(successfulImageResponse(), MediaType.APPLICATION_JSON));
+
+        assertTrue(client.generate("FEMALE", "通勤", "杭州", 24.0, List.of(),
+                new StoredImageData(solidPng(width, height), "image/png")).succeeded());
+
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"8001, 240", "8000, 1"})
+    void rejectsPhotosThatExceedTheHeaderOrNormalizedDimensionLimits(int width, int height) throws Exception {
+        RestClient.Builder builder = RestClient.builder().baseUrl("http://aliyun.test");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        var result = imageClient(builder.build()).generate("MALE", "通勤", "杭州", 24.0, List.of(),
+                new StoredImageData(solidPng(width, height), "image/png"));
+
+        assertEquals("FAILED", result.status());
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void rejectsConcurrentGenerationUntilSynchronousOrPolledWorkCompletes(boolean poll) throws Exception {
+        RestClient.Builder builder = RestClient.builder().baseUrl("http://aliyun.test");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        var client = imageClient(builder.build());
+        CountDownLatch providerEntered = new CountDownLatch(1);
+        CountDownLatch finishProvider = new CountDownLatch(1);
+        var blockingResponse = (org.springframework.test.web.client.ResponseCreator) request -> {
+            providerEntered.countDown();
+            try {
+                if (!finishProvider.await(5, TimeUnit.SECONDS)) {
+                    throw new IOException("Timed out waiting for the concurrent request");
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IOException(exception);
+            }
+            return withSuccess(successfulImageResponse(), MediaType.APPLICATION_JSON).createResponse(request);
+        };
+        var generation = server.expect(requestTo("http://aliyun.test/generate"));
+        if (poll) {
+            generation.andRespond(withSuccess("{\"output\":{\"task_id\":\"task-1\"}}", MediaType.APPLICATION_JSON));
+            server.expect(requestTo("http://aliyun.test/tasks/task-1")).andRespond(blockingResponse);
+        } else {
+            generation.andRespond(blockingResponse);
+        }
+        server.expect(requestTo("http://aliyun.test/generate"))
+                .andRespond(withSuccess(successfulImageResponse(), MediaType.APPLICATION_JSON));
+
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> client.generate("MALE", "通勤", "杭州", 24.0, List.of()));
+            assertTrue(providerEntered.await(5, TimeUnit.SECONDS));
+            var busy = executor.submit(() -> client.generate("FEMALE", "通勤", "杭州", 24.0, List.of()))
+                    .get(1, TimeUnit.SECONDS);
+            assertEquals("FAILED", busy.status());
+            assertEquals("穿搭效果图生成服务繁忙，请稍后重试。", busy.message());
+            finishProvider.countDown();
+            assertTrue(first.get(5, TimeUnit.SECONDS).succeeded());
+            assertTrue(client.generate("FEMALE", "通勤", "杭州", 24.0, List.of()).succeeded());
+        } finally {
+            finishProvider.countDown();
+            executor.shutdownNow();
+        }
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void releasesTheGenerationPermitAfterImageOrProviderFailure(boolean providerFailure) throws Exception {
+        RestClient.Builder builder = RestClient.builder().baseUrl("http://aliyun.test");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        var client = imageClient(builder.build());
+        if (providerFailure) {
+            server.expect(requestTo("http://aliyun.test/generate")).andRespond(withServerError());
+        }
+        server.expect(requestTo("http://aliyun.test/generate"))
+                .andRespond(withSuccess(successfulImageResponse(), MediaType.APPLICATION_JSON));
+
+        var failed = client.generate("MALE", "通勤", "杭州", 24.0, List.of(),
+                providerFailure ? null : new StoredImageData(new byte[] {1, 2, 3}, "image/png"));
+        assertEquals("FAILED", failed.status());
+        assertTrue(client.generate("FEMALE", "通勤", "杭州", 24.0, List.of()).succeeded());
+        server.verify();
+    }
+
+    private BailianImageGenerationClient imageClient(RestClient restClient) {
+        return new BailianImageGenerationClient(restClient, objectMapper, new DefaultResourceLoader(),
+                mock(ImageStorage.class), "/generate", "/tasks", "secret-key", "wan2.6-image", true,
+                "classpath:reference_photo/model-male.png", "classpath:reference_photo/model-female.png",
+                "", Duration.ofSeconds(2), Duration.ofMillis(1));
+    }
+
+    private static String successfulImageResponse() {
+        return "{\"output\":{\"task_status\":\"SUCCEEDED\",\"choices\":[{\"message\":{\"content\":[{\"image\":\"https://result.test/look.png\"}]}}]}}";
+    }
+
+    // Stream PNG rows so even the 8K regression fixture needs no full-size pixel buffer.
+    private static byte[] solidPng(int width, int height) throws IOException {
+        var output = new ByteArrayOutputStream();
+        var png = new DataOutputStream(output);
+        png.write(new byte[] {(byte) 137, 80, 78, 71, 13, 10, 26, 10});
+        var header = new ByteArrayOutputStream();
+        var headerData = new DataOutputStream(header);
+        headerData.writeInt(width);
+        headerData.writeInt(height);
+        headerData.write(new byte[] {8, 2, 0, 0, 0});
+        pngChunk(png, "IHDR", header.toByteArray());
+        var compressed = new ByteArrayOutputStream();
+        try (var deflater = new DeflaterOutputStream(compressed)) {
+            byte[] row = new byte[1 + width * 3];
+            for (int y = 0; y < height; y++) {
+                deflater.write(row);
+            }
+        }
+        pngChunk(png, "IDAT", compressed.toByteArray());
+        pngChunk(png, "IEND", new byte[0]);
+        return output.toByteArray();
+    }
+
+    private static void pngChunk(DataOutputStream output, String type, byte[] content) throws IOException {
+        byte[] typeBytes = type.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        var crc = new CRC32();
+        crc.update(typeBytes);
+        crc.update(content);
+        output.writeInt(content.length);
+        output.write(typeBytes);
+        output.write(content);
+        output.writeInt((int) crc.getValue());
     }
 
     private static byte[] imageBytes(int width, int height, int type, String format) throws Exception {

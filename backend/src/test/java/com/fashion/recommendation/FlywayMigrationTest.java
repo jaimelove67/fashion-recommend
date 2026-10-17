@@ -35,8 +35,8 @@ class FlywayMigrationTest {
 
         MigrateResult firstMigration = flyway.migrate();
 
-        assertEquals(12, firstMigration.migrationsExecuted);
-        assertEquals("12", flyway.info().current().getVersion().getVersion());
+        assertEquals(14, firstMigration.migrationsExecuted);
+        assertEquals("14", flyway.info().current().getVersion().getVersion());
         assertEquals("旧衣物", jdbcTemplate.queryForObject(
                 "SELECT name FROM wardrobe_items WHERE id = 41", String.class));
         assertEquals("MANUAL", jdbcTemplate.queryForObject(
@@ -46,6 +46,7 @@ class FlywayMigrationTest {
         assertTableExists(jdbcTemplate, "admin_audit_logs");
         assertIndexExists(jdbcTemplate, "idx_admin_audit_logs_created_id");
         assertColumnExists(jdbcTemplate, "trend_contents", "moderation_status");
+        assertColumnExists(jdbcTemplate, "trend_contents", "reviewed_content_hash");
         assertColumnExists(jdbcTemplate, "trend_contents", "ai_decision");
         assertIndexExists(jdbcTemplate, "idx_trend_moderation_queue");
         assertColumnExists(jdbcTemplate, "style_profiles", "gender");
@@ -58,6 +59,7 @@ class FlywayMigrationTest {
         assertColumnExists(jdbcTemplate, "style_profiles", "preferences_confirmed");
         assertTableExists(jdbcTemplate, "admin_ai_model_settings");
         assertTableExists(jdbcTemplate, "try_on_favorites");
+        assertTableExists(jdbcTemplate, "outfit_techniques");
 
         int appliedBeforeRestart = flyway.info().applied().length;
         MigrateResult secondMigration = flyway.migrate();
@@ -83,7 +85,7 @@ class FlywayMigrationTest {
 
         MigrateResult migration = flyway.migrate();
 
-        assertEquals("12", flyway.info().current().getVersion().getVersion());
+        assertEquals("14", flyway.info().current().getVersion().getVersion());
         assertEquals("旧场合推荐", jdbcTemplate.queryForObject(
                 "SELECT summary FROM recommendations WHERE id = 91", String.class));
         assertEquals("development-rule-v1", jdbcTemplate.queryForObject(

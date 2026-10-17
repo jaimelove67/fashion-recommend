@@ -1,5 +1,6 @@
 <script setup>
 import RecommendationFeedback from '../components/RecommendationFeedback.vue'
+import FavoritesView from './FavoritesView.vue'
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { formatRecommendationReason, formatRecommendationTitle } from '../utils/recommendationReason'
 import {
@@ -7,6 +8,7 @@ import {
   ChevronDown,
   Clock3,
   CloudSun,
+  Heart,
   History,
   LoaderCircle,
   RefreshCw,
@@ -20,6 +22,11 @@ import {
 const props = defineProps({
   app: { type: Object, required: true }
 })
+const emit = defineEmits(['open-try-on'])
+const showFavorites = computed(() => props.app.state.activeView === 'favorites')
+const sectionLoading = computed(() => showFavorites.value
+  ? props.app.state.tryOnFavoritesLoading
+  : props.app.state.historyLoading)
 
 const query = ref(props.app.state.historyQuery || '')
 const activeFilter = ref(props.app.state.historyFilter || 'all')
@@ -108,6 +115,11 @@ function clearFilters() {
   query.value = ''
   activeFilter.value = 'all'
 }
+
+function refreshCurrentSection() {
+  if (showFavorites.value) return props.app.loadTryOnFavorites()
+  return props.app.loadHistory()
+}
 </script>
 
 <template>
@@ -116,16 +128,27 @@ function clearFilters() {
       <div>
         <p class="eyebrow"><History :size="15" aria-hidden="true" />搭配记录</p>
         <h1>搭配记录</h1>
-        <p>查看过往搭配方案，按场合、城市、收藏与评分状态检索记录。</p>
+        <p>查看过往搭配方案与喜欢的试穿单品，随时回顾搭配或再次试穿。</p>
       </div>
-      <button class="refresh-button" type="button" :disabled="app.state.historyLoading" @click="app.loadHistory">
-        <LoaderCircle v-if="app.state.historyLoading" class="spinning" :size="17" />
+      <button class="refresh-button" type="button" :disabled="sectionLoading" @click="refreshCurrentSection">
+        <LoaderCircle v-if="sectionLoading" class="spinning" :size="17" />
         <RefreshCw v-else :size="17" aria-hidden="true" />
-        刷新记录
+        {{ showFavorites ? '刷新收藏' : '刷新记录' }}
       </button>
     </header>
 
-    <section class="stats-band" aria-label="历史记录统计">
+    <div class="history-tabs" role="group" aria-label="切换穿搭历史内容">
+      <button type="button" :aria-pressed="!showFavorites" @click="app.selectView('history')">
+        <History :size="17" aria-hidden="true" />穿搭历史
+      </button>
+      <button type="button" :aria-pressed="showFavorites" @click="app.selectView('favorites')">
+        <Heart :size="17" aria-hidden="true" />喜欢的穿搭
+      </button>
+    </div>
+
+    <FavoritesView v-show="showFavorites" :app="app" @open-try-on="emit('open-try-on', $event)" />
+
+    <section v-show="!showFavorites" class="stats-band" aria-label="历史记录统计">
       <article>
         <span>搭配总数</span>
         <strong>{{ app.recommendationStats.total }}</strong>
@@ -148,7 +171,7 @@ function clearFilters() {
       </article>
     </section>
 
-    <section class="trend-section" aria-labelledby="history-trend-title">
+    <section v-show="!showFavorites" class="trend-section" aria-labelledby="history-trend-title">
       <header class="section-heading">
         <div>
           <p class="section-kicker">近 7 天</p>
@@ -195,7 +218,7 @@ function clearFilters() {
       <p class="chart-source">按已加载记录的生成日期统计，收藏状态以当前状态为准。</p>
     </section>
 
-    <section class="records-section" aria-labelledby="records-title">
+    <section v-show="!showFavorites" class="records-section" aria-labelledby="records-title">
       <header class="records-header">
         <div>
           <p class="section-kicker">全部</p>
@@ -359,6 +382,23 @@ function clearFilters() {
 }
 
 .page-hero > div > p:last-child { margin: 19px 0 0; color: var(--muted); font-size: 14px; line-height: 1.8; }
+.history-tabs { display: flex; gap: 8px; margin-bottom: 28px; border-bottom: 1px solid var(--line); }
+.history-tabs button {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 12px 18px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 14px;
+  font-weight: 600;
+}
+.history-tabs button:hover { color: var(--accent-strong); }
+.history-tabs button[aria-pressed="true"] { border-bottom-color: var(--accent-strong); color: var(--accent-strong); }
 .refresh-button,
 .save-button,
 .empty-state > button {
@@ -621,9 +661,11 @@ function clearFilters() {
 }
 
 @media (max-width: 680px) {
+  .history-view { width: calc(100% - 32px); }
   .page-hero { flex-direction: column; align-items: stretch; gap: 25px; padding: 42px 0 30px; }
   .page-hero h1 { font-size: 36px; }
   .refresh-button { width: 100%; }
+  .history-tabs button { flex: 1; padding-inline: 10px; }
   .stats-band { grid-template-columns: 1fr; }
   .stats-band article { border-right: 0; border-bottom: 1px solid var(--line); padding: 20px; }
   .stats-band article:last-child { border-bottom: 0; }

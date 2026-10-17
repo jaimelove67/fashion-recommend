@@ -19,6 +19,8 @@ import {
   Settings2,
   UsersRound
 } from '@lucide/vue'
+import { trendDisplayImageUrl } from '../utils/trendImage.js'
+import { trendPlatformName } from '../utils/trendSources.js'
 
 const props = defineProps({
   app: { type: Object, required: true }
@@ -28,6 +30,7 @@ const sections = [
   { id: 'overview', label: '运营总览', description: '平台数据', icon: Activity },
   { id: 'users', label: '账号与权限', description: '账户状态管理', icon: UsersRound },
   { id: 'feedback', label: '反馈审核', description: '用户反馈处理', icon: MessageSquareText },
+  { id: 'trendReviews', label: '穿搭图片复核', description: '鉴赏内容与全部配图', icon: ShieldCheck },
   { id: 'aiModels', label: '模型配置', description: 'AI 能力与密钥', icon: Settings2 },
   { id: 'audit', label: '操作日志', description: '管理操作审计', icon: FileClock }
 ]
@@ -47,6 +50,55 @@ const feedback = computed(() => props.app.state.adminFeedback)
 const auditLogs = computed(() => props.app.state.adminAuditLogs)
 const aiModels = computed(() => props.app.state.adminAiModels)
 const aiModelDrafts = reactive({})
+const trendReviewDrafts = reactive({})
+function safeReviewUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return ''
+  try {
+    const url = new URL(value, window.location.origin)
+    return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : ''
+  } catch {
+    return ''
+  }
+}
+const trendReviews = computed(() => (props.app.state.adminTrendReviews || []).map(candidate => {
+  const item = candidate.item
+  const urls = [...new Set([item.imageUrl, ...(item.evidence?.images || []), item.evidence?.fullBodyImageUrl]
+    .filter(url => typeof url === 'string' && url.trim()))]
+  return { ...candidate, sourceUrl: safeReviewUrl(item.sourceUrl), images: urls.map((url, index) => ({
+    key: url, url: safeReviewUrl(url), displayUrl: safeReviewUrl(url) ? trendDisplayImageUrl(safeReviewUrl(url)) : '',
+    label: url === item.imageUrl ? '封面' : `配图 ${index + 1}`
+  })) }
+}))
+watch(trendReviews, (candidates) => {
+  const currentIds = new Set(candidates.map(candidate => candidate.item.id))
+  Object.keys(trendReviewDrafts).forEach(id => { if (!currentIds.has(id)) delete trendReviewDrafts[id] })
+  candidates.forEach(candidate => {
+    const id = candidate.item.id
+    if (trendReviewDrafts[id]?.fingerprint !== candidate.fingerprint) {
+      trendReviewDrafts[id] = { fingerprint: candidate.fingerprint, note: '', confirmed: false, loaded: {}, failed: {} }
+    }
+  })
+}, { immediate: true })
+function allReviewImagesLoaded(candidate) {
+  const draft = trendReviewDrafts[candidate.item.id]
+  return candidate.images.length > 0 && candidate.images.every(image => image.url && draft?.loaded[image.key] && !draft.failed[image.key])
+}
+function markReviewImage(candidate, image, loaded) {
+  const draft = trendReviewDrafts[candidate.item.id]
+  if (!draft || draft.fingerprint !== candidate.fingerprint) return
+  draft.loaded[image.key] = loaded
+  draft.failed[image.key] = !loaded
+  if (!loaded) draft.confirmed = false
+}
+function canSubmitTrendReview(candidate, approved) {
+  const draft = trendReviewDrafts[candidate.item.id]
+  return Boolean(draft?.note.trim()) && !props.app.state.adminTrendReviewAction && !props.app.state.adminTrendReviewsLoading
+    && (!approved || (draft.confirmed && allReviewImagesLoaded(candidate)))
+}
+async function submitTrendReview(candidate, approved) {
+  if (!canSubmitTrendReview(candidate, approved)) return
+  await props.app.reviewAdminTrend(candidate, approved, trendReviewDrafts[candidate.item.id].note)
+}
 const overviewChartsRef = ref(null)
 const overviewChartsVisible = ref(false)
 const overviewChartsKey = ref(0)
@@ -57,6 +109,8 @@ const anyAdminLoading = computed(() => props.app.state.adminOverviewLoading
   || props.app.state.adminFeedbackLoading
   || props.app.state.adminAuditLoading
   || props.app.state.adminAiModelsLoading
+  || props.app.state.adminTrendReviewsLoading
+  || Boolean(props.app.state.adminTrendReviewAction)
   || Boolean(props.app.state.adminAiModelAction))
 const missingAiEncryptionKey = computed(() => aiModels.value.some((model) => !model.encryptionAvailable))
 
@@ -235,6 +289,7 @@ async function selectSection(section) {
   if (section === 'overview') props.app.loadAdminOverview()
   if (section === 'users') props.app.loadAdminUsers({ page: 0 })
   if (section === 'feedback') props.app.loadAdminFeedback({ page: 0 })
+  if (section === 'trendReviews') props.app.loadAdminTrendReviews()
   if (section === 'aiModels') {
     const models = await props.app.loadAdminAiModels()
     if (models) models.forEach(syncAiModelDraft)
@@ -247,6 +302,7 @@ async function refreshWorkspace() {
   props.app.loadAdminUsers({ page: props.app.state.adminUsersPage })
   props.app.loadAdminFeedback({ page: props.app.state.adminFeedbackPage })
   props.app.loadAdminAuditLogs({ page: props.app.state.adminAuditPage })
+  if (activeSection.value === 'trendReviews') props.app.loadAdminTrendReviews()
   const models = await props.app.loadAdminAiModels()
   if (models) models.forEach(syncAiModelDraft)
 }
@@ -394,6 +450,8 @@ function auditActionLabel(action) {
   if (action === 'FEEDBACK_STATUS_UPDATE') return '反馈状态处理'
   if (action === 'AI_MODEL_CONFIG_UPDATE') return 'AI 模型配置调整'
   if (action === 'AI_MODEL_CONFIG_RESET') return '恢复 AI 环境配置'
+  if (action === 'TREND_CONTENT_REVIEW') return '穿搭图片复核'
+  if (action === 'TREND_REFRESH') return '刷新穿搭数据源'
   return action || '未知操作'
 }
 
@@ -460,12 +518,12 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
   <section v-else class="admin-workspace" aria-labelledby="admin-title">
     <header class="admin-workspace-header">
       <div class="admin-title-block">
-        <button class="admin-back-button" type="button" @click="app.selectView('home')">
+        <button class="admin-back-button" type="button" @click="app.selectView('recommend')">
           <ArrowLeft :size="15" aria-hidden="true" />返回用户端
         </button>
         <p class="admin-kicker"><ShieldCheck :size="14" aria-hidden="true" />管理工作台</p>
         <h1 id="admin-title">管理工作台</h1>
-        <p class="admin-title-copy">查看平台运行数据，管理账户状态、用户反馈与 AI 模型配置。</p>
+        <p class="admin-title-copy">查看平台运行数据，管理账户状态、穿搭内容、用户反馈与 AI 模型配置。</p>
       </div>
       <div class="admin-identity-block">
         <span>当前管理员</span>
@@ -570,7 +628,7 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
               </div>
               <div class="mono-chart-legend" aria-label="账号状态图例"><span v-for="segment in accountComposition" :key="segment.label"><i :style="{ backgroundColor: segment.color }"></i>{{ segment.label }} {{ segment.value }}（{{ segment.percent }}%）</span></div>
               <div class="boundary-note"><ShieldCheck :size="15" aria-hidden="true" /><span>衣物识别待人工确认：{{ overview.manualReviewItems }} 件</span></div>
-              <p class="admin-caption">后台提供账户、反馈、AI 配置与操作记录管理；穿搭内容可在趋势页面查看。</p>
+              <p class="admin-caption">后台提供账户、穿搭图片复核、反馈、AI 配置与操作记录管理。</p>
               <p class="mono-chart-source">账号状态</p>
             </section>
 
@@ -647,6 +705,48 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
             </div>
             <footer class="admin-pagination"><span>第 {{ app.state.adminFeedbackPage + 1 }} 页</span><div><button type="button" :disabled="app.state.adminFeedbackPage === 0 || app.state.adminFeedbackLoading" @click="previousFeedbackPage"><ChevronLeft :size="14" />上一页</button><button type="button" :disabled="!app.state.adminFeedbackHasNext || app.state.adminFeedbackLoading" @click="nextFeedbackPage">下一页<ChevronRight :size="14" /></button></div></footer>
           </section>
+        </section>
+
+        <section v-else-if="activeSection === 'trendReviews'" class="admin-section" aria-labelledby="trend-reviews-title">
+          <header class="admin-section-heading">
+            <div><span>鉴赏</span><h2 id="trend-reviews-title">穿搭图片复核</h2></div>
+            <p>逐一检查封面、全部配图与文字。通过后，符合每日分类和时效条件的作品才会进入穿搭鉴赏。</p>
+          </header>
+          <div class="trend-review-toolbar">
+            <span>每次显示最新 20 条待复核内容，处理后可继续加载。</span>
+            <button class="toolbar-button" type="button" :disabled="app.state.adminTrendReviewsLoading || Boolean(app.state.adminTrendReviewAction)" @click="app.loadAdminTrendReviews()">刷新待复核内容</button>
+          </div>
+          <p v-if="app.state.adminTrendReviewError" class="trend-review-error" role="alert">{{ app.state.adminTrendReviewError }}</p>
+          <div v-if="app.state.adminTrendReviewsLoading && !trendReviews.length" class="admin-loading" role="status"><LoaderCircle class="spinning" :size="18" />正在加载待复核内容…</div>
+          <p v-else-if="!trendReviews.length && !app.state.adminTrendReviewError" class="admin-empty">当前没有待复核的穿搭内容。</p>
+          <div class="trend-review-list">
+            <article v-for="candidate in trendReviews" :key="`${candidate.item.id}:${candidate.fingerprint}`" class="trend-review-card">
+              <header class="trend-review-heading">
+                <div><p>{{ trendPlatformName(candidate.item.platform) }} · {{ candidate.item.evidence?.author || '作者未提供' }} · {{ formatDate(candidate.item.publishedAt) }}</p><h3>{{ candidate.item.title }}</h3></div>
+                <a v-if="candidate.sourceUrl" :href="candidate.sourceUrl" target="_blank" rel="noopener noreferrer">查看原帖</a>
+              </header>
+              <p v-if="candidate.item.summary" class="trend-review-summary">{{ candidate.item.summary }}</p>
+              <ul v-if="candidate.item.topicTags?.length" class="trend-review-tags" aria-label="原帖标签"><li v-for="(tag, index) in candidate.item.topicTags" :key="index">{{ tag }}</li></ul>
+              <div v-if="candidate.images.length" class="trend-review-images" aria-label="待复核的封面与全部配图">
+                <figure v-for="image in candidate.images" :key="image.key">
+                  <a v-if="image.url" :href="image.url" target="_blank" rel="noopener noreferrer" :aria-label="`查看${image.label}原图`">
+                    <img :src="image.displayUrl" :alt="`${image.label}：${candidate.item.title}`" referrerpolicy="no-referrer" @load="markReviewImage(candidate, image, true)" @error="markReviewImage(candidate, image, false)" />
+                  </a>
+                  <figcaption>{{ image.label }}<span v-if="!image.url || trendReviewDrafts[candidate.item.id]?.failed[image.key]"> · 图片不可用，无法通过复核</span><span v-else-if="!trendReviewDrafts[candidate.item.id]?.loaded[image.key]"> · 加载中</span></figcaption>
+                </figure>
+              </div>
+              <p v-else class="trend-review-error">没有可查看的图片，无法通过复核。</p>
+              <form v-if="trendReviewDrafts[candidate.item.id]" class="trend-review-form" @submit.prevent="submitTrendReview(candidate, true)">
+                <label>复核说明<textarea v-model="trendReviewDrafts[candidate.item.id].note" maxlength="300" required rows="2" placeholder="说明服装展示、配图与文字是否符合收录范围；拒绝时说明原因。"></textarea></label>
+                <label class="trend-review-confirm"><input v-model="trendReviewDrafts[candidate.item.id].confirmed" type="checkbox" :disabled="!allReviewImagesLoaded(candidate)" />我已逐一检查封面、全部配图与文字，确认属于可展示的穿搭作品。</label>
+                <div class="trend-review-actions">
+                  <button class="toolbar-button toolbar-primary" type="submit" :disabled="!canSubmitTrendReview(candidate, true)">通过复核</button>
+                  <button class="toolbar-button" type="button" :disabled="!canSubmitTrendReview(candidate, false)" @click="submitTrendReview(candidate, false)">拒绝收录</button>
+                  <span v-if="app.state.adminTrendReviewAction === candidate.item.id" role="status">正在提交复核…</span>
+                </div>
+              </form>
+            </article>
+          </div>
         </section>
 
         <section v-else-if="activeSection === 'aiModels'" class="admin-section" aria-labelledby="ai-models-title">
@@ -832,7 +932,7 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
 .overview-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(290px, .92fr); gap: 13px; }
 .overview-lead { min-height: 285px; border-radius: 16px; padding: 25px; color: var(--surface); background: var(--accent-strong); box-shadow: 0 22px 42px rgba(11,48,40,.15); }
 .overview-lead-top { display: flex; align-items: center; justify-content: space-between; color: rgba(252,250,245,.72); font-size: 10px; }
-.overview-lead-top svg { color: #b9d5a9; }
+.overview-lead-top svg { color: var(--nav-active-bg); }
 .overview-lead-number { display: block; margin-top: 31px; font-family: var(--font-display); font-size: clamp(64px, 8vw, 92px); font-weight: 400; letter-spacing: -.08em; line-height: .8; }
 .overview-lead p { max-width: 330px; margin: 18px 0 28px; color: rgba(252,250,245,.72); font-size: 11px; line-height: 1.7; }
 .overview-lead-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; border-top: 1px solid rgba(252,250,245,.22); padding-top: 14px; }
@@ -946,6 +1046,30 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
 .feedback-actions .resolve-action { border-color: var(--accent-strong); color: var(--accent-strong); }
 .feedback-actions .resolve-action:hover:not(:disabled) { color: var(--surface); background: var(--accent-strong); }
 .moderation-toolbar .moderation-search { min-width: 220px; }
+.trend-review-toolbar, .trend-review-heading, .trend-review-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.trend-review-toolbar { margin-bottom:20px; color:var(--muted); font-size:12px; line-height:1.7; }
+.trend-review-list { display:grid; gap:24px; }
+.trend-review-card { min-width:0; border:1px solid var(--line); border-radius:12px; padding:20px; }
+.trend-review-heading { align-items:flex-start; }
+.trend-review-heading>div { flex:1 1 240px; min-width:0; }
+.trend-review-heading p { margin:0 0 8px; color:var(--muted); font-size:12px; line-height:1.7; }
+.trend-review-heading h3 { margin:0; font-size:18px; line-height:1.6; overflow-wrap:anywhere; }
+.trend-review-heading>a { color:var(--accent-strong); font-size:12px; line-height:1.8; text-decoration:underline; }
+.trend-review-summary { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; line-height:1.8; }
+.trend-review-tags { display:flex; flex-wrap:wrap; gap:6px; padding:0; list-style:none; }
+.trend-review-tags li { max-width:100%; border-radius:5px; padding:4px 7px; background:var(--surface-soft); color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
+.trend-review-images { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); gap:16px; margin:20px 0; }
+.trend-review-images figure { min-width:0; margin:0; }
+.trend-review-images a { display:block; background:var(--surface-soft); }
+.trend-review-images img { display:block; width:100%; height:320px; object-fit:contain; }
+.trend-review-images figcaption { margin-top:8px; font-size:12px; line-height:1.7; }
+.trend-review-images figcaption span, .trend-review-error { color:var(--coral); }
+.trend-review-error { font-size:13px; line-height:1.8; }
+.trend-review-form { display:grid; gap:14px; border-top:1px solid var(--line); padding-top:18px; font-size:13px; line-height:1.8; }
+.trend-review-form textarea { display:block; width:100%; box-sizing:border-box; margin-top:8px; border:1px solid var(--line-strong); border-radius:8px; padding:10px; background:var(--surface); color:var(--ink); font:inherit; resize:vertical; }
+.trend-review-confirm { display:flex; align-items:flex-start; gap:8px; }
+.trend-review-confirm input { flex:none; margin-top:5px; }
+.trend-review-actions { justify-content:flex-start; }
 .moderation-run { display: flex; align-items: flex-start; gap: 8px; margin: 14px 0 1px; border-bottom: 1px solid var(--line); padding: 0 0 13px; color: var(--accent-strong); font-size: 10px; line-height: 1.6; }
 .moderation-run svg { flex: 0 0 auto; margin-top: 1px; }
 .moderation-table { min-width: 1080px; }

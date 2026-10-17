@@ -17,8 +17,8 @@ function uniqueUsername(label, testInfo) {
 async function expectCurrentAuthCopy(page) {
   const heading = page.locator('.fish-auth-login h1')
   if (!(await heading.isVisible())) {
-    await expect(page.getByRole('button', { name: '直接登录', exact: true })).toBeVisible()
-    await page.getByRole('button', { name: '直接登录', exact: true }).click()
+    await expect(page.getByRole('button', { name: '登录 / 注册', exact: true })).toBeEnabled()
+    await page.getByRole('button', { name: '登录 / 注册', exact: true }).click()
   }
 
   await expect(heading).toHaveText(/^(登录知己|创建知己账户)$/)
@@ -39,15 +39,16 @@ async function registerThroughUi(page, username, onLoginReady) {
   await page.locator('input[name="confirmPassword"]').fill(password)
   await page.getByRole('button', { name: '注册账户', exact: true }).click()
   await expect(page.getByRole('button', { name: '退出登录' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '基于个人衣橱的穿搭推荐。' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '完善衣橱，开始穿搭推荐。' })).toBeVisible()
 }
 
-test('uses the double-fish login experience', async ({ page }) => {
+test('opens the double-fish login experience from the guest home', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/')
-  await expect(page.getByRole('button', { name: '点击图标，进入知己', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '先找一点穿搭灵感', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '登录 / 注册', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: '登录 / 注册', exact: true }).click()
   await expect(page.getByText('知己 · 账户服务', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '直接登录', exact: true }).click()
   await expect(page.getByRole('heading', { name: '登录知己', exact: true })).toBeVisible()
 
   const layout = await page.evaluate(() => {
@@ -104,7 +105,7 @@ test('logs in through the double-fish form and restores the session', async ({ p
   await page.getByRole('button', { name: '登录知己', exact: true }).click()
 
   await expect(page.getByRole('button', { name: '退出登录' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '基于个人衣橱的穿搭推荐。' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '完善衣橱，开始穿搭推荐。' })).toBeVisible()
   const authenticated = await context.request.get('/api/v1/auth/me')
   await expect(await authenticated.json()).toMatchObject({ code: 0, data: { username } })
 })
@@ -312,7 +313,7 @@ test('rejects private APIs without authentication and preserves then clears the 
   await page.reload()
 
   await expect(page.getByRole('button', { name: '退出登录' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '基于个人衣橱的穿搭推荐。' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '完善衣橱，开始穿搭推荐。' })).toBeVisible()
   const authenticated = await context.request.get('/api/v1/auth/me')
   expect(authenticated.ok()).toBeTruthy()
   await expect(await authenticated.json()).toMatchObject({ code: 0, data: { username } })

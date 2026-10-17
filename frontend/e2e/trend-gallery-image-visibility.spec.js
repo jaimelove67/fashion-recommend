@@ -45,7 +45,7 @@ test('keeps a verified trend image visible when the thumbnail URL fails', async 
 
   await page.goto('/#trend')
 
-  const gallery = page.getByRole('region', { name: '趋势穿搭画廊' })
+  const gallery = page.getByRole('region', { name: '穿搭鉴赏画廊' })
   await expect(gallery.locator('.gallery-card')).toHaveCount(1)
   await expect(gallery.locator('.gallery-card-image img')).toHaveAttribute('src', largeImageUrl)
   await expect.poll(() => gallery.locator('.gallery-card-image img').evaluate((image) => image.naturalWidth)).toBeGreaterThan(0)

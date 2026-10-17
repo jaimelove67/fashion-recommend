@@ -141,7 +141,7 @@ pieceGuides.push(
     image: '/assets/trend-pieces/knit-cardigan.png',
     category: '上装',
     aliases: [/毛衣/i, /针织衫/i, /羊毛衫/i, /sweater\b/i, /jumper\b/i],
-    description: '趋势内容中提及的针织上衣，建议结合气温与面料厚度选择。',
+    description: '收录穿搭中提及的针织上衣，建议结合气温与面料厚度选择。',
     pairings: [
       { type: '下装', items: '直筒牛仔裤、垂感西裤或过膝半裙', reason: '用利落下装平衡针织的体积。' },
       { type: '鞋履', items: '乐福鞋、短靴或简洁运动鞋', reason: '按针织厚度和场合调整鞋型。' },
@@ -190,7 +190,7 @@ pieceGuides.push(
     image: '',
     category: '袜品',
     aliases: [/光腿神器/i, /打底袜/i, /连脚(?:款|袜)?/i, /踩脚(?:款|袜)?/i, /thermal tights?/i],
-    description: '趋势测评内容中提及的连脚或踩脚打底袜。',
+    description: '穿搭测评内容中提及的连脚或踩脚打底袜。',
     pairings: [
       { type: '下装', items: '长度合适的半裙或连衣裙', reason: '选择与袜品厚度相配的裙长和面料。' },
       { type: '鞋履', items: '包脚短靴、乐福鞋或简洁单鞋', reason: '确认袜脚与鞋内空间合适，避免挤压。' },

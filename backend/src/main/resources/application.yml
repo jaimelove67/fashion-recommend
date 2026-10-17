@@ -87,6 +87,8 @@ app:
     # Daily at noon in Asia/Shanghai; source collection also runs once after startup.
     refresh-cron: ${TREND_REFRESH_CRON:0 0 12 * * *}
     initial-delay: ${TREND_INITIAL_DELAY:10000}
+    # Per-platform daily collector performs several public searches and detail reads.
+    collection-read-timeout: ${TREND_COLLECTION_READ_TIMEOUT:300s}
     endpoint: ${TREND_JSON_URL:}
     platform: ${TREND_PLATFORM:configured-feed}
     web-urls: ${TREND_WEB_URLS:}
@@ -96,6 +98,14 @@ app:
     connect-timeout: ${TREND_CONNECT_TIMEOUT:3s}
     read-timeout: ${TREND_READ_TIMEOUT:5s}
     cache-ttl: ${TREND_CACHE_TTL:15m}
+  techniques:
+    enabled: ${OUTFIT_TECHNIQUES_ENABLED:true}
+    # Check daily; the persisted publication guard permits at most one item per seven days.
+    refresh-cron: ${OUTFIT_TECHNIQUES_REFRESH_CRON:0 0 10 * * *}
+    initial-delay: ${OUTFIT_TECHNIQUES_INITIAL_DELAY:60000}
+    feeds: ${OUTFIT_TECHNIQUES_FEEDS:https://www.permanentstyle.com/category/style/feed,https://putthison.com/tag/guides/feed/}
+    article-urls: ${OUTFIT_TECHNIQUES_ARTICLE_URLS:}
+    model-read-timeout: ${OUTFIT_TECHNIQUES_MODEL_READ_TIMEOUT:60s}
   weather:
     primary-base-url: ${WEATHER_PRIMARY_BASE_URL:${WEATHER_BASE_URL:https://wttr.in}}
     fallback-geocoding-base-url: ${WEATHER_FALLBACK_GEOCODING_BASE_URL:https://geocoding-api.open-meteo.com}

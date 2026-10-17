@@ -93,6 +93,7 @@ public class TrendService {
                 List<TrendItem> items = source.fetchPublicSnapshots();
                 List<TrendItem> visibleItems = items.stream()
                         .filter(TrendService::isImagePost)
+                        .filter(item -> TrendContentPolicy.exclusionReason(item) == null)
                         .filter(item -> !TrendTopics.excludedShowOrCelebrity(item)).toList();
                 for (TrendItem item : visibleItems) repository.save(source.platform(), normalize(item, source.scoreLabel()));
                 if (visibleItems.isEmpty() && SOCIAL_SOURCES.contains(source.platform()) && !source.emptyResultIsHealthy()) {
@@ -137,6 +138,11 @@ public class TrendService {
                 noteExclusion(exclusionReasons, sourceId, "不符合展示规则（仅收录图文帖子，不含视频和纯文字）");
                 continue;
             }
+            String contentReason = TrendContentPolicy.exclusionReason(item);
+            if (contentReason != null) {
+                noteExclusion(exclusionReasons, sourceId, contentReason);
+                continue;
+            }
             if (TrendTopics.excludedShowOrCelebrity(item)) {
                 noteExclusion(exclusionReasons, sourceId, "不符合展示规则（红毯、秀场或明星内容）");
                 continue;
@@ -152,6 +158,10 @@ public class TrendService {
             TrendEvidence e = item.evidence();
             if (!hotBoardsEnabled && e != null && "board".equalsIgnoreCase(e.mediaType())) {
                 noteExclusion(exclusionReasons, sourceId, "不符合展示规则（匿名热榜默认只作为补充）");
+                continue;
+            }
+            if (period.equals("day") && (item.publishedAt().isBefore(cutoff) || item.fetchedAt().isBefore(cutoff))) {
+                noteExclusion(exclusionReasons, sourceId, "超出每日精选最近24小时的发布时间或采集窗口");
                 continue;
             }
             Long growth = repository.growth(item, cutoff);
@@ -198,7 +208,9 @@ public class TrendService {
                 .filter(entry -> !SOCIAL_SOURCES.contains(entry.getKey())).map(Map.Entry::getValue).toList();
         List<TrendItem> socialItems = roundRobin(socialGroups);
         List<TrendItem> supplementalItems = roundRobin(supplementalGroups);
-        int supplementalLimit = socialItems.isEmpty()
+        // Daily slots must consider every eligible platform before deciding a category is missing.
+        // The weekly feed retains its existing supplemental-source proportion.
+        int supplementalLimit = period.equals("day") || socialItems.isEmpty()
                 ? supplementalItems.size()
                 : Math.min(supplementalItems.size(),
                         (socialItems.size() + SOCIAL_ITEMS_PER_SUPPLEMENTAL - 1) / SOCIAL_ITEMS_PER_SUPPLEMENTAL);
@@ -210,7 +222,9 @@ public class TrendService {
                 ordered.add(socialItems.get(socialIndex++));
             if (supplementalIndex < supplementalLimit) ordered.add(supplementalItems.get(supplementalIndex++));
         }
-        List<TrendItem> filtered = ordered.stream()
+        TrendDailySelection.Result dailySelection = period.equals("day") ? TrendDailySelection.select(ordered) : null;
+        List<TrendItem> selection = dailySelection == null ? ordered : dailySelection.items();
+        List<TrendItem> filtered = selection.stream()
                 .filter(i -> platform == null || platform.isBlank() || platform.equals(i.platform()))
                 .filter(i -> topic == null || topic.isBlank() || i.title().contains(topic) || i.topicTags().stream().anyMatch(t -> t.contains(topic)))
                 .limit(50).toList();
@@ -222,40 +236,55 @@ public class TrendService {
             for (TrendSourceStatus status : storedStatuses) statusById.put(status.id(), status);
         }
         List<TrendSourceStatus> statuses = sourceStatuses(statusById, observedCounts, eligibleCounts,
-                exclusionReasons);
+                exclusionReasons, repository.pendingCounts(cutoff));
 
         // A configured demo is deliberately a last resort for the unfiltered, all-source view.
         // A real item that survives the same period rules always wins, and selecting a real source
         // must never make the local demo look like that platform.
-        if (filtered.isEmpty() && configuredDemoEnabled && isAllSourcesQuery(platform, topic)) {
+        if (ordered.isEmpty() && configuredDemoEnabled && isAllSourcesQuery(platform, topic)) {
             return configuredDemoFeed(period, statuses);
         }
 
         Instant fetched = filtered.stream().map(TrendItem::fetchedAt).max(Instant::compareTo).orElse(null);
-        return new TrendFeed("multi-source", fetched, false, filtered, "来源内评分", period, styles(filtered), statuses,
-                "统计采集范围内最近" + (period.equals("day") ? "24 小时" : "7 天")
+        String notice = period.equals("day")
+                ? "每日精选目标5套：男装穿搭2套、女装穿搭2套、小众风格欣赏1套。仅从最近24小时新发布、图片复核通过的候选中选择，跨平台重复内容不重复占位。"
+                        + "小众名额依据具体服装风格，与博主粉丝量无关；分类不明确或候选不足时保留缺口，不用过期、未复核或其他类别内容补位。"
+                        + "来源与主题筛选只显示当日入选内容的子集，各平台采集数不等于最终入选数。"
+                : "统计采集范围内最近7 天"
                         + "发布或有已验证互动增长的内容；抖音/微博/小红书按粉丝数划分主流与小众博主，小众目标占已分层博主内容 "
                         + Math.round(nicheShare * 100) + "%，粉丝数缺失或显示精度不足的条目列为未分类补充。"
                         + (hotBoardsEnabled ? "匿名热榜只作为补充来源。" : "匿名热榜默认关闭。")
                         + "仅展示图文穿搭帖子与搭配思路，不收录视频与纯文字，排除杂志、红毯、时装周、秀场和明星时装大片。"
-                        + "其他授权来源每 4 条博主内容最多补充 1 条；博主内容不足时按现有来源补齐。");
+                        + "其他授权来源每 4 条博主内容最多补充 1 条；博主内容不足时按现有来源补齐。";
+        return new TrendFeed("multi-source", fetched, false, filtered, "来源内评分", period, styles(filtered), statuses,
+                notice, dailySelection == null ? null : dailySelection.summary());
     }
 
     private List<TrendSourceStatus> sourceStatuses(Map<String, TrendSourceStatus> knownById,
             Map<String, Integer> observedCounts, Map<String, Integer> eligibleCounts,
-            Map<String, List<String>> exclusionReasons) {
+            Map<String, List<String>> exclusionReasons, Map<String, Integer> pendingCounts) {
         List<TrendSourceStatus> statuses = new ArrayList<>();
         for (TrendSourceAdapter source : sources) {
             if ("editorial".equalsIgnoreCase(source.platform())) continue;
             String id = source.platform();
             TrendSourceStatus known = knownById.get(id);
             int observed = observedCounts.getOrDefault(id, 0);
-            int collected = known == null ? observed : Math.max(known.itemCount(), observed);
+            int pending = pendingCounts.getOrDefault(id, 0);
+            int collected = Math.max(known == null ? observed : Math.max(known.itemCount(), observed), observed + pending);
             int eligible = eligibleCounts.getOrDefault(id, 0);
             List<String> reasons = exclusionReasons.get(id);
             String exclusionReason = reasons != null && !reasons.isEmpty()
                     ? mostCommonReason(reasons, collected)
                     : (eligible == 0 ? mostCommonReason(null, collected) : null);
+
+            if (pending > 0) {
+                String message = eligible > 0 ? "当前可展示 " + eligible + " 条，另有 " + pending + " 条待图片内容复核"
+                        : "已采集 " + pending + " 条，待图片内容复核后展示";
+                statuses.add(new TrendSourceStatus(id, known == null ? null : known.lastAttemptAt(),
+                        known == null ? null : known.lastSuccessAt(), eligible > 0 ? "ready" : "pending-review",
+                        message, collected, eligible, eligible == 0 ? "待图片内容复核" : exclusionReason));
+                continue;
+            }
 
             if (known == null) {
                 if (collected == 0) {
@@ -455,7 +484,7 @@ public class TrendService {
     public TrendItem reference(String id) {
         TrendItem item = repository.find(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "参考穿搭已下架或不存在，请重新选择"));
-        if (TrendTopics.excludedShowOrCelebrity(item))
+        if (TrendTopics.excludedShowOrCelebrity(item) || TrendContentPolicy.exclusionReason(item) != null || !isImagePost(item))
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "参考穿搭已下架或不存在，请重新选择");
         return item;
     }

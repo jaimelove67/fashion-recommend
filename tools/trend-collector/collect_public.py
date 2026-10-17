@@ -11,16 +11,60 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode, urljoin, urlparse
+from content_scope import text_rejection
 
 logging.disable(logging.INFO)
 UTC = timezone.utc
 CST = timezone(timedelta(hours=8))
 FASHION = re.compile(r'穿搭|搭配|时尚|时髦|时装|服饰|衬衫|针织|牛仔|裙|裤|外套|旗袍|配饰|手镯|饰品|包包|鞋|ootd', re.I)
 EXCLUDED = re.compile(r'红毯|时装周|秀场|走秀|大秀|fashion[ -]?week|runway|catwalk|时装大片|时尚大片|杂志|画报|封面拍摄|magazine|fashion editorial|演唱会|明星|艺人|演员|歌手|女星|男星|影后|影帝|偶像|名人|星同款', re.I)
+AUDIENCE_OUTFIT_WORDS = r'(?:日常|通勤|休闲|运动|极简|复古|街头|春季|夏季|秋季|冬季|春夏|秋冬|衬衫|T恤|针织衫?|毛衣|卫衣|西装|夹克|外套|大衣|羽绒服|牛仔裤|阔腿裤|长裤|短裤|连衣裙|半裙|裙装|裤装|套装)'
+OUTFIT_AUDIENCE = {
+    '男装穿搭': re.compile(r'男装|男[士生](?:的)?' + AUDIENCE_OUTFIT_WORDS + r'{0,2}(?:穿搭|搭配)|\bmenswear\b|\bmen[’\']?s\s+(?:outfit|style|fashion)', re.I),
+    '女装穿搭': re.compile(r'女装|女[士生](?:的)?' + AUDIENCE_OUTFIT_WORDS + r'{0,2}(?:穿搭|搭配)|\bwomenswear\b|\bwomen[’\']?s\s+(?:outfit|style|fashion)', re.I),
+}
+SHARED_AUDIENCE = re.compile(r'男女装|男女同款|男女通穿|男女同穿|男女都能穿|无性别(?:穿搭|服装|风格|款式)?|\bunisex\b', re.I)
+# Named outfit styles provide a reviewable basis for the appreciation slot.
+# A small audience, a niche brand or generic "小众" marketing is not style evidence.
+NICHE_STYLES = {
+    '哥特风': re.compile(r'哥特(?:风|式)?|\bgoth(?:ic)?\b', re.I),
+    '洛丽塔': re.compile(r'洛丽塔|洛莉塔|\blolita\b', re.I),
+    '蒸汽朋克': re.compile(r'蒸汽朋克|\bsteampunk\b', re.I),
+    '赛博朋克': re.compile(r'赛博朋克|\bcyberpunk\b', re.I),
+    '视觉系': re.compile(r'视觉系|\bvisual\s+kei\b', re.I),
+    '暗黑先锋': re.compile(r'暗黑先锋', re.I),
+}
+NEGATED_LABEL = re.compile(r'(?:不是|并非|不走|不属于|不算|不喜欢|拒绝|告别|不穿|没有|不要)[^，。；！？!?;,.]{0,4}$|非$|\b(?:not|non)[ -]?(?:a )?$', re.I)
+NON_OUTFIT_STYLE = r'(?:建筑|教堂|电影|小说|游戏|背景|家具|装修|音乐|配乐|滤镜)'
 
 
 def clean(value):
     return re.sub(r'\s+', ' ', str(value or '')).strip()
+
+
+def outfit_topic_tags(value):
+    """Classify explicit clothing copy, never the creator's identity or follower count.
+
+    These are candidate labels for the existing content review gate. Comparisons
+    and shared outfits retain an ambiguity marker even when summaries are truncated.
+    """
+    value = clean(value)
+    def affirmative_label(pattern, outfit_style=False):
+        for match in pattern.finditer(value):
+            before = value[max(0, match.start() - 12):match.start()]
+            after = value[match.end():match.end() + 12]
+            if NEGATED_LABEL.search(before):
+                continue
+            # Nearby references to architecture/media do not describe the clothes.
+            if outfit_style and (re.match(r'(?:的)?' + NON_OUTFIT_STYLE, after)
+                                 or re.search(NON_OUTFIT_STYLE + r'(?:是|为|的)?$', before)):
+                continue
+            return True
+        return False
+    audience = [tag for tag, pattern in OUTFIT_AUDIENCE.items() if affirmative_label(pattern)]
+    tags = ['男女装'] if len(audience) > 1 or affirmative_label(SHARED_AUDIENCE) else audience
+    styles = [tag for tag, pattern in NICHE_STYLES.items() if affirmative_label(pattern, outfit_style=True)]
+    return tags + (['小众穿搭'] + styles if styles else [])
 
 
 def publication(value):
@@ -41,6 +85,8 @@ def eligible(item, now):
     if not item.get('images'):
         return 'missing-images'
     text = ' '.join(str(item.get(key) or '') for key in ('title', 'summary', 'content', 'author'))
+    if text_rejection(text):
+        return text_rejection(text)
     if not FASHION.search(text):
         return 'not-fashion'
     if EXCLUDED.search(text):
@@ -174,9 +220,16 @@ def xiaohongshu(limit=3):
 
 
 def feed_item(item, now):
-    return {'id': item['platform'] + ':' + (urlparse(item['sourceUrl']).path.rsplit('/', 1)[-1] if item['platform'] == 'weibo' else hashlib.sha256(item['sourceUrl'].split('?')[0].encode()).hexdigest()[:24]),
+    identifier = str(item.get('id') or '')
+    if item['platform'] == 'weibo':
+        identifier = identifier if re.fullmatch(r'\d{6,}', identifier) else urlparse(item['sourceUrl']).path.rsplit('/', 1)[-1]
+    else:
+        identifier = hashlib.sha256(item['sourceUrl'].split('?')[0].encode()).hexdigest()[:24]
+    # Use full original copy before truncation; author names and query terms are not evidence.
+    tags = outfit_topic_tags(' '.join(str(item.get(key) or '') for key in ('title', 'summary', 'content', 'topicTags')))
+    return {'id': item['platform'] + ':' + identifier,
             'platform': item['platform'], 'title': item['title'], 'summary': item['summary'],
-            'topicTags': ['穿搭灵感'], 'heatScore': 0,
+            'topicTags': tags + ['穿搭灵感'], 'heatScore': 0,
             'publishedAt': publication(item['publishedAt']).isoformat(), 'fetchedAt': now.isoformat(),
             'sourceUrl': item['sourceUrl'], 'imageUrl': item['images'][0],
             'evidence': {'author': item.get('author') or None, 'mediaType': 'image', 'images': item['images'],

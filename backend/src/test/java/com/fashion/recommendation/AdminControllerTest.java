@@ -492,7 +492,7 @@ class AdminControllerTest {
     }
 
     @Test
-    void publishesTrendContentImmediatelyAndRemovesModerationApi() throws Exception {
+    void pendingAndRejectedTrendContentStayPrivateAndLegacyModerationApisStayRemoved() throws Exception {
         String admin = createUser("adm", true, "ROLE_ADMIN");
         String trendId = "weibo:admin-moderation-" + UUID.randomUUID().toString().replace("-", "");
         Instant fetchedAt = Instant.now().minusSeconds(30);
@@ -513,13 +513,12 @@ class AdminControllerTest {
 
         mockMvc.perform(get("/api/v1/trends").param("period", "week"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.items.length()").value(1))
-                .andExpect(jsonPath("$.data.items[0].id").value(trendId));
+                .andExpect(jsonPath("$.data.items.length()").value(0));
 
         jdbcTemplate.update("UPDATE trend_contents SET moderation_status='REJECTED', hidden=TRUE WHERE id=?", trendId);
         mockMvc.perform(get("/api/v1/trends").param("period", "week"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.items[0].id").value(trendId));
+                .andExpect(jsonPath("$.data.items.length()").value(0));
 
         mockMvc.perform(post("/api/v1/admin/trends/ai-review")
                         .with(user(admin).roles("ADMIN"))

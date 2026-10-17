@@ -1,4 +1,6 @@
 import { imageAddress, imageFile, readImage, sitePermission } from './images.js'
+import { adoptIntegratedWindow, closeAllTryOnWindows, closeTryOnWindow, focusIntegratedWindow, forwardProviderEvent, hasIntegratedWindow,
+  integratedItem, integratedState, openTryOnWindow, selectIntegratedItem, setTryOnWindowClosedHandler } from './tryOnWindow.js'
 
 const localPage = sender => sender.id === chrome.runtime.id
   && sender.url?.split('?')[0] === chrome.runtime.getURL('popup.html')
@@ -12,15 +14,35 @@ async function broadcast(type) {
   const tabs = await chrome.tabs.query({})
   await Promise.allSettled(tabs.map(tab => chrome.tabs.sendMessage(tab.id, { type })))
 }
+setTryOnWindowClosedHandler(async () => {
+  if ((await state())?.enabled && !await hasIntegratedWindow()) await broadcast('SHOW_PANEL')
+})
 
 async function handle(message, sender) {
-  if (message.type === 'IS_ENABLED' && contentPage(sender)) return { enabled: Boolean((await state())?.enabled) }
+  if (message.type === 'TRY_ON_WINDOW_EVENT' && sender.id === chrome.runtime.id && !sender.tab) return
+  if (message.type === 'PROVIDER_EVENT') return forwardProviderEvent(message, sender)
+  if (message.type === 'CONTROLS_READY' && floatingPage(sender)) {
+    await adoptIntegratedWindow(sender); await broadcast('HIDE_PANEL'); return { ok: true }
+  }
+  if (message.type === 'SELECT_INTEGRATED_GARMENT' && floatingPage(sender)) {
+    const imageUrl = imageAddress(message.item?.imageUrl)
+    const item = { imageUrl, sourceUrl: message.item?.sourceUrl ? imageAddress(message.item.sourceUrl) : '',
+      name: String(message.item?.name || '购物单品').slice(0, 100), sourceKind: 'SHOPPING' }
+    await selectIntegratedItem(sender, item); return { item }
+  }
+  if (message.type === 'OPEN_TRY_ON' && floatingPage(sender)) {
+    if (!(await state())?.enabled) throw new Error('请在项目趋势页重新连接试穿。')
+    return openTryOnWindow(message, sender)
+  }
+  if (message.type === 'CLOSE_TRY_ON' && floatingPage(sender)) return closeTryOnWindow(sender, message.tryonId)
+  if (message.type === 'IS_ENABLED' && contentPage(sender)) return { enabled: Boolean((await state())?.enabled) && !await hasIntegratedWindow() }
   if (message.type === 'BIND_PROJECT' && localPage(sender)) {
     const tab = await chrome.tabs.get(message.tabId)
     const origin = new URL(imageAddress(tab.url)).origin
     if (!await chrome.permissions.contains({ origins: [sitePermission(tab.url)] })) throw new Error('请先批准项目网站的访问权限。')
     const previous = await state()
     if (previous && previous.origin !== origin) {
+      await closeAllTryOnWindows()
       await chrome.storage.session.clear()
       await broadcast('HIDE_PANEL')
     }
@@ -34,11 +56,13 @@ async function handle(message, sender) {
     if (origin !== message.origin || !message.username || message.username.length > 100) throw new Error('项目连接无效。')
     const previous = await state()
     if (previous && (previous.username !== message.username || previous.origin !== origin || previous.tabId !== sender.tab.id)) {
+      await closeAllTryOnWindows()
       await chrome.storage.session.clear()
       await broadcast('HIDE_PANEL')
     }
     await chrome.storage.session.set({ connection: { tabId: sender.tab.id, origin, username: message.username, enabled: true } })
-    await broadcast('SHOW_PANEL')
+    if (await hasIntegratedWindow()) await focusIntegratedWindow()
+    else await broadcast('SHOW_PANEL')
     return { username: message.username }
   }
   if (message.type === 'SELECT_GARMENT' && contentPage(sender)) {
@@ -53,11 +77,12 @@ async function handle(message, sender) {
   }
   if (message.type === 'GET_STATE' && (floatingPage(sender) || localPage(sender))) {
     const connection = await state()
-    const item = sender.tab ? (await chrome.storage.session.get('selection:' + sender.tab.id))['selection:' + sender.tab.id] : null
-    return { connected: Boolean(connection?.enabled), username: connection?.username || '', item }
+    const integrated = floatingPage(sender) ? await integratedState(sender) : null
+    const item = integrated?.item || (sender.tab ? (await chrome.storage.session.get('selection:' + sender.tab.id))['selection:' + sender.tab.id] : null)
+    return { connected: Boolean(connection?.enabled), username: connection?.username || '', item, integrated }
   }
   if (message.type === 'READ_IMAGE' && floatingPage(sender)) {
-    const item = (await chrome.storage.session.get('selection:' + sender.tab?.id))['selection:' + sender.tab?.id]
+    const item = await integratedItem(sender) || (await chrome.storage.session.get('selection:' + sender.tab?.id))['selection:' + sender.tab?.id]
     if (!(await state())?.enabled || !item || imageAddress(message.url) !== item.imageUrl) throw new Error('请重新拖入选中的商品图片。')
     if (!await chrome.permissions.contains({ origins: [sitePermission(item.imageUrl)] })) throw new Error('请点击开始试穿，授权读取这张商品图片。')
     return { image: await readImage(item.imageUrl) }
@@ -72,12 +97,14 @@ async function handle(message, sender) {
       origin: connection.origin, item: message.item }, { frameId: 0 })
   }
   if (message.type === 'STOP_ALL' && (floatingPage(sender) || localPage(sender) || contentPage(sender))) {
+    await closeAllTryOnWindows()
     await chrome.storage.session.clear()
     await broadcast('HIDE_PANEL')
     return { ok: true }
   }
   if (message.type === 'DISCONNECT_PROJECT' && contentPage(sender)) {
     if ((await state())?.tabId === sender.tab.id) {
+      await closeAllTryOnWindows()
       await chrome.storage.session.clear()
       await broadcast('HIDE_PANEL')
     }
@@ -93,6 +120,7 @@ async function handle(message, sender) {
   }
   if (message.type === 'SHOW_CURRENT' && localPage(sender)) {
     if (!(await state())?.enabled) return { enabled: false }
+    if (await hasIntegratedWindow()) { await focusIntegratedWindow(); return { ok: true } }
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
     if (tab) await chrome.tabs.sendMessage(tab.id, { type: 'SHOW_PANEL' })
     return { ok: true }
@@ -107,6 +135,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 chrome.tabs.onRemoved.addListener(async id => {
   await chrome.storage.session.remove('selection:' + id)
   if ((await state())?.tabId === id) {
+    await closeAllTryOnWindows()
     await chrome.storage.session.clear()
     await broadcast('HIDE_PANEL')
   }

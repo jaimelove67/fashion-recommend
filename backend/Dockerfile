@@ -6,6 +6,7 @@ RUN --mount=type=cache,target=/root/.m2 \
     mvn -q -U -Dmaven.wagon.http.retryHandler.count=3 -DskipTests package
 
 FROM public.ecr.aws/docker/library/eclipse-temurin:17-jre-alpine
+RUN apk add --no-cache fontconfig ttf-dejavu
 WORKDIR /app
 COPY --from=build /app/target/fashion-recommendation-api-0.1.0.jar app.jar
 EXPOSE 8080

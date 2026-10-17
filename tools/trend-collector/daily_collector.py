@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import logging
+from itertools import zip_longest
 from pathlib import Path
 import re
 from urllib.parse import quote, unquote, urlparse
@@ -16,6 +17,7 @@ UTC = timezone.utc
 CST = timezone(timedelta(hours=8))
 PLATFORMS = {'weibo', 'douyin', 'xiaohongshu'}
 FASHION = re.compile(r'穿搭|搭配|OOTD|衬衫|牛仔|针织|裙|外套', re.I)
+DAILY_KEYWORDS = ('男士穿搭', '女士穿搭', '小众风格穿搭')
 
 
 def recent(item, now):
@@ -29,11 +31,13 @@ def recent(item, now):
 
 def weibo_date(raw, now):
     raw = clean(raw)
-    if re.fullmatch(r'今天 \d{1,2}:\d{2}', raw):
-        raw = now.astimezone(CST).strftime('%Y-%m-%d') + raw[2:]
+    if re.fullmatch(r'今天\s*\d{1,2}:\d{2}', raw):
+        raw = now.astimezone(CST).strftime('%Y-%m-%d') + ' ' + raw[2:].strip()
     if re.fullmatch(r'\d{2}月\d{2}日 \d{1,2}:\d{2}', raw):
         raw = str(now.astimezone(CST).year) + '-' + raw.replace('月', '-').replace('日', '')
     try:
+        if re.fullmatch(r'\d{2}-\d{2}-\d{2} \d{1,2}:\d{2}', raw):
+            raw = datetime.strptime(raw, '%y-%m-%d %H:%M').isoformat()
         return publication(raw).isoformat()
     except (ValueError, TypeError, OverflowError):
         return None
@@ -45,7 +49,7 @@ def parse_weibo(page, now):
         mid = card.attrib.get('mid', '')
         if not re.fullmatch(r'\d{6,}', mid):
             continue
-        content = card.css('[node-type="feed_list_content_full"], [node-type="feed_list_content"]')
+        content = card.css('[node-type="feed_list_content_full"]') or card.css('[node-type="feed_list_content"]')
         text = clean(' '.join(content.xpath('.//text()').getall()))
         date_link = card.css('.from a').first
         raw_date = date_link.attrib.get('title') or clean(' '.join(date_link.xpath('.//text()').getall())) if date_link else ''
@@ -182,12 +186,21 @@ def search(platform, keyword, now, real_chrome=False):
     return records
 
 
-def collect(platform, output, keyword='穿搭', real_chrome=False, search_fn=search):
+def collect(platform, output, keyword=None, real_chrome=False, search_fn=search):
     now = datetime.now(UTC)
+    keywords = (keyword,) if keyword is not None else DAILY_KEYWORDS
     report = {'platform': platform, 'attemptedAt': now.isoformat(), 'windowHours': 24,
-              'acceptedCount': 0, 'rejectedCount': 0}
+              'acceptedCount': 0, 'rejectedCount': 0, 'contentReviewRequired': True,
+              'keywords': list(keywords), 'queriesCompleted': 0,
+              'dailySelectionTarget': {'男装穿搭': 2, '女装穿搭': 2, '小众穿搭': 1}}
     try:
-        candidates = search_fn(platform, keyword, now, real_chrome)
+        batches = []
+        for query in keywords:
+            # Do not label a result from the search term: only its own copy is evidence.
+            batches.append(search_fn(platform, query, datetime.now(UTC), real_chrome))
+            report['queriesCompleted'] += 1
+        # Interleave queries so the 50-candidate ceiling cannot be filled by the first audience.
+        candidates = (item for group in zip_longest(*batches) for item in group if item is not None)
         now = datetime.now(UTC)
         accepted, seen = [], set()
         for item in candidates:
@@ -207,7 +220,7 @@ def collect(platform, output, keyword='穿搭', real_chrome=False, search_fn=sea
     except Exception as exc:
         # Preserve the last export on failures; never log response bodies or credentials.
         report.update(state='unavailable', error=type(exc).__name__,
-                      reason=str(exc) if str(exc) in {'search-http-error', 'login-or-verification-required', 'search-content-unavailable', 'note-detail-unavailable'} else 'collector-failed')
+                      reason=str(exc) if str(exc) in {'search-http-error', 'login-or-verification-required', 'search-content-unavailable', 'note-detail-unavailable', 'authorized-browser-unavailable'} else 'collector-failed')
         atomic_write(output / (platform + '-collection-status.json'), report)
         raise RuntimeError('public-source-unavailable') from None
 

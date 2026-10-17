@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+
+test('distinguishes collected posts awaiting image review from collection failures', () => {
+  assert.equal(trendSourceMessage({ state: 'pending-review', message: '已采集3条，待图片内容复核后展示' }),
+    '待复核 · 已采集3条，待图片内容复核后展示')
+})
 import {
   externalTrendSourceUrl,
   shouldShowStaleTrend,

@@ -24,6 +24,14 @@ test('leaves other Sina image variants unchanged', () => {
   ])
 })
 
+for (const size of ['orj360', 'thumb150']) {
+  test(`supports the ${size} image URLs returned by real Weibo search cards`, () => {
+    const original = `https://wx4.sinaimg.cn/${size}/abc123.jpg`
+    assert.deepEqual(trendImageCandidates(original), ['https://wx4.sinaimg.cn/large/abc123.jpg', original])
+    assert.equal(trendDisplayImageUrl(original), `/trend-images/wx4/${size}/abc123.jpg`)
+  })
+}
+
 test('keeps same-origin demo asset paths as image candidates', () => {
   assert.deepEqual(trendImageCandidates('/assets/look-urban.jpg'), [
     '/assets/look-urban.jpg'

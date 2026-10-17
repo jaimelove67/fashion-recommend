@@ -89,17 +89,23 @@ class RecommendationControllerTest {
 
     @Test
     @org.springframework.transaction.annotation.Transactional
-    void usesNewlyStoredTrendReferenceWithoutReviewAndRejectsUnknownReferences() throws Exception {
+    void usesReviewedTrendReferenceAndRejectsPendingOrUnknownReferences() throws Exception {
         String userId = "trend-reference-user";
         createItem(userId, "白衬衫", "上装", "白色");
         createItem(userId, "直筒裤", "下装", "黑色");
         var now = java.time.Instant.now();
         trendRepository.save("douyin", new com.fashion.recommendation.trend.TrendItem(
                 "douyin:reference-test", "douyin", "极简通勤", List.of("极简", "通勤"), 0,
-                now.minusSeconds(60), now, "https://www.douyin.com/video/test", false, null));
+                now.minusSeconds(60), now, "https://www.douyin.com/note/test", false, "https://images.example/outfit.jpg", null,
+                new com.fashion.recommendation.trend.TrendEvidence("author", "image", List.of("https://images.example/outfit.jpg"),
+                null, null, null, null, "互动", null)));
         String body = """
                 {"occasion":"通勤","city":"长沙","trendId":"douyin:reference-test"}
                 """;
+        mockMvc.perform(post("/api/v1/recommendations").with(user(userId)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isNotFound());
+        trendRepository.review("douyin:reference-test", trendRepository.reviewCandidate("douyin:reference-test")
+                .orElseThrow().fingerprint(), true, "test-reviewer", "日常通勤服装展示");
         mockMvc.perform(post("/api/v1/recommendations").with(user(userId)).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
         var captor = ArgumentCaptor.forClass(LlmRecommendationContext.class);
@@ -757,6 +763,39 @@ class RecommendationControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
         verifyNoInteractions(imageStorage, garmentRecognitionService);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void uploadedDressCanFormAnOutfitWithShoes(boolean allowAiRecognition) throws Exception {
+        String owner = "uploaded-dress-" + allowAiRecognition;
+        given(imageStorage.store(eq(owner), any())).willReturn(
+                new StoredImage("wardrobe/" + owner + "/dress.png", "image/png"));
+        given(garmentRecognitionService.recognize(any())).willReturn(Optional.of(
+                new GarmentRecognitionResult("蓝色连衣裙", "连体装", "蓝色", "日常")));
+        byte[] png = java.util.Base64.getDecoder().decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jS1cAAAAASUVORK5CYII=");
+        var upload = org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart(
+                "/api/v1/me/wardrobe/upload")
+                .file(new MockMultipartFile("image", "dress.png", "image/png", png))
+                .param("allowAiRecognition", Boolean.toString(allowAiRecognition))
+                .with(user(owner)).with(csrf());
+        if (!allowAiRecognition) upload.param("name", "蓝色连衣裙").param("category", "连体装").param("color", "蓝色");
+        var uploaded = mockMvc.perform(upload).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.category").value("连体装"))
+                .andExpect(jsonPath("$.data.recognitionStatus").value(
+                        allowAiRecognition ? "RECOGNIZED" : "MANUAL_CORRECTED"))
+                .andReturn();
+        long dressId = readData(uploaded).path("id").asLong();
+        long shoesId = createItem(owner, "日常单鞋", "鞋履", "白色");
+
+        mockMvc.perform(post("/api/v1/recommendations").with(user(owner)).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"occasion\":\"日常\",\"city\":\"长沙\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[*].id").value(
+                        org.hamcrest.Matchers.containsInAnyOrder((int) dressId, (int) shoesId)));
+        if (allowAiRecognition) verify(garmentRecognitionService).recognize(any());
+        else verifyNoInteractions(garmentRecognitionService);
     }
 
     private long createItem(String userId, String name, String category, String color) throws Exception {

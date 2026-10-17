@@ -9,6 +9,18 @@ import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
 class TrendServiceTest {
+    @Test void pendingImageReviewsAreReportedInsteadOfBeingCalledCollectionFailures() {
+        TrendRepository repository = mock(TrendRepository.class);
+        when(repository.since(any())).thenReturn(List.of());
+        when(repository.statuses()).thenReturn(List.of());
+        when(repository.pendingCounts(any())).thenReturn(java.util.Map.of("weibo", 3));
+        var status = new TrendService(List.of(source("weibo")), repository).currentFeed(null, null, "day")
+                .sources().stream().filter(s -> s.id().equals("weibo")).findFirst().orElseThrow();
+        assertEquals("pending-review", status.state());
+        assertEquals(3, status.itemCount());
+        assertEquals(0, status.eligibleCount());
+        assertTrue(status.message().contains("图片内容复核"));
+    }
     @Test void doesNotInventSamplesWhenAllSourcesFail() {
         TrendRepository repository = mock(TrendRepository.class);
         TrendSourceAdapter source = mock(TrendSourceAdapter.class);
@@ -249,7 +261,7 @@ class TrendServiceTest {
     }
 
     private TrendItem item(String id, String platform, int hoursAgo) {
-        return new TrendItem(id, platform, "通勤穿搭", List.of("通勤"), 50,
+        return new TrendItem(id, platform, "通勤穿搭", List.of("通勤", "男装穿搭"), 50,
                 Instant.now().minus(hoursAgo, ChronoUnit.HOURS), Instant.now(), "https://example.com/" + id, false, "https://example.com/" + id + ".jpg");
     }
 

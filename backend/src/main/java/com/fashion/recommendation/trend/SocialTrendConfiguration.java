@@ -22,7 +22,7 @@ public class SocialTrendConfiguration {
     private TrendSourceAdapter source(String platform, ObjectMapper mapper, Environment env) {
         String url = env.getProperty("app.trends." + platform + "-endpoint", "");
         var adapter = new ConfiguredJsonTrendSourceAdapter(mapper, url, platform,
-                Duration.ofSeconds(3), Duration.ofSeconds(90), Duration.ZERO);
+                Duration.ofSeconds(3), env.getProperty("app.trends.collection-read-timeout", Duration.class, Duration.ofSeconds(300)), Duration.ZERO);
         String directory = env.getProperty("app.trends.import-directory", "");
         boolean hotBoard = env.getProperty("app.trends.hot-boards-enabled", Boolean.class, false)
                 && PublicHotBoards.supports(platform);

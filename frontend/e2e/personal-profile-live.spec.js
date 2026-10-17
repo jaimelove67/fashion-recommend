@@ -81,7 +81,7 @@ async function resetModels() {
 
 async function registerUi(page, username) {
   await page.goto('/')
-  await page.getByRole('button', { name: '直接登录', exact: true }).click()
+  await page.getByRole('button', { name: '登录 / 注册', exact: true }).click()
   await page.getByRole('tab', { name: '注册', exact: true }).click()
   await page.locator('input[name="username"]').fill(username)
   await page.locator('input[name="password"]').fill(password)

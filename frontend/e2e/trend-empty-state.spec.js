@@ -53,8 +53,7 @@ test('shows an empty state without preset images when the trends API returns no 
 
   const emptyState = page.locator('.trend-empty-state')
   await expect(emptyState).toBeVisible()
-  await expect(page.locator('.updated')).toContainText('每日 12:00 更新（北京时间）')
-  await expect(page.locator('.updated')).toContainText('最近采集')
+  await expect(emptyState.getByRole('button', { name: '重新加载', exact: true })).toBeEnabled()
   const images = emptyState.locator('.trend-empty-images img')
   await expect(images).toHaveCount(0)
   await expect(emptyState).toContainText('当前筛选范围暂无穿搭内容')
@@ -80,7 +79,7 @@ test('shows local references when all remote gallery image candidates fail', asy
 
   const fallback = page.locator('.trend-gallery .gallery-empty-reference')
   await expect(fallback).toBeVisible()
-  await expect(fallback).toContainText('非实时趋势内容')
+  await expect(fallback).toContainText('非实时采集内容')
   const images = fallback.locator('.gallery-empty-images img')
   await expect(images).toHaveCount(3)
   await expect.poll(() => images.evaluateAll((elements) => elements.filter((image) => image.complete && image.naturalWidth > 0).length)).toBe(3)

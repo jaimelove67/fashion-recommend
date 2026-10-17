@@ -29,7 +29,6 @@
     const minimize = document.createElement('button'); minimize.textContent = '−'; minimize.setAttribute('aria-label', '收起试穿浮窗')
     const close = document.createElement('button'); close.textContent = '×'; close.setAttribute('aria-label', '关闭跨站试穿')
     frame = document.createElement('iframe'); frame.src = chrome.runtime.getURL('floating.html'); frame.title = '知己跨站试穿浮窗'
-    frame.allow = `camera ${extensionOrigin} https://anywear.decart.ai; fullscreen https://anywear.decart.ai`
     frame.referrerPolicy = 'no-referrer'
     header.append(title, minimize, close); panel.append(header, frame); root.append(style, panel)
     document.documentElement.append(host)

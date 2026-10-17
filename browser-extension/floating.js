@@ -1,17 +1,22 @@
-import { ANYWEAR_ORIGIN, anywearFrameUrl, isAnywearMessage } from './liveTryOn.js'
+import { ANYWEAR_ORIGIN } from './liveTryOn.js'
 import { sitePermission } from './images.js'
 
 const $ = id => document.getElementById(id)
-let selected = null, image = '', consent = false, frame = null, tryonId = '', version = 0, timer = null, saving = false, streaming = false, tried = false, saved = false
+let selected = null, image = '', consent = false, active = false, tryonId = '', version = 0, timer = null, saving = false, streaming = false, queued = false, tried = false, saved = false
+const integrated = new URLSearchParams(location.search).has('controls')
 const send = async message => {
   const result = await chrome.runtime.sendMessage(message)
   if (!result?.ok) throw new Error(result?.error || '连接失败，请在项目中重新连接。')
   return result.data
 }
-function stop() { version++; clearTimeout(timer); timer = null; frame?.remove(); frame = null; tryonId = ''; streaming = false; $('like').disabled = true }
-function syncButtons() { $('like').disabled = !tried || saving || saved; $('start').disabled = saving || !selected || Boolean(frame && !streaming) }
+function stop() {
+  version++; clearTimeout(timer); timer = null
+  if (tryonId) void send({ type: 'CLOSE_TRY_ON', tryonId }).catch(() => {})
+  active = false; tryonId = ''; streaming = queued = false; $('like').disabled = true; $('preview').textContent = ''
+}
+function syncButtons() { $('like').disabled = !tried || saving || saved; $('start').disabled = saving || !selected || (active && !streaming) }
 function fail(message) { stop(); $('error').textContent = message; $('error').hidden = false; $('status').textContent = '暂时无法试穿'; $('start').disabled = !selected }
-function wait(timeout) { clearTimeout(timer); timer = setTimeout(() => fail('试衣服务未及时响应。请检查网络和摄像头权限后重试。'), timeout) }
+function wait(timeout) { clearTimeout(timer); timer = setTimeout(() => fail('试衣服务未及时响应。请检查独立试穿窗口、网络和摄像头权限后重试。'), timeout) }
 function showSelection(item, data = '') {
   tried = false; saved = false; image = data; selected = item; $('photo').src = data || ''; $('photo').hidden = !data
   $('name').value = item.name || '购物单品'; $('garment').hidden = false; $('start').disabled = false
@@ -26,6 +31,17 @@ async function selectItem(item) {
 async function syncConnection() {
   const data = await send({ type: 'GET_STATE' })
   if (!data.connected) { fail('请先登录项目，在趋势页开启跨站试穿。'); return }
+  if (integrated && data.integrated) {
+    const session = data.integrated
+    showSelection(session.item, session.image)
+    $('category').value = session.item.category || '上装'
+    tryonId = session.tryonId || ''; consent = true; active = Boolean(tryonId)
+    streaming = session.stage === 'streaming'; queued = session.stage === 'queued'; tried = session.hasRendered
+    $('consent').hidden = true; $('start').textContent = '重新试穿此单品'
+    $('status').textContent = streaming ? '实时试穿中' : queued ? '服务正在排队，请查看窗口提示' : session.stage === 'ended' ? '本次试穿已结束' : active ? '正在连接，请在左侧试穿画面中允许使用摄像头…' : '图片已准备好'
+    if (active && !streaming && !queued) wait(45000)
+    syncButtons(); await send({ type: 'CONTROLS_READY' }); return
+  }
   if (data.item && (!selected || data.item.imageUrl !== selected.imageUrl)) void selectItem(data.item)
   else if (!selected) { $('error').hidden = true; $('status').textContent = '先拖入一张清晰的衣服图片' }
 }
@@ -33,10 +49,13 @@ async function start(requestPermission = false) {
   if (!selected || saving) return
   stop(); tried = false; const current = version; $('start').disabled = true; $('error').hidden = true
   try {
+    const origins = [ANYWEAR_ORIGIN + '/*']
+    if (!image) origins.push(sitePermission(selected.imageUrl))
+    // Request all required hosts in the original click gesture, before fetching.
+    const allowed = requestPermission ? await chrome.permissions.request({ origins }) : await chrome.permissions.contains({ origins })
+    if (current !== version) return
+    if (!allowed) throw new Error('试穿需要你授权读取商品图片及访问 Anywear 试衣服务。')
     if (!image) {
-      const origins = [sitePermission(selected.imageUrl)]
-      const allowed = requestPermission ? await chrome.permissions.request({ origins }) : await chrome.permissions.contains({ origins })
-      if (!allowed) throw new Error('读取这张商品图片需要你授权它所在的站点。')
       $('status').textContent = '正在读取商品图片…'
       const result = await send({ type: 'READ_IMAGE', url: selected.imageUrl })
       if (current !== version) return
@@ -45,19 +64,14 @@ async function start(requestPermission = false) {
     if (current !== version) return
     consent = true; $('consent').hidden = true; $('start').textContent = '重新试穿此单品'
     tryonId = 'tryon_' + crypto.randomUUID()
-    frame = document.createElement('iframe'); frame.title = 'Anywear 实时试衣窗口'
-    frame.src = anywearFrameUrl(location.hostname)
-    frame.allow = `camera ${ANYWEAR_ORIGIN}; fullscreen ${ANYWEAR_ORIGIN}`
-    frame.sandbox = 'allow-scripts allow-same-origin'; frame.referrerPolicy = 'no-referrer'
-    const active = frame
-    active.onload = () => {
-      if (frame !== active) return
-      $('status').textContent = '正在连接，请允许使用摄像头…'; wait(45000)
-      active.contentWindow.postMessage({ type: 'DECART_FULLSCREEN_MODE' }, ANYWEAR_ORIGIN)
-      active.contentWindow.postMessage({ type: 'DECART_AUTO_START', productImageUrl: image, tryonId,
-        imageSource: 'zhiji_shopping_selection', suggestedFacingMode: 'user', garmentCategoryRaw: $('category').value }, ANYWEAR_ORIGIN)
-    }
-    $('preview').append(active); $('status').textContent = '正在加载试衣服务…'; wait(20000)
+    const activeId = tryonId
+    active = true
+    $('preview').textContent = integrated ? '' : '正在打开选图、试穿和收藏合一的窗口…'
+    $('status').textContent = '正在打开独立试穿窗口…'; wait(25000)
+    await send({ type: 'OPEN_TRY_ON', tryonId: activeId, image, category: $('category').value,
+      item: { ...selected, name: $('name').value.trim() || selected.name } })
+    if (current !== version) { void send({ type: 'CLOSE_TRY_ON', tryonId: activeId }).catch(() => {}); return }
+    if (!streaming && !queued) { $('status').textContent = integrated ? '正在连接，请在左侧试穿画面中允许使用摄像头…' : '正在连接，请在独立试穿窗口中允许使用摄像头…'; wait(45000) }
   } catch (error) { if (current === version) fail(error.message) }
 }
 window.addEventListener('message', event => {
@@ -73,14 +87,18 @@ window.addEventListener('message', event => {
   if (event.source === parent && event.data?.type === 'ZHIJI_CONNECTION_CHANGED') {
     void syncConnection().catch(error => fail(error.message)); return
   }
-  if (!isAnywearMessage(event, frame?.contentWindow)) return
-  const data = event.data
+})
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (sender.id !== chrome.runtime.id || message.type !== 'TRY_ON_WINDOW_EVENT' || !tryonId || message.tryonId !== tryonId) return
+  if (message.event === 'closed') { stop(); $('status').textContent = '试穿窗口已关闭'; syncButtons(); return }
+  const data = message.data
+  if (!data || typeof data !== 'object') return
   if (['DECART_CAMERA_FLIP', 'DECART_RESTART_SAME_GARMENT'].includes(data.type)) { void start(); return }
   if (data.type !== 'DECART_TRACK_EVENT' || (data.properties?.tryon_id && data.properties.tryon_id !== tryonId)) return
   if (data.event === 'first_frame_rendered' && data.properties?.tryon_id === tryonId) {
     clearTimeout(timer); tried = true; streaming = true; $('status').textContent = '实时试穿中'; syncButtons()
-  } else if (data.event === 'queue_entered') { clearTimeout(timer); $('status').textContent = '服务正在排队，请查看窗口提示' }
-  else if (data.event === 'queue_completed') { $('status').textContent = '正在连接试衣服务…'; wait(45000) }
+  } else if (data.event === 'queue_entered') { queued = true; clearTimeout(timer); $('status').textContent = '服务正在排队，请查看窗口提示' }
+  else if (data.event === 'queue_completed') { queued = false; $('status').textContent = '正在连接试衣服务…'; wait(45000) }
   else if (data.event === 'first_frame_timeout') fail('试穿画面未能生成，请检查摄像头权限后重试。')
   else if (data.event === 'session_ended') { stop(); $('status').textContent = '本次试穿已结束'; syncButtons() }
 })
@@ -118,5 +136,24 @@ $('like').onclick = async () => {
   }
 }
 $('favorites').onclick = () => void send({ type: 'OPEN_PROJECT', favorites: true }).catch(error => fail(error.message))
-window.addEventListener('pagehide', stop)
+window.addEventListener('pagehide', () => { clearTimeout(timer); if (!integrated) stop() })
+if (integrated) {
+  document.querySelector('.drop-zone strong').textContent = '把其他网页中的衣服图片拖到这里'
+  window.addEventListener('dragover', event => event.preventDefault())
+  window.addEventListener('drop', event => {
+    if (!event.isTrusted || saving) return
+    if (event.dataTransfer.files.length) {
+      event.preventDefault(); $('file').files = event.dataTransfer.files; $('file').dispatchEvent(new Event('change')); return
+    }
+    const html = new DOMParser().parseFromString(event.dataTransfer.getData('text/html'), 'text/html')
+    const url = html.querySelector('img')?.getAttribute('src') || event.dataTransfer.getData('text/uri-list').split(/\r?\n/).find(line => line && !line.startsWith('#'))
+    const source = html.querySelector('a')?.getAttribute('href') || ''
+    if (!url) return
+    event.preventDefault(); stop(); const current = version; $('start').disabled = true
+    void send({ type: 'SELECT_INTEGRATED_GARMENT', item: { imageUrl: url,
+      name: html.querySelector('img')?.getAttribute('alt') || '购物单品', sourceUrl: /^https?:\/\//.test(source) ? source : '' } })
+      .then(result => { if (current === version) showSelection(result.item) })
+      .catch(error => { if (current === version) fail(error.message) })
+  })
+}
 void syncConnection().catch(error => fail(error.message))

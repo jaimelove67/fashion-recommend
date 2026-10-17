@@ -39,6 +39,40 @@ class CollectorTests(unittest.TestCase):
         self.assertIsNone(item["evidence"]["authorFollowers"])
         self.assertEqual(item["evidence"]["authorFollowersLabel"], "23.2万")
 
+    def test_import_carries_explicit_outfit_labels_without_using_creator_identity(self):
+        item = normalize({**self.row(), 'title': '男装哥特风穿搭', 'author_followers_count': 999999}, 'weibo')
+        self.assertIn('男装穿搭', item['topicTags'])
+        self.assertIn('小众穿搭', item['topicTags'])
+        self.assertIn('哥特风', item['topicTags'])
+        ordinary = normalize({**self.row(), 'nickname': '女装洛丽塔', 'author_followers_count': 100}, 'weibo')
+        self.assertNotIn('女装穿搭', ordinary['topicTags'])
+        self.assertNotIn('小众穿搭', ordinary['topicTags'])
+
+    def test_import_preserves_full_description_audience_ambiguity_and_negation(self):
+        for detail in ('男女同款', '无性别穿搭', '女装穿搭'):
+            with self.subTest(detail=detail):
+                item = normalize({**self.row(), 'title': '男装穿搭', 'desc': '针织 ' * 150 + detail}, 'weibo')
+                self.assertIn('男女装', item['topicTags'])
+                self.assertNotIn('男装穿搭', item['topicTags'])
+                self.assertNotIn('女装穿搭', item['topicTags'])
+                self.assertNotIn(detail, item['summary'])
+        for title in ('不是男装穿搭', '并非女装穿搭'):
+            with self.subTest(title=title):
+                item = normalize({**self.row(), 'title': title}, 'weibo')
+                self.assertNotIn('男装穿搭', item['topicTags'])
+                self.assertNotIn('女装穿搭', item['topicTags'])
+
+    def test_import_does_not_classify_camera_role_as_outfit_audience(self):
+        for title, expected in (
+                ('男生帮我拍的穿搭', None),
+                ('女生拍摄的穿搭', None),
+                ('男生帮我拍的女装穿搭', '女装穿搭'),
+                ('女生帮我拍的男士衬衫穿搭', '男装穿搭')):
+            with self.subTest(title=title):
+                tags = normalize({**self.row(), 'title': title}, 'weibo')['topicTags']
+                audience = [tag for tag in tags if tag in ('男装穿搭', '女装穿搭', '男女装')]
+                self.assertEqual([expected] if expected else [], audience)
+
     def test_accepts_public_sina_weibo_mirror_only_for_weibo(self):
         mirrored = {**self.row(), "note_url": "https://www.sina.cn/news/detail/123.html"}
         self.assertEqual(normalize(mirrored, "weibo")["sourceUrl"], mirrored["note_url"])
@@ -55,6 +89,12 @@ class CollectorTests(unittest.TestCase):
                       "Vogue 杂志封面穿搭", "秋季时尚画报大片"]:
             with self.subTest(title=title), self.assertRaises(ValueError):
                 normalize({**self.row(), "title": title}, "weibo")
+
+    def test_legacy_import_also_blocks_body_focused_and_suggestive_content(self):
+        for title in ('OOTD 胸部特写', '穿搭 擦边福利', '时尚 性暗示'):
+            with self.subTest(title=title), self.assertRaisesRegex(ValueError, 'body-focused-or-suggestive'):
+                normalize({**self.row(), "title": title}, "weibo")
+        self.assertIsNotNone(normalize({**self.row(), "title": '半身衬衫穿搭与胸前口袋细节'}, 'weibo'))
 
     def test_only_explicitly_reviewed_image_enters_gallery_contract(self):
         row = self.row()

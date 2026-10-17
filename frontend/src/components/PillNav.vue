@@ -12,6 +12,7 @@ const props = defineProps({
   ease: { type: String, default: 'power3.out' },
   baseColor: { type: String, default: '#000000' },
   pillColor: { type: String, default: '#ffffff' },
+  activePillColor: { type: String, default: undefined },
   hoveredPillTextColor: { type: String, default: '#ffffff' },
   pillTextColor: { type: String, default: undefined },
   onMobileMenuClick: { type: Function, default: undefined },
@@ -46,6 +47,7 @@ watch(
 const cssVars = computed(() => ({
   '--base': props.baseColor,
   '--pill-bg': props.pillColor,
+  '--pill-active-bg': props.activePillColor ?? props.baseColor,
   '--hover-text': props.hoveredPillTextColor,
   '--pill-text': resolvedPillTextColor.value,
   '--nav-h': '46px',
@@ -343,12 +345,12 @@ const handleLogoClick = () => {
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(255, 255, 255, .16);
+  border: 1px solid var(--line-strong);
   border-radius: 50%;
   padding: 0;
   color: var(--pill-bg);
   background: var(--base);
-  box-shadow: 0 10px 24px rgba(30, 44, 39, .18), inset 0 1px 0 rgba(255, 255, 255, .14);
+  box-shadow: 0 4px 14px rgba(82, 72, 55, .08);
   overflow: hidden;
 }
 
@@ -385,9 +387,9 @@ const handleLogoClick = () => {
   height: var(--nav-h);
   align-items: center;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, .15);
+  border: 1px solid var(--line-strong);
   background: var(--base);
-  box-shadow: 0 10px 24px rgba(30, 44, 39, .15), inset 0 1px 0 rgba(255, 255, 255, .14);
+  box-shadow: 0 4px 14px rgba(82, 72, 55, .06);
   overflow: hidden;
 }
 
@@ -435,31 +437,31 @@ const handleLogoClick = () => {
 }
 
 .pill-nav-item:hover {
-  box-shadow: inset 0 -2px 0 var(--gold);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .pill-nav-item.is-active {
   color: var(--hover-text);
-  background: var(--base);
-  box-shadow: inset 0 -2px 0 var(--gold);
+  background: var(--pill-active-bg);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .pill-nav-item:focus-visible {
-  outline-color: var(--base);
+  outline-color: var(--accent-strong);
   outline-offset: -3px;
 }
 
 .pill-nav-item.is-active:focus-visible,
 .pill-nav-item:hover:focus-visible,
 .pill-nav-hamburger:focus-visible {
-  outline-color: var(--gold);
+  outline-color: var(--accent-strong);
   outline-offset: -3px;
 }
 
 .pill-nav-mobile-link:focus-visible {
   color: var(--pill-text);
   background: var(--pill-bg);
-  outline-color: var(--base);
+  outline-color: var(--accent-strong);
   outline-offset: -3px;
 }
 
@@ -514,7 +516,7 @@ const handleLogoClick = () => {
   width: 17px;
   height: 2px;
   border-radius: 999px;
-  background: var(--pill-bg);
+  background: var(--pill-text);
   transform-origin: center;
 }
 
@@ -525,10 +527,10 @@ const handleLogoClick = () => {
   z-index: 998;
   display: none;
   width: min(330px, calc(100vw - 32px));
-  border: 1px solid rgba(255, 255, 255, .16);
+  border: 1px solid var(--line-strong);
   border-radius: 22px;
   background: var(--base);
-  box-shadow: 0 20px 48px rgba(30, 44, 39, .2), inset 0 1px 0 rgba(255, 255, 255, .14);
+  box-shadow: var(--shadow-pop);
   transform-origin: top center;
 }
 
@@ -545,7 +547,7 @@ const handleLogoClick = () => {
   border: 0;
   border-radius: 999px;
   padding: 12px 16px;
-  color: var(--pill-bg);
+  color: var(--pill-text);
   background: transparent;
   font: inherit;
   font-size: 13px;
@@ -558,15 +560,15 @@ const handleLogoClick = () => {
 
 .pill-nav-mobile-link:hover,
 .pill-nav-mobile-link.is-active {
-  color: var(--pill-text);
-  background: var(--pill-bg);
+  color: var(--hover-text);
+  background: var(--pill-active-bg);
 }
 
 .pill-nav-mobile-link.is-active {
-  box-shadow: inset 0 -2px 0 var(--gold);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
-@media (max-width: 680px) {
+@media (max-width: 860px) {
   .pill-nav-shell {
     width: 100%;
   }

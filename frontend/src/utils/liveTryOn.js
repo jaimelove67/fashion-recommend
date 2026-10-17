@@ -13,7 +13,7 @@ export function trendTryOnItem(piece) {
     imageSource: 'trend_piece_illustration',
     sourceKind: 'TREND_ILLUSTRATION',
     sourceUrl: piece?.mentions?.find(item => item.sourceUrl)?.sourceUrl || '',
-    imageNote: '趋势单品示意图 · 非原帖商品图'
+    imageNote: '穿搭单品示意图 · 非原帖商品图'
   }
 }
 

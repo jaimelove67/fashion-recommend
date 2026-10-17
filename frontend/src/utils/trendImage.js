@@ -4,12 +4,12 @@ export function trendImageCandidates(imageUrl) {
 
   try {
     const original = new URL(imageUrl)
-    if (!/(^|\.)sinaimg\.cn$/i.test(original.hostname) || !/\/thumbnail\//i.test(original.pathname)) {
+    if (!/(^|\.)sinaimg\.cn$/i.test(original.hostname) || !/\/(?:thumbnail|orj360|thumb150)\//i.test(original.pathname)) {
       return [imageUrl]
     }
 
     const large = new URL(original)
-    large.pathname = large.pathname.replace(/\/thumbnail\//i, '/large/')
+    large.pathname = large.pathname.replace(/\/(?:thumbnail|orj360|thumb150)\//i, '/large/')
     return [...new Set([large.href, imageUrl])]
   } catch {
     return [imageUrl]
@@ -22,7 +22,7 @@ export function trendDisplayImageUrl(imageUrl) {
     const url = new URL(imageUrl)
     if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash) return imageUrl
     const host = /^(wx[1-4])\.sinaimg\.cn$/i.exec(url.hostname)
-    if (!host || !/^\/(?:cmw960|large|mw690|thumbnail)\/[A-Za-z0-9]+\.(?:jpg|jpeg|png|webp)$/.test(url.pathname)) return imageUrl
+    if (!host || !/^\/(?:cmw960|large|mw690|thumbnail|orj360|thumb150)\/[A-Za-z0-9]+\.(?:jpg|jpeg|png|webp)$/.test(url.pathname)) return imageUrl
     return `/trend-images/${host[1].toLowerCase()}${url.pathname}`
   } catch { return imageUrl }
 }
