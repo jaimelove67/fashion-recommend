@@ -228,7 +228,8 @@ onBeforeUnmount(() => fashion.dispose())
   <LoginView
     v-if="fashion.state.authPhase === 'guest' && guestLoginOpen"
     :app="fashion"
-    direct-entry
+    :direct-entry="Boolean(fashion.state.authError)"
+    can-browse
     @browse="returnToGuestHome"
   />
 

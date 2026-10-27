@@ -19,7 +19,58 @@ export function safeTechniqueSourceUrl(value) {
   }
 }
 
-function normalizeSource(value) {
+function safeTechniqueImageUrl(value) {
+  if (typeof value === 'string' && /^\/api\/v1\/outfit-techniques\/comparison-images\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return value
+  const url = safeTechniqueSourceUrl(value)
+  if (!url || new URL(url).protocol !== 'https:') return null
+  return url
+}
+
+export function normalizeTechniqueComparisonVisual(value) {
+  if (!value || !['source', 'generated'].includes(value.kind) || !Array.isArray(value.images)
+      || value.images.length < 1 || value.images.length > 2) return null
+  const seen = new Set()
+  const images = value.images.flatMap(image => {
+    const url = safeTechniqueImageUrl(image?.url)
+    const alt = text(image?.alt, 500)
+    if (!url || !alt || seen.has(url) || (value.kind === 'source' && !url.startsWith('https:'))
+        || (value.kind === 'generated' && !url.startsWith('/api/v1/outfit-techniques/comparison-images/'))) return []
+    seen.add(url)
+    return [{ url, alt }]
+  })
+  if (images.length !== value.images.length) return null
+  const candidateSource = safeTechniqueSourceUrl(value.sourceUrl)
+  const sourceUrl = candidateSource && new URL(candidateSource).protocol === 'https:' ? candidateSource : null
+  if (value.kind === 'source' && !sourceUrl) return null
+  return { kind: value.kind, images, ...(sourceUrl ? { sourceUrl } : {}),
+    ...(text(value.note, 1000) ? { note: text(value.note, 1000) } : {}) }
+}
+
+// The browser stores only a public lesson ID and this content-version digest.
+export function techniqueProgressVersion(technique) {
+  const content = JSON.stringify([technique.title, technique.summary, technique.sourceNotes,
+    technique.synthesisNote, technique.steps, technique.reason, technique.example,
+    technique.suitable, technique.limit, technique.check, technique.sources, technique.comparisonVisual])
+  let left = 2166136261
+  let right = 3339675911
+  for (let index = 0; index < content.length; index++) {
+    left = Math.imul(left ^ content.charCodeAt(index), 16777619)
+    right = Math.imul(right ^ content.charCodeAt(index), 2246822519)
+  }
+  return `v1-${(left >>> 0).toString(16).padStart(8, '0')}${(right >>> 0).toString(16).padStart(8, '0')}`
+}
+
+export function normalizeTechniqueProgress(value) {
+  try {
+    const entries = JSON.parse(value)
+    if (!Array.isArray(entries)) return []
+    return entries.filter(entry => Array.isArray(entry) && entry.length === 2
+      && text(entry[0], 200) && typeof entry[1] === 'string' && /^v1-[a-f0-9]{16}$/.test(entry[1]))
+      .map(([id, version]) => [id.trim(), version])
+  } catch { return [] }
+}
+
+function normalizeSource(value, generationMode) {
   if (!value || typeof value !== 'object') return null
   const id = text(value.id, 200)
   const title = text(value.title, 500)
@@ -29,21 +80,22 @@ function normalizeSource(value) {
     && Number.isFinite(Date.parse(value.readAt)) ? value.readAt : null
   if (!id || !title || !url || !platform || !readAt) return null
   return { id, title, url, platform, readAt, author: text(value.author, 200) || '原文未署名',
-    publishedAt: text(value.publishedAt, 100), scope: AI_READING_SCOPE }
+    publishedAt: text(value.publishedAt, 100), scope: generationMode === 'weekly-ai' ? AI_READING_SCOPE
+      : text(value.scope, 1000) || '已核读文字正文；未独立查看原图或观看视频。历史方法参考。' }
 }
 
 function normalizeWeeklyTechnique(value) {
-  if (!value || typeof value !== 'object' || value.generationMode !== 'weekly-ai') return null
+  if (!value || typeof value !== 'object' || !['weekly-ai', 'curated'].includes(value.generationMode)) return null
   const publishedAt = instant(value.publishedAt)
-  if (!publishedAt || !Array.isArray(value.sources) || value.sources.length > 10
+  if ((value.generationMode === 'weekly-ai' && !publishedAt) || !Array.isArray(value.sources) || value.sources.length > 10
       || !Array.isArray(value.sourceNotes) || value.sourceNotes.length > 20
       || !Array.isArray(value.steps) || value.steps.length < 2 || value.steps.length > 10) return null
-  const normalized = { publishedAt, generationMode: 'weekly-ai' }
+  const normalized = { publishedAt, generationMode: value.generationMode }
   for (const field of ['id', 'category', 'title', 'summary', 'synthesisNote', 'reason', 'suitable', 'limit', 'check']) {
     normalized[field] = text(value[field], ['id', 'category'].includes(field) ? 200 : 4000)
     if (!normalized[field]) return null
   }
-  normalized.sources = value.sources.map(normalizeSource)
+  normalized.sources = value.sources.map(source => normalizeSource(source, value.generationMode))
   if (!normalized.sources.length || normalized.sources.some(source => !source)
       || new Set(normalized.sources.map(source => source.id)).size !== normalized.sources.length
       || new Set(normalized.sources.map(source => source.url)).size !== normalized.sources.length) return null
@@ -59,6 +111,7 @@ function normalizeWeeklyTechnique(value) {
   const after = text(value.example?.after)
   if (!before || !after) return null
   normalized.example = { before, after }
+  normalized.comparisonVisual = normalizeTechniqueComparisonVisual(value.comparisonVisual)
   return normalized
 }
 
@@ -67,11 +120,11 @@ export function normalizeOutfitTechniqueFeed(payload) {
     return { items: [], latestPublishedAt: null, status: null }
   }
   const items = payload.data.items.slice(0, 60).map(normalizeWeeklyTechnique).filter(Boolean)
-    .sort((left, right) => Date.parse(right.publishedAt) - Date.parse(left.publishedAt))
+    .sort((left, right) => (Date.parse(right.publishedAt) || 0) - (Date.parse(left.publishedAt) || 0))
   return {
     items,
     // Only advertise dates backed by a valid lesson that can actually be read.
-    latestPublishedAt: items[0]?.publishedAt || null,
+    latestPublishedAt: items.find(item => item.generationMode === 'weekly-ai')?.publishedAt || null,
     status: FEED_STATUSES.has(payload.data.status) ? payload.data.status : null
   }
 }

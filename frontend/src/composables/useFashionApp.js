@@ -98,6 +98,17 @@ async function readApiBody(response) {
   return response.json().catch(() => null)
 }
 
+async function fetchApi(path, options) {
+  try {
+    return await fetch(path, options)
+  } catch (cause) {
+    if (!(cause instanceof TypeError)) throw cause
+    const error = new Error('无法连接服务器，请检查网络或服务是否启动后重试。', { cause })
+    error.networkError = true
+    throw error
+  }
+}
+
 function responseError(response, body, fallback = '请求失败，请稍后再试。') {
   const error = new Error(body?.message || `${fallback} (${response.status})`)
   error.status = response.status
@@ -117,6 +128,8 @@ export function useFashionApp() {
   let trendRequestVersion = 0
   let historyRequestVersion = 0
   let favoritesRequestVersion = 0
+  let adminFeedbackRequestVersion = 0
+  let pendingWardrobeRead = null
   const visualCache = new Map()
   const state = reactive({
     authPhase: 'checking',
@@ -216,6 +229,8 @@ export function useFashionApp() {
   function resetPrivateState() {
     state.selectedTrendReference = null
     sessionVersion += 1
+    pendingWardrobeRead = null
+    adminFeedbackRequestVersion += 1
     visualCache.clear()
     state.wardrobe = []
     state.tryOnFavorites = []
@@ -322,7 +337,7 @@ export function useFashionApp() {
 
   async function refreshCsrf(expectedSessionVersion = sessionVersion) {
     if (expectedSessionVersion !== sessionVersion) throw sessionChangedError()
-    const response = await fetch('/api/v1/auth/csrf', {
+    const response = await fetchApi('/api/v1/auth/csrf', {
       credentials: 'same-origin',
       headers: { Accept: 'application/json' }
     })
@@ -355,7 +370,7 @@ export function useFashionApp() {
     }
     if (requestVersion !== sessionVersion) throw sessionChangedError()
 
-    const response = await fetch(path, {
+    const response = await fetchApi(path, {
       ...options,
       method,
       credentials: 'same-origin',
@@ -559,17 +574,36 @@ export function useFashionApp() {
   async function loadWardrobe() {
     if (state.authPhase !== 'authenticated' || state.wardrobeLoading) return null
     const version = sessionVersion
+    const read = { changes: new Map() }
+    pendingWardrobeRead = read
     state.wardrobeLoading = true
     try {
-      const wardrobe = await request('/api/v1/me/wardrobe')
-      if (isCurrentSession(version)) state.wardrobe = wardrobe
+      let wardrobe = await request('/api/v1/me/wardrobe')
+      if (isCurrentSession(version)) {
+        // Preserve writes that completed after this snapshot was requested.
+        for (const [itemId, item] of read.changes) wardrobe = applyWardrobeChange(wardrobe, itemId, item)
+        state.wardrobe = wardrobe
+      }
       return wardrobe
     } catch (cause) {
-      showError(cause)
+      if (isCurrentSession(version)) showError(cause)
       return null
     } finally {
+      if (pendingWardrobeRead === read) pendingWardrobeRead = null
       if (isCurrentSession(version)) state.wardrobeLoading = false
     }
+  }
+
+  function applyWardrobeChange(items, itemId, item) {
+    if (!item) return items.filter(candidate => candidate.id !== itemId)
+    return items.some(candidate => candidate.id === itemId)
+      ? items.map(candidate => candidate.id === itemId ? item : candidate)
+      : [item, ...items]
+  }
+
+  function recordWardrobeChange(itemId, item) {
+    pendingWardrobeRead?.changes.set(itemId, item)
+    state.wardrobe = applyWardrobeChange(state.wardrobe, itemId, item)
   }
 
   async function loadTryOnFavorites() {
@@ -738,9 +772,10 @@ export function useFashionApp() {
   }
 
   async function loadAdminFeedback(options = {}) {
-    if (!isAdmin.value || state.adminFeedbackLoading) return null
+    if (!isAdmin.value) return null
     const page = Number.isInteger(options.page) ? options.page : 0
     const version = sessionVersion
+    const requestVersion = ++adminFeedbackRequestVersion
     state.adminFeedbackLoading = true
     try {
       const params = new URLSearchParams({ page: String(page), size: String(ADMIN_PAGE_SIZE) })
@@ -750,7 +785,7 @@ export function useFashionApp() {
       const query = state.adminFeedbackQuery.trim()
       if (query) params.set('query', query)
       const result = await request(`/api/v1/admin/feedback?${params.toString()}`)
-      if (isCurrentSession(version)) {
+      if (isCurrentSession(version) && requestVersion === adminFeedbackRequestVersion) {
         state.adminFeedback = result.items || []
         state.adminFeedbackTotal = Number(result.totalElements || 0)
         state.adminFeedbackPage = Number(result.page || 0)
@@ -758,10 +793,10 @@ export function useFashionApp() {
       }
       return result
     } catch (cause) {
-      showError(cause)
+      if (isCurrentSession(version) && requestVersion === adminFeedbackRequestVersion) showError(cause)
       return null
     } finally {
-      if (isCurrentSession(version)) state.adminFeedbackLoading = false
+      if (isCurrentSession(version) && requestVersion === adminFeedbackRequestVersion) state.adminFeedbackLoading = false
     }
   }
 
@@ -1137,9 +1172,6 @@ export function useFashionApp() {
             style: state.garmentForm.style
           })
         })
-        if (isCurrentSession(version)) {
-          state.wardrobe = state.wardrobe.map((candidate) => candidate.id === item.id ? item : candidate)
-        }
       } else if (state.selectedImage) {
         const formData = new FormData()
         formData.append('image', state.selectedImage)
@@ -1148,15 +1180,16 @@ export function useFashionApp() {
           if (key !== 'imageUrl' && value) formData.append(key, value)
         }
         item = await requestMultipart('/api/v1/me/wardrobe/upload', formData)
-        if (isCurrentSession(version)) state.wardrobe = [item, ...state.wardrobe]
       } else {
         item = await request('/api/v1/me/wardrobe', {
           method: 'POST',
           body: JSON.stringify(state.garmentForm)
         })
-        if (isCurrentSession(version)) state.wardrobe = [item, ...state.wardrobe]
       }
-      if (isCurrentSession(version)) resetGarmentForm()
+      if (isCurrentSession(version)) {
+        recordWardrobeChange(item.id, item)
+        resetGarmentForm()
+      }
       return item
     } catch (cause) {
       showError(cause)
@@ -1173,7 +1206,7 @@ export function useFashionApp() {
     clearError()
     try {
       await request(`/api/v1/me/wardrobe/${itemId}`, { method: 'DELETE' })
-      if (isCurrentSession(version)) state.wardrobe = state.wardrobe.filter((item) => item.id !== itemId)
+      if (isCurrentSession(version)) recordWardrobeChange(itemId, null)
       return true
     } catch (cause) {
       showError(cause)

@@ -41,7 +41,7 @@ class TechniqueGenerationClientTest {
         assertEquals("weekly-ai", value.generationMode());
         assertEquals("作者甲", value.sources().get(0).author());
         assertNull(value.sources().get(1).publishedAt());
-        assertTrue(value.sources().get(0).scope().contains("未人工核读"));
+        assertTrue(value.sources().get(0).scope().contains("未人工核验图片"));
         assertEquals(2, value.sources().size());
         assertEquals(3, value.sourceNotes().size());
         String publicJson = mapper.writeValueAsString(value);
@@ -49,6 +49,9 @@ class TechniqueGenerationClientTest {
         assertFalse(publicJson.contains(FIRST_QUOTE));
         assertFalse(publicJson.contains("article body"));
         assertEquals(NOW, value.publishedAt());
+        var legacyPayload = (ObjectNode) mapper.valueToTree(value);
+        legacyPayload.remove("comparisonVisual");
+        assertNull(mapper.treeToValue(legacyPayload, OutfitTechnique.class).comparisonVisual());
     }
 
     @Test void inventedEvidenceAndCrossSourceEvidenceAreRejected() {
@@ -58,6 +61,24 @@ class TechniqueGenerationClientTest {
         ObjectNode wrongSource = draft();
         ((ObjectNode) wrongSource.path("sourceNotes").get(0)).put("sourceId", "b");
         assertThrows(IllegalArgumentException.class, () -> client.validateDraft(wrongSource, articles(), List.of(), "m", NOW));
+    }
+
+    @Test void originalImageSelectionUsesCollectedMetadataAndRespectsAnExplicitNoMatch() {
+        var first = articles().get(0);
+        var illustrated = new TechniqueArticle(first.id(), first.title(), first.url(), first.author(), first.platform(),
+                first.publishedAt(), first.fetchedAt(), first.text(), List.of(new TechniqueArticle.ComparisonImage(
+                        "https://publisher.test/collar-comparison.jpg", "领口调整前后", "领口对照", "领口边缘")));
+        var inputs = List.of(illustrated, articles().get(1));
+        var noMatch = draft().putNull("comparisonSourceId");
+        assertNull(client.validateDraft(noMatch, inputs, List.of(), "m", NOW).comparisonVisual());
+        var selected = draft().put("comparisonSourceId", first.id());
+        var visual = client.validateDraft(selected, inputs, List.of(), "m", NOW).comparisonVisual();
+        assertEquals("source", visual.kind());
+        assertEquals("https://publisher.test/collar-comparison.jpg", visual.images().get(0).url());
+        assertThrows(IllegalArgumentException.class, () -> client.validateDraft(
+                draft().put("comparisonSourceId", "invented"), inputs, List.of(), "m", NOW));
+        var inventedUrl = draft().put("comparisonVisual", "https://untrusted.test/invented.jpg");
+        assertThrows(IllegalArgumentException.class, () -> client.validateDraft(inventedUrl, inputs, List.of(), "m", NOW));
     }
 
     @Test void oneSourceDuplicateEvidenceAndDuplicateTitlesAreRejected() {

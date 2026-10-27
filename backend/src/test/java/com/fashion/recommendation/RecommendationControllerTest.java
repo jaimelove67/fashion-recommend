@@ -621,6 +621,38 @@ class RecommendationControllerTest {
                 .andExpect(jsonPath("$.data.generationAudit.fallbackReason").value("request-failed"));
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"衣", "🧥"})
+    void persistsRuleRecommendationWithMaximumLengthNamesAndOccasion(String character) throws Exception {
+        String userId = "long-rule-summary-" + character.codePointAt(0);
+        String name = character.repeat(120 / character.length());
+        String occasion = "会议".repeat(40);
+        for (String category : List.of("上装", "下装", "鞋履", "配饰")) {
+            createItem(userId, name, category, "白色");
+        }
+
+        var generated = mockMvc.perform(post("/api/v1/recommendations")
+                        .with(user(userId)).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "occasion", occasion, "city", "长沙", "manualTemperatureC", 24))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.engine").value("development-rule-v1"))
+                .andExpect(jsonPath("$.data.items.length()").value(4))
+                .andReturn();
+        JsonNode recommendation = readData(generated);
+        String summary = recommendation.path("summary").asText();
+        assertTrue(summary.length() <= 500);
+        assertTrue(summary.startsWith(occasion + "推荐："));
+        assertTrue(summary.endsWith("…"));
+        assertFalse(summary.codePoints().anyMatch(codePoint -> codePoint >= 0xD800 && codePoint <= 0xDFFF),
+                "Shortening a summary must not split a Unicode surrogate pair");
+        recommendation.path("items").forEach(item -> assertEquals(name, item.path("name").asText()));
+        assertEquals(summary, jdbcTemplate.queryForObject(
+                "SELECT summary FROM recommendations WHERE id = ? AND user_id = ?",
+                String.class, recommendation.path("id").asLong(), userId));
+    }
+
     @Test
     void rejectsExistingItemFromAnotherUsersWardrobeAndFallsBackAsAWhole() throws Exception {
         String userId = "llm-id-validation-user";

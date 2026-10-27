@@ -91,6 +91,19 @@ class DailyCollectorTests(unittest.TestCase):
             self.assertIsNone(data['items'][0]['evidence']['fullBodyImageUrl'])
             self.assertEqual(data, json.loads((Path(folder) / 'weibo.json').read_text(encoding='utf-8')))
 
+    def test_daily_export_limits_emoji_text_and_preserves_full_copy_classification(self):
+        item = dict(self.item, title='穿搭' + '衣' * 197 + '😀', summary='衣' * 599 + '😀',
+                    author='名' * 119 + '😀', content='女士穿搭')
+        with tempfile.TemporaryDirectory() as folder:
+            collector.collect('weibo', Path(folder), search_fn=lambda *args: [item])
+            exported = json.loads((Path(folder) / 'weibo.json').read_text(encoding='utf-8'))['items'][0]
+        self.assertEqual('穿搭' + '衣' * 197, exported['title'])
+        self.assertEqual('衣' * 599, exported['summary'])
+        self.assertEqual('名' * 119, exported['evidence']['author'])
+        self.assertIn('女装穿搭', exported['topicTags'])
+        self.assertEqual(item['publishedAt'], exported['publishedAt'])
+        self.assertEqual(item['images'], exported['evidence']['images'])
+
     def test_default_queries_cover_audiences_and_style_without_labels_from_query(self):
         for platform in collector.PLATFORMS:
             with self.subTest(platform=platform):

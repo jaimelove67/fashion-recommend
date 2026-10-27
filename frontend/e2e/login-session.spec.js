@@ -12,6 +12,7 @@ test('guest login reaches the real session service and same-origin requests pass
   expect(Boolean(csrfBody.data?.token && csrfBody.data?.headerName)).toBe(true)
 
   await page.getByRole('button', { name: '登录 / 注册', exact: true }).click()
+  await page.getByRole('button', { name: '直接登录', exact: true }).click()
   await expect(page.getByRole('heading', { name: '登录知己', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '登录知己', exact: true })).toBeEnabled()
   await expect(page.getByRole('alert')).toHaveCount(0)

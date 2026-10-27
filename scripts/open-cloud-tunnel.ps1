@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
     [string] $Server = '193.112.24.191',
+    [ValidateRange(1, 65535)]
     [int] $LocalPort = 18090,
+    [ValidateRange(1, 65535)]
+    [int] $RemotePort = 80,
     [switch] $OpenBrowser
 )
 
@@ -18,7 +21,7 @@ if (Get-NetTCPConnection -State Listen -LocalPort $LocalPort -ErrorAction Silent
 }
 $sshArguments = @(
     '-i', ('"{0}"' -f $identityFile),
-    '-N', '-L', "127.0.0.1:${LocalPort}:127.0.0.1:8090",
+    '-N', '-L', "127.0.0.1:${LocalPort}:127.0.0.1:${RemotePort}",
     '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes',
     '-o', 'StrictHostKeyChecking=yes', '-o', ('UserKnownHostsFile="{0}"' -f $knownHosts),
     '-o', 'ExitOnForwardFailure=yes', '-o', 'ServerAliveInterval=30',
@@ -33,6 +36,16 @@ for ($attempt = 0; $attempt -lt 20; $attempt++) {
     }
     if (Get-NetTCPConnection -State Listen -LocalPort $LocalPort -ErrorAction SilentlyContinue) {
         $url = "http://127.0.0.1:$LocalPort"
+        try {
+            $loginProbe = Invoke-RestMethod -Uri "$url/api/v1/auth/csrf" `
+                -Headers @{ Accept = 'application/json' } -TimeoutSec 8
+            if ($loginProbe.code -ne 0 -or -not $loginProbe.data.token -or -not $loginProbe.data.headerName) {
+                throw 'The login endpoint did not return a valid session response.'
+            }
+        } catch {
+            Stop-Process -Id $sshProcess.Id -ErrorAction SilentlyContinue
+            throw "SSH connected, but the website login service is unavailable. Check the server listener and -RemotePort (currently $RemotePort)."
+        }
         if ($OpenBrowser) { Start-Process $url }
         Write-Output "Cloud project tunnel is ready: $url (process $($sshProcess.Id))"
         return

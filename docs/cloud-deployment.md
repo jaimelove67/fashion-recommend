@@ -12,7 +12,7 @@
 ssh -N -L 127.0.0.1:8090:127.0.0.1:8090 -i <本机私钥路径> root@193.112.24.191
 ```
 
-当前工作区已准备专用 SSH 连接时，也可以运行 `powershell -ExecutionPolicy Bypass -File scripts/open-cloud-tunnel.ps1 -OpenBrowser`，在后台开启隧道并打开页面。该辅助脚本默认使用 `http://127.0.0.1:18090`，对应服务器 `PUBLIC_ORIGIN` 也应为该地址。使用独立端口避免占用开发环境入口；使用 127.0.0.1 可与通常位于 localhost 的开发站点分开登录 Cookie，因为 Cookie 不按端口隔离。脚本使用本机忽略目录下受权限保护的密钥副本与已核验服务器记录，不把密钥写入源码。
+当前工作区已准备专用 SSH 连接时，也可以运行 `powershell -ExecutionPolicy Bypass -File scripts/open-cloud-tunnel.ps1 -OpenBrowser`，在后台开启隧道并打开页面。该辅助脚本默认使用 `http://127.0.0.1:18090`，转发至当前实例的服务器 HTTP 端口 `80`；对于仍监听默认回环端口 `8090` 的新环境，增加 `-RemotePort 8090`，也可用 `-LocalPort` 改本机端口。脚本会实际检查登录会话接口返回有效 JSON 后才报告连接成功，不能仅以本机端口已监听判断网站可用。使用独立端口避免占用开发环境入口；使用 127.0.0.1 可与通常位于 localhost 的开发站点分开登录 Cookie，因为 Cookie 不按端口隔离。脚本使用本机忽略目录下受权限保护的密钥副本与已核验服务器记录，不把密钥写入源码。
 
 若本机 8090 已被开发环境占用，改用其他本机端口，并将服务器 `.env.cloud` 的 `PUBLIC_ORIGIN` 改为相应的 `http://localhost:端口`，重新创建后端。不要覆盖或停止无关的本机服务。
 
@@ -64,6 +64,44 @@ CLOUD_MC_IMAGE=fashion-recommendation-cloud-mc:a7fe349ef4bd
 效果图客户端在解码阶段对子图采样，最长边限制为 2048px；每个后端实例只允许一路在途生图，忙碌请求返回明确失败信息供稍后重试。没有新增本地模型或 GPU 依赖。
 
 新环境不创建公开的默认账号，也不导入本地演示账号或个人照片。正常注册后即可使用个人功能；管理员角色应针对明确的账号单独授予，不能运行本地 demo seed 来建立生产管理员。
+
+## 已登录公开微博导入
+
+本地微博登录仅用于读取公开帖子，不把登录凭据、浏览器会话或私密内容上传服务器。保留原帖真实发布时间与采集时间，导入后按照[内容与图片复核规则](trend-content-policy.md)检查文案、封面和全部拟发布图片，仅在检查通过后由管理员批准；导入文件不能自行授予公开权限。
+
+将候选 JSON 放在服务器独立目录（例如 `/opt/zhiji/shared/reviewed-trend-imports/weibo.json`），避免被日常采集器覆盖。备份现有 `.env.cloud` 后设置：
+
+```dotenv
+TREND_WEIBO_URL=
+TREND_IMPORT_PATH=/opt/zhiji/shared/reviewed-trend-imports
+```
+
+显式空的 `TREND_WEIBO_URL` 停用微博采集器 URL；未设置该变量时仍使用原采集器地址。`TREND_IMPORT_PATH` 只替换后端 `/app/trend-data` 的只读挂载来源，采集器自身的数据目录不变。将需要保留的其他平台导入文件一并放入独立目录。
+
+设置后在当前发布目录仅重建后端，并重载前端 Nginx 以刷新后端地址；不要输出完整 Compose 配置或环境秘密：
+
+```bash
+docker compose --env-file .env.cloud -f docker-compose.yml -f docker-compose.cloud.yml --profile app config --quiet
+docker compose --env-file .env.cloud -f docker-compose.yml -f docker-compose.cloud.yml --profile app up -d --no-deps --no-build --pull never --wait --wait-timeout 300 backend
+docker compose --env-file .env.cloud -f docker-compose.yml -f docker-compose.cloud.yml --profile app exec -T frontend nginx -t
+docker compose --env-file .env.cloud -f docker-compose.yml -f docker-compose.cloud.yml --profile app exec -T frontend nginx -s reload
+```
+
+TLS 部署应在上述每条命令的文件列表中追加 `-f docker-compose.cloud.tls.yml`。每日精选仍要求原帖发布时间与采集时间均在最近 24 小时内，过期后会退出每日精选；本次导入不会在服务器自动登录微博或自动更新，后续需重新读取公开帖子并复核，不得修改日期维持展示。
+
+## 公网 HTTP 接入
+
+如需先通过 `http://www.jaime.ltd` 访问，可在备份服务器现有 `.env.cloud` 后修改以下字段；每个字段只保留一行，不重新初始化密码或加密密钥：
+
+```dotenv
+PUBLIC_ORIGIN=http://www.jaime.ltd
+FRONTEND_BIND_IP=0.0.0.0
+FRONTEND_PORT=80
+```
+
+在当前发布目录运行 `bash scripts/cloud-deploy.sh http --no-build`，并在云安全组放行 TCP 80。`FRONTEND_BIND_IP` 默认仍为 `127.0.0.1`，上述配置只开放前端网站，数据库、MinIO 和后端端口继续绑定回环地址。公网 HTTP 不加密传输，配套扩展不支持公网 HTTP；正式切换前应确认适用的备案手续已完成。使用前述 SSH 隧道地址验收的部署切换后，应改用这里的 HTTP 域名访问。
+
+后续开启 HTTPS 时按下一节准备证书并切换 TLS 覆盖配置；HTTP 与 TLS 使用不同的监听变量，TLS 覆盖会替换这里的 HTTP 端口映射。
 
 ## HTTPS 公网接入
 

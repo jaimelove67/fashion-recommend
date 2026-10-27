@@ -50,6 +50,160 @@ class BailianImageGenerationClientTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void comparisonKeepsSharedPermitWhileReservingBudgetAndSubmitting() throws Exception {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        var client = new BailianImageGenerationClient(builder.build(), objectMapper, new DefaultResourceLoader(),
+                mock(ImageStorage.class),
+                "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+                "https://dashscope.aliyuncs.com/api/v1/tasks", "test-key", "wan2.6-image", true,
+                "unused", "unused", "", Duration.ofSeconds(1), Duration.ofMillis(1));
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            server.expect(requestTo("https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation"))
+                    .andRespond(withSuccess("{\"output\":{\"results\":[{\"url\":\"https://result.test/comparison.png\"}]}}",
+                            MediaType.APPLICATION_JSON));
+            var result = client.generateTechniqueComparison("腰线比较", "调整前", "调整后", () -> {
+                try {
+                    var ordinary = executor.submit(() -> client.generate("MALE", "通勤", "杭州", 24.0, List.of()))
+                            .get(2, TimeUnit.SECONDS);
+                    assertEquals("FAILED", ordinary.status());
+                    assertTrue(ordinary.message().contains("繁忙"));
+                    return true;
+                } catch (Exception exception) { throw new IllegalStateException(exception); }
+            });
+            assertTrue(result.succeeded());
+            server.verify();
+        } finally { executor.shutdownNow(); }
+    }
+
+    @Test
+    void refusedOrFailedBudgetReservationReleasesPermitWithoutSubmitting() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        var client = new BailianImageGenerationClient(builder.build(), objectMapper, new DefaultResourceLoader(),
+                mock(ImageStorage.class),
+                "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+                "https://dashscope.aliyuncs.com/api/v1/tasks", "test-key", "wan2.6-image", true,
+                "unused", "unused", "", Duration.ofSeconds(1), Duration.ofMillis(1));
+        assertEquals("UNAVAILABLE", client.generateTechniqueComparison("腰线比较", "调整前", "调整后", () -> false).status());
+        assertEquals("FAILED", client.generateTechniqueComparison("腰线比较", "调整前", "调整后", () -> {
+            throw new IllegalStateException("database-unavailable");
+        }).status());
+        server.verify();
+        server.expect(requestTo("https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation"))
+                .andRespond(withServerError());
+        assertEquals("FAILED", client.generateTechniqueComparison("腰线比较", "调整前", "调整后", () -> true).status());
+        server.verify();
+        var permit = (java.util.concurrent.Semaphore) ReflectionTestUtils.getField(client, "generationPermit");
+        assertEquals(1, permit.availablePermits());
+    }
+
+    @Test
+    void comparisonSubmitsExactlyOneImageWithOnlyPublicLessonTextAndDoesNotRetryFailure() throws Exception {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        ImageStorage storage = mock(ImageStorage.class);
+        var client = new BailianImageGenerationClient(builder.build(), objectMapper, new DefaultResourceLoader(), storage,
+                "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+                "https://dashscope.aliyuncs.com/api/v1/tasks", "test-key", "wan2.6-image", true, "unused", "unused", "",
+                Duration.ofSeconds(1), Duration.ofMillis(1));
+        assertTrue(client.comparisonAvailable());
+        server.expect(requestTo("https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation"))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.method(org.springframework.http.HttpMethod.POST))
+                .andExpect(header("X-DashScope-Async", "enable")).andExpect(request -> {
+            var body = (org.springframework.mock.http.client.MockClientHttpRequest) request;
+            var payload = objectMapper.readTree(body.getBodyAsString());
+            assertEquals(1, payload.path("parameters").path("n").asInt());
+            assertEquals(1, payload.path("parameters").path("max_images").asInt());
+            assertTrue(payload.path("parameters").path("enable_interleave").asBoolean());
+            var content = payload.path("input").path("messages").get(0).path("content");
+            assertEquals(1, content.size());
+            assertTrue(content.get(0).path("text").asText().contains("调整前腰线模糊"));
+            assertFalse(content.get(0).has("image"));
+        }).andRespond(withServerError());
+        assertFalse(client.generateTechniqueComparison("腰线比较", "调整前腰线模糊", "调整后腰线清晰").succeeded());
+        org.mockito.Mockito.verifyNoInteractions(storage);
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"dashscope.aliyuncs.com,multimodal-generation", "dashscope-intl.aliyuncs.com,image-generation",
+            "dashscope-us.aliyuncs.com,multimodal-generation"})
+    void comparisonUsesRegionalAsyncEndpointAndOneCreationThenOnlyPolls(String host, String configuredFamily) throws Exception {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        ImageStorage storage = mock(ImageStorage.class);
+        String base = "https://" + host;
+        var client = new BailianImageGenerationClient(builder.build(), objectMapper, new DefaultResourceLoader(), storage,
+                base + "/api/v1/services/aigc/" + configuredFamily + "/generation", base + "/api/v1/tasks",
+                "test-key", "wan2.6-image", true, "unused", "unused", "", Duration.ofSeconds(2), Duration.ofMillis(1));
+        assertTrue(client.comparisonAvailable());
+        server.expect(requestTo(base + "/api/v1/services/aigc/image-generation/generation"))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.method(org.springframework.http.HttpMethod.POST))
+                .andExpect(header("X-DashScope-Async", "enable")).andExpect(header("Authorization", "Bearer test-key"))
+                .andExpect(request -> {
+                    var payload = objectMapper.readTree(((org.springframework.mock.http.client.MockClientHttpRequest) request).getBodyAsString());
+                    assertEquals("wan2.6-image", payload.path("model").asText());
+                    assertEquals(1, payload.path("parameters").path("n").asInt());
+                    assertEquals(1, payload.path("parameters").path("max_images").asInt());
+                    assertTrue(payload.path("parameters").path("enable_interleave").asBoolean());
+                    assertEquals("1280*800", payload.path("parameters").path("size").asText());
+                    var content = payload.path("input").path("messages").get(0).path("content");
+                    assertEquals(1, content.size());
+                    assertTrue(content.get(0).has("text"));
+                    assertFalse(content.get(0).has("image"));
+                }).andRespond(withSuccess("{\"request_id\":\"comparison-request\",\"output\":{\"task_id\":\"comparison-task\",\"task_status\":\"PENDING\"}}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(base + "/api/v1/tasks/comparison-task"))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.method(org.springframework.http.HttpMethod.GET))
+                .andExpect(headerDoesNotExist("X-DashScope-Async"))
+                .andRespond(withSuccess("{\"output\":{\"task_status\":\"RUNNING\"}}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(base + "/api/v1/tasks/comparison-task"))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.method(org.springframework.http.HttpMethod.GET))
+                .andRespond(withSuccess("{\"output\":{\"task_status\":\"SUCCEEDED\",\"choices\":[{\"message\":{\"content\":[{\"text\":\"示意图\"},{\"image\":\"https://result.test/comparison.png\"}]}}]}}", MediaType.APPLICATION_JSON));
+        var result = client.generateTechniqueComparison("腰线比较", "调整前腰线模糊", "调整后腰线清晰");
+        assertTrue(result.succeeded());
+        assertEquals("https://result.test/comparison.png", result.imageUrl());
+        assertEquals("comparison-request", result.requestId());
+        org.mockito.Mockito.verifyNoInteractions(storage);
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"wan2.5-t2i-preview,DASHSCOPE", "wan2.6-t2i,DASHSCOPE", "gpt-image-1,OPENAI", "wan2.6-image,OPENAI"})
+    void unsupportedComparisonModelConfigurationIsUnavailableWithoutMakingARequest(String selectedModel, AiModelProvider provider) {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        var client = imageClient(builder.build());
+        AiModelConfigurationService configuration = mock(AiModelConfigurationService.class);
+        var config = new AiModelRuntimeConfig(AiModelCapability.DAILY_IMAGE_GENERATION, provider, selectedModel, "test-key", true,
+                "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+                "https://dashscope.aliyuncs.com/api/v1/tasks", "ENVIRONMENT", true, false, true, null);
+        when(configuration.resolve(AiModelCapability.DAILY_IMAGE_GENERATION)).thenReturn(config);
+        when(configuration.isEffectivelyEnabled(config)).thenReturn(true);
+        ReflectionTestUtils.setField(client, "modelConfigurationService", configuration);
+        assertFalse(client.comparisonAvailable());
+        assertEquals("UNAVAILABLE", client.generateTechniqueComparison("课文", "调整前", "调整后").status());
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "https://dashscope.aliyuncs.com.evil.test/api/v1/services/aigc/multimodal-generation/generation,https://dashscope.aliyuncs.com/api/v1/tasks",
+            "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation,https://dashscope-intl.aliyuncs.com/api/v1/tasks",
+            "http://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation,https://dashscope.aliyuncs.com/api/v1/tasks",
+            "https://dashscope.aliyuncs.com/api/v1/services/aigc/unverified/generation,https://dashscope.aliyuncs.com/api/v1/tasks"})
+    void unverifiedComparisonEndpointsAreRejectedWithoutSendingCredentials(String configuredEndpoint, String tasks) {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        var client = new BailianImageGenerationClient(builder.build(), objectMapper, new DefaultResourceLoader(), mock(ImageStorage.class),
+                configuredEndpoint, tasks, "test-key", "wan2.6-image", true, "unused", "unused", "", Duration.ofSeconds(1), Duration.ofMillis(1));
+        assertFalse(client.comparisonAvailable());
+        assertEquals("UNAVAILABLE", client.generateTechniqueComparison("课文", "调整前", "调整后").status());
+        server.verify();
+    }
+
+    @Test
     void generatesWanImageSynchronouslyWithoutAsyncHeader() throws Exception {
         RestClient.Builder builder = RestClient.builder().baseUrl("http://aliyun.test");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();

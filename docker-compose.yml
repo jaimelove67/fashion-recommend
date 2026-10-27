@@ -109,7 +109,7 @@ services:
       TREND_NICHE_SHARE: ${TREND_NICHE_SHARE:-0.25}
       TREND_IMPORT_DIRECTORY: /app/trend-data
       TREND_DOUYIN_URL: ${TREND_DOUYIN_URL:-http://trend-collector:8766/douyin.json}
-      TREND_WEIBO_URL: ${TREND_WEIBO_URL:-http://trend-collector:8766/weibo.json}
+      TREND_WEIBO_URL: ${TREND_WEIBO_URL-http://trend-collector:8766/weibo.json}
       TREND_XIAOHONGSHU_URL: ${TREND_XIAOHONGSHU_URL:-http://trend-collector:8766/xiaohongshu.json}
       TREND_REFRESH_CRON: ${TREND_REFRESH_CRON:-0 0 12 * * *}
       TREND_COLLECTION_READ_TIMEOUT: ${TREND_COLLECTION_READ_TIMEOUT:-300s}
@@ -142,7 +142,7 @@ services:
       WEATHER_CONFIGURED_WEATHER_CODE: ${WEATHER_CONFIGURED_WEATHER_CODE:-}
       WEATHER_CONFIGURED_WIND_SPEED_KMH: ${WEATHER_CONFIGURED_WIND_SPEED_KMH:-}
     volumes:
-      - ./tools/trend-collector/data:/app/trend-data:ro
+      - ${TREND_IMPORT_PATH:-./tools/trend-collector/data}:/app/trend-data:ro
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8088}:8080"
     depends_on:
@@ -164,7 +164,7 @@ services:
     build:
       context: ./frontend
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-8090}:80"
+      - "${FRONTEND_BIND_IP:-127.0.0.1}:${FRONTEND_PORT:-8090}:80"
     depends_on:
       backend:
         condition: service_healthy

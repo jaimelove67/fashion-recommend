@@ -68,6 +68,28 @@ class PublicCollectionTests(unittest.TestCase):
         self.assertIsNone(result['evidence']['fullBodyImageUrl'])
         self.assertEqual('image', result['evidence']['mediaType'])
 
+    def test_exported_text_respects_java_utf16_limits_without_splitting_emoji(self):
+        cases = (
+            ('title', '穿搭' + '衣' * 194 + '😀😀尾尾', '穿搭' + '衣' * 194 + '😀😀', 200),
+            ('title', '穿搭' + '衣' * 197 + '😀尾', '穿搭' + '衣' * 197, 200),
+            ('title', '穿搭' + '😀' * 99, '穿搭' + '😀' * 99, 200),
+            ('summary', '衣' * 599 + '😀尾', '衣' * 599, 600),
+            ('summary', '衣' * 598 + '😀尾', '衣' * 598 + '😀', 600),
+            ('author', '名' * 119 + '😀尾', '名' * 119, 120),
+            ('author', '名' * 118 + '😀尾', '名' * 118 + '😀', 120),
+        )
+        for field, source, expected, limit in cases:
+            with self.subTest(field=field, source_units=len(source.encode('utf-16-le')) // 2):
+                item = dict(self.item, platform='weibo', sourceUrl='https://weibo.com/2/detail/1234567890',
+                            **{field: source})
+                result = collector.feed_item(item, self.now)
+                exported = result['evidence'][field] if field == 'author' else result[field]
+                self.assertEqual(expected, exported)
+                self.assertLessEqual(len(exported.encode('utf-16-le')) // 2, limit)
+                self.assertEqual(item['publishedAt'], result['publishedAt'])
+                self.assertEqual(item['sourceUrl'], result['sourceUrl'])
+                self.assertEqual(item['images'], result['evidence']['images'])
+
     def test_excluded_topics_are_checked_beyond_the_short_summary(self):
         for excluded in ('演唱会', '明星同款', '巴黎时装周', 'Fashion Week', 'runway'):
             with self.subTest(excluded=excluded):

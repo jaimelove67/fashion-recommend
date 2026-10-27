@@ -107,7 +107,7 @@ public class OutfitTechniqueRepository {
             OutfitTechnique publication = new OutfitTechnique(generated.id(), generated.category(), generated.title(),
                     generated.summary(), generated.sources(), generated.sourceNotes(), generated.synthesisNote(), generated.steps(),
                     generated.reason(), generated.example(), generated.suitable(), generated.limit(), generated.check(), now,
-                    generated.generationMode(), generated.modelName());
+                    generated.generationMode(), generated.modelName(), generated.comparisonVisual());
             jdbc.update("INSERT INTO outfit_techniques(id,normalized_title,source_set_hash,payload,published_at) VALUES (?,?,?,?,?)",
                     publication.id(), normalizedTitle, sourcesHash, encode(publication), timestamp(now));
             finishAttempt(token, "PUBLISHED", null, now, result);

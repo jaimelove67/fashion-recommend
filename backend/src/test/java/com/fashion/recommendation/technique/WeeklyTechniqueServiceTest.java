@@ -62,6 +62,22 @@ class WeeklyTechniqueServiceTest {
     }
 
     @Test
+    void preservesOriginalComparisonAndIllustrationFailureCannotUndoThePublishedLesson() {
+        var result = result("with-original", "比较领口层次的方法", "one", "two");
+        var visual = new OutfitTechnique.ComparisonVisual("source", List.of(
+                new OutfitTechnique.ComparisonVisual.Image("https://publisher.test/before-after.jpg", "原文领口对照")),
+                "https://publisher.test/article", "原文对照");
+        when(generator.generate(anyList(), anyList())).thenReturn(new TechniqueGenerationResult(
+                result.technique().withComparisonVisual(visual), result.qualityScore(), result.providerCallId()));
+        var curated = mock(CuratedTechniqueCatalog.class);
+        var visuals = mock(TechniqueComparisonVisualService.class);
+        when(visuals.start()).thenThrow(new IllegalStateException("worker unavailable"));
+        service = new WeeklyTechniqueService(repository, collector, generator, true, clock, curated, visuals);
+        assertEquals("published", service.refresh().outcome());
+        assertEquals(visual, repository.latest().get(0).comparisonVisual());
+    }
+
+    @Test
     void publishesOnlyOncePerSevenDaysAndSurvivesAServiceRestart() {
         when(generator.generate(anyList(), anyList())).thenReturn(result("weekly-1", "用腰线调整比例", "one", "two"));
         assertEquals("published", service.refresh().outcome());

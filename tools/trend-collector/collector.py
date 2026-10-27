@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 import re
 from urllib.parse import urlparse
-from collect_public import outfit_topic_tags
+from collect_public import outfit_topic_tags, truncate_utf16
 
 PLATFORMS = {"dy": "douyin", "wb": "weibo"}
 # The backend rejects an import file larger than this, so status reports readiness the same way.
@@ -161,11 +161,11 @@ def normalize(row, platform, observed=None, now=None):
     if not any(host == domain or host.endswith("." + domain) for domain in allowed):
         raise ValueError("source platform mismatch")
     return {
-        "id": str(item_id)[:120], "platform": platform, "title": title[:200], "summary": description[:300],
+        "id": str(item_id)[:120], "platform": platform, "title": truncate_utf16(title, 200), "summary": description[:300],
         "topicTags": (tags or ["穿搭灵感"])[:10], "heatScore": 0,
         "publishedAt": published.isoformat(), "fetchedAt": fetched.isoformat(),
         "sourceUrl": source, "imageUrl": cover,
-        "evidence": {"author": text(row.get("nickname"))[:120], "mediaType": "video" if is_video else "image",
+        "evidence": {"author": truncate_utf16(text(row.get("nickname")), 120), "mediaType": "video" if is_video else "image",
                      "images": images or ([cover] if cover else []), "likes": count(row.get("liked_count")),
                      "favorites": count(row.get("collected_count")), "comments": count(row.get("comment_count", row.get("comments_count"))),
                      "reposts": count(row.get("share_count", row.get("shared_count"))),

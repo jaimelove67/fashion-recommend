@@ -66,6 +66,20 @@ public class TechniqueSourceCollector {
     private static final Pattern METHOD = Pattern.compile(
             "(?i)\\b(how|fit|proportion|balance|contrast|texture|layer|layering|pair|combine|colour|color|"
                     + "silhouette|formal|casual|dressing|length|volume)\\b|搭配|配色|比例|轮廓|叠穿|松量|版型|裤长");
+    private static final Pattern BEFORE_IMAGE = Pattern.compile(
+            "(?i)\\bbefore(?:\\s*[:：.)）-]|\\s*$|\\s+(?:adjustment|styling|change|tucking|hemming)\\b)"
+                    + "|(?:调整|优化|改造|修改|修正)前|原搭配|原方案");
+    private static final Pattern AFTER_IMAGE = Pattern.compile(
+            "(?i)\\bafter(?:\\s*[:：.)）-]|\\s*$|\\s+(?:adjustment|styling|change|tucking|hemming)\\b)"
+                    + "|(?:调整|优化|改造|修改|修正)后|优化搭配|调整方案");
+    private static final Pattern COMBINED_COMPARISON = Pattern.compile(
+            "(?i)\\bbefore\\s*(?:and|&|/|→|vs\\.?|-)\\s*after\\b|前后对比|前后对照|(?:调整|改造|优化)前后"
+                    + "|\\bA\\s*(?:/|vs\\.?|and|&|与|和)\\s*B\\s*(?:comparison|对比|对照)"
+                    + "|(?:对比|对照)\\s*\\bA\\s*(?:/|vs\\.?|与|和)\\s*B\\b");
+    private static final Pattern OPTION_A = Pattern.compile("(?i)(?:^|[\\s（(])(?:option|look|outfit|方案)?\\s*A\\s*[:：.)）]");
+    private static final Pattern OPTION_B = Pattern.compile("(?i)(?:^|[\\s（(])(?:option|look|outfit|方案)?\\s*B\\s*[:：.)）]");
+    private static final Pattern UNRELATED_IMAGE = Pattern.compile(
+            "(?i)\\b(logo|avatar|banner|advertisement|coupon|kitchen|architecture)\\b|头像|徽标|商标|优惠券|广告横幅|建筑改造");
 
     private final ObjectMapper mapper;
     private final List<URI> feeds;
@@ -137,6 +151,32 @@ public class TechniqueSourceCollector {
             }
         }
         if (articles.isEmpty()) throw new TechniqueSourceException("未取得可核读的完整穿搭教程正文；本周不发布新内容");
+        return List.copyOf(articles.values());
+    }
+
+    /** Re-read already attributed sources without broadening the configured publisher boundary. */
+    public List<TechniqueArticle> collectSources(List<OutfitTechnique.Source> sources) {
+        if (sources == null || sources.isEmpty()) return List.of();
+        long deadline = System.nanoTime() + COLLECTION_BUDGET_MS * 1_000_000;
+        Map<String, TechniqueArticle> articles = new LinkedHashMap<>();
+        int attempted = 0;
+        for (OutfitTechnique.Source source : sources) {
+            if (attempted++ >= MAX_SOURCES || articles.size() >= MAX_ARTICLES || System.nanoTime() >= deadline) break;
+            if (source == null) continue;
+            try {
+                URI uri = URI.create(source.url());
+                TechniqueArticle article = readArticle(fetch(uri), new Candidate(uri, source.title(),
+                        source.author(), source.platform(), source.publishedAt()));
+                if (article != null) {
+                    String id = first(source.id(), article.id());
+                    articles.putIfAbsent(article.url(), new TechniqueArticle(id, article.title(), article.url(),
+                            article.author(), article.platform(), article.publishedAt(), article.fetchedAt(),
+                            article.text(), article.comparisonImages()));
+                }
+            } catch (Exception e) {
+                log.debug("Attributed technique source unavailable");
+            }
+        }
         return List.copyOf(articles.values());
     }
 
@@ -225,8 +265,90 @@ public class TechniqueSourceCollector {
                 person(article == null ? null : article.get("publisher")), candidate.platform(), page.url().getHost());
         String date = validDate(first(meta(html, "property", "article:published_time"),
                 jsonText(article, "datePublished"), meta(html, "name", "datePublished"), candidate.date()));
-        return new TechniqueArticle(fingerprint(url), title, url, limit(author, 200), limit(platform, 200), date, clock.instant(), content);
+        return new TechniqueArticle(fingerprint(url), title, url, limit(author, 200), limit(platform, 200), date,
+                clock.instant(), content, comparisonImages(page.url(), body));
     }
+
+    private List<TechniqueArticle.ComparisonImage> comparisonImages(URI page, Element body) {
+        List<ImageEvidence> candidates = new ArrayList<>();
+        int inspected = 0;
+        // Only body images with their own captions/labels qualify; metadata covers and article
+        // first images never become comparisons merely because the surrounding tutorial compares outfits.
+        for (Element image : body.select("img")) {
+            if (inspected++ >= 40) break;
+            Element group = image.closest("figure, .wp-caption, .gallery-item, p");
+            if (group == null || group == body) group = image;
+            Element caption = group.selectFirst("figcaption, .wp-caption-text, .gallery-caption");
+            String alt = first(image.attr("alt"), image.attr("title"));
+            String captionText = caption == null ? null : limit(caption.text(), 700);
+            String label = String.join(" ", alt == null ? "" : alt, captionText == null ? "" : captionText);
+            if (UNRELATED_IMAGE.matcher(label).find()) continue;
+            String context = imageContext(group);
+            String localEvidence = label + " " + context;
+            if (!FASHION.matcher(localEvidence).find() || !METHOD.matcher(localEvidence).find()) continue;
+            String ownLabel = group.select("img").size() == 1 ? label : alt;
+            int role = imageRole(ownLabel);
+            boolean combined = COMBINED_COMPARISON.matcher(label).find()
+                    || (BEFORE_IMAGE.matcher(label).find() && AFTER_IMAGE.matcher(label).find());
+            candidates.add(new ImageEvidence(image, group, alt, captionText, context, role, combined));
+        }
+        for (ImageEvidence candidate : candidates) {
+            if (!candidate.combined() || candidate.group().select("img").size() != 1) continue;
+            var image = comparisonImage(page, candidate);
+            if (image != null) return List.of(image);
+        }
+        for (int i = 0; i + 1 < candidates.size(); i++) {
+            ImageEvidence one = candidates.get(i), two = candidates.get(i + 1);
+            if (one.role() == 0 || two.role() == 0 || one.role() == two.role() || !adjacentImages(one, two)) continue;
+            boolean beforeAfter = Math.abs(one.role()) == 1 && Math.abs(two.role()) == 1;
+            if (!beforeAfter && !(Math.abs(one.role()) == 2 && Math.abs(two.role()) == 2)) continue;
+            var firstImage = comparisonImage(page, one);
+            var secondImage = comparisonImage(page, two);
+            if (firstImage == null || secondImage == null || firstImage.url().equals(secondImage.url())) continue;
+            return one.role() < 0 ? List.of(firstImage, secondImage) : List.of(secondImage, firstImage);
+        }
+        return List.of();
+    }
+
+    private TechniqueArticle.ComparisonImage comparisonImage(URI page, ImageEvidence candidate) {
+        for (String attribute : List.of("data-src", "data-lazy-src", "src")) {
+            String value = candidate.image().attr(attribute);
+            if (value.isBlank()) continue;
+            try {
+                // Keep image identity and signed query parameters exactly as the publisher supplied them.
+                URI uri = page.resolve(value.trim()).normalize();
+                ensurePublicTarget(uri);
+                return new TechniqueArticle.ComparisonImage(uri.toString(), limit(candidate.alt(), 500),
+                        candidate.caption(), candidate.context());
+            } catch (Exception ignored) { /* An unsafe image never invalidates a readable article. */ }
+        }
+        return null;
+    }
+
+    private static int imageRole(String text) {
+        if (text == null) return 0;
+        boolean before = BEFORE_IMAGE.matcher(text).find(), after = AFTER_IMAGE.matcher(text).find();
+        if (before != after) return before ? -1 : 1;
+        boolean optionA = OPTION_A.matcher(text).find(), optionB = OPTION_B.matcher(text).find();
+        return optionA == optionB ? 0 : optionA ? -2 : 2;
+    }
+
+    private static boolean adjacentImages(ImageEvidence first, ImageEvidence second) {
+        if (first.group() == second.group()) return true;
+        return first.group().parent() == second.group().parent()
+                && first.group().nextElementSibling() == second.group();
+    }
+
+    private static String imageContext(Element group) {
+        List<String> parts = new ArrayList<>();
+        Element before = group.previousElementSibling(), after = group.nextElementSibling();
+        if (before != null && before.select("img").isEmpty()) parts.add(limit(before.text(), 350));
+        if (after != null && after.select("img").isEmpty()) parts.add(limit(after.text(), 350));
+        return String.join(" ", parts);
+    }
+
+    private record ImageEvidence(Element image, Element group, String alt, String caption, String context,
+            int role, boolean combined) {}
 
     private static List<String> bodyParagraphs(Element body) {
         StringBuilder text = new StringBuilder();

@@ -7,7 +7,8 @@ const props = defineProps({
     type: Object,
     required: true
   },
-  directEntry: { type: Boolean, default: false }
+  directEntry: { type: Boolean, default: false },
+  canBrowse: { type: Boolean, default: false }
 })
 const emit = defineEmits(['browse'])
 
@@ -25,6 +26,7 @@ const statusText = ref(props.directEntry ? '等待登录' : '正在加载登录�
 const introVisible = ref(!props.directEntry)
 const loginVisible = ref(props.directEntry)
 const assetsError = ref('')
+const assetsReady = ref(false)
 const motionReduced = ref(false)
 const canvasRef = ref(null)
 const startButton = ref(null)
@@ -401,7 +403,7 @@ function resizeCanvas() {
 function revealLogin() {
   if (loginVisible.value) return
   loginVisible.value = true
-  nextTick(focusFirstEditable)
+  scheduleFocus()
 }
 
 function resetScene() {
@@ -428,7 +430,9 @@ function resetScene() {
 }
 
 function openLogin(skipAnimation = false) {
-  if (submitting.value || phase.value !== 'intro') return
+  const canOpen = phase.value === 'intro'
+    || (skipAnimation && ['loading', 'opening'].includes(phase.value))
+  if (submitting.value || !canOpen) return
   clearAuthError()
   introVisible.value = false
   if (skipAnimation || isReducedMotion()) {
@@ -554,23 +558,24 @@ onMounted(() => {
 
   Promise.all([
     loadImage('/prototypes/zhiji-fish/assets/fish-atlas.png'),
-    loadImage('/prototypes/zhiji-fish/assets/original-logo.png')
+    loadImage('/assets/zhiji-logo.png')
   ])
     .then(([atlas, logo]) => {
       if (disposed) return
       atlasImage = atlas
       logoImage = logo
+      assetsReady.value = true
       resizeCanvas()
-      if (!props.directEntry) resetScene()
+      if (phase.value === 'loading') resetScene()
     })
     .catch(() => {
       if (disposed) return
       assetsError.value = '开场动画加载失败，可直接使用登录表单。'
-      if (props.directEntry) return
+      if (loginVisible.value) return
       introVisible.value = false
       loginVisible.value = true
       setPhase('login', '等待登录')
-      nextTick(focusFirstEditable)
+      scheduleFocus()
     })
 })
 
@@ -592,33 +597,35 @@ onBeforeUnmount(() => {
           <strong>知己</strong>
           <small>穿搭推荐</small>
         </div>
-        <button
-          v-if="directEntry"
-          class="fish-auth-text-button"
-          type="button"
-          :disabled="submitting"
-          @click="emit('browse')"
-        >
-          返回首页
-        </button>
-        <button
-          v-else-if="!loginVisible"
-          class="fish-auth-text-button"
-          type="button"
-          :disabled="phase === 'loading' || submitting"
-          @click="openLogin(true)"
-        >
-          直接登录
-        </button>
-        <button
-          v-else-if="!assetsError"
-          class="fish-auth-text-button"
-          type="button"
-          :disabled="submitting"
-          @click="resetScene"
-        >
-          返回欢迎页
-        </button>
+        <div class="fish-auth-actions">
+          <button
+            v-if="canBrowse"
+            class="fish-auth-text-button"
+            type="button"
+            :disabled="submitting"
+            @click="emit('browse')"
+          >
+            返回首页
+          </button>
+          <button
+            v-if="!loginVisible"
+            class="fish-auth-text-button"
+            type="button"
+            :disabled="submitting"
+            @click="openLogin(true)"
+          >
+            直接登录
+          </button>
+          <button
+            v-else-if="!assetsError && assetsReady"
+            class="fish-auth-text-button"
+            type="button"
+            :disabled="submitting"
+            @click="resetScene"
+          >
+            返回欢迎页
+          </button>
+        </div>
       </header>
 
       <section
@@ -852,6 +859,12 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: baseline;
   gap: 8px;
+}
+
+.fish-auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
 }
 
 .fish-auth-brand strong {

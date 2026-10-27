@@ -32,6 +32,98 @@ function fixture(onFeedback) {
   return { app, recommendation, calls }
 }
 
+function adminFixture() {
+  const app = useFashionApp()
+  app.state.authPhase = 'authenticated'
+  app.state.authUser = { username: 'review-admin', authorities: ['ROLE_ADMIN'] }
+  const requests = []
+  globalThis.fetch = async input => {
+    const url = new URL(input, 'http://localhost')
+    if (url.pathname.endsWith('/csrf')) return response({ token: 'fixture', headerName: 'X-XSRF-TOKEN' })
+    if (url.pathname.endsWith('/logout')) return response(null)
+    return new Promise(resolve => requests.push({ status: url.searchParams.get('status'), resolve }))
+  }
+  return { app, requests }
+}
+
+function feedbackPage(status) {
+  return response({ items: [{ recommendationId: 7, moderationStatus: status }], totalElements: 1, page: 0, hasNext: false })
+}
+
+for (const responseOrder of ['old-first', 'new-first']) {
+  test(`admin feedback uses the newest filter when responses finish ${responseOrder}`, async () => {
+    const { app, requests } = adminFixture()
+    const oldLoad = app.loadAdminFeedback()
+    app.state.adminFeedbackStatus = 'RESOLVED'
+    const newLoad = app.loadAdminFeedback()
+    assert.deepEqual(requests.map(request => request.status), ['PENDING', 'RESOLVED'])
+
+    if (responseOrder === 'old-first') {
+      requests[0].resolve(feedbackPage('PENDING'))
+      await oldLoad
+      assert.deepEqual(app.state.adminFeedback, [])
+      assert.equal(app.state.adminFeedbackLoading, true)
+      requests[1].resolve(feedbackPage('RESOLVED'))
+      await newLoad
+    } else {
+      requests[1].resolve(feedbackPage('RESOLVED'))
+      await newLoad
+      assert.equal(app.state.adminFeedbackLoading, false)
+      requests[0].resolve(feedbackPage('PENDING'))
+      await oldLoad
+    }
+    assert.equal(app.state.adminFeedback[0].moderationStatus, 'RESOLVED')
+    assert.equal(app.state.adminFeedbackLoading, false)
+  })
+}
+
+test('an obsolete feedback error does not replace the current result or clear its loading flag', async () => {
+  const { app, requests } = adminFixture()
+  const oldLoad = app.loadAdminFeedback()
+  app.state.adminFeedbackStatus = 'RESOLVED'
+  const newLoad = app.loadAdminFeedback()
+  requests[0].resolve(new Response(JSON.stringify({ code: 500, message: 'Obsolete error' }), { status: 500 }))
+  await oldLoad
+  assert.equal(app.state.error, '')
+  assert.equal(app.state.adminFeedbackLoading, true)
+  assert.equal(requests.length, 2)
+  requests[1].resolve(feedbackPage('RESOLVED'))
+  await newLoad
+  assert.equal(app.state.adminFeedback[0].moderationStatus, 'RESOLVED')
+})
+
+test('the newest feedback error stays visible when an older successful response arrives', async () => {
+  const { app, requests } = adminFixture()
+  const oldLoad = app.loadAdminFeedback()
+  app.state.adminFeedbackStatus = 'RESOLVED'
+  const newLoad = app.loadAdminFeedback()
+  assert.equal(requests.length, 2)
+  requests[1].resolve(new Response(JSON.stringify({ code: 500, message: 'Current error' }), { status: 500 }))
+  await newLoad
+  requests[0].resolve(feedbackPage('PENDING'))
+  await oldLoad
+  assert.equal(app.state.error, 'Current error')
+  assert.deepEqual(app.state.adminFeedback, [])
+  assert.equal(app.state.adminFeedbackLoading, false)
+})
+
+test('feedback from the previous session cannot replace the new account data or loading state', async () => {
+  const { app, requests } = adminFixture()
+  const oldLoad = app.loadAdminFeedback()
+  await app.logout()
+  app.state.authPhase = 'authenticated'
+  app.state.authUser = { username: 'second-admin', authorities: ['ROLE_ADMIN'] }
+  app.state.adminFeedbackStatus = 'RESOLVED'
+  const newLoad = app.loadAdminFeedback()
+  requests[0].resolve(feedbackPage('PENDING'))
+  await oldLoad
+  assert.deepEqual(app.state.adminFeedback, [])
+  assert.equal(app.state.adminFeedbackLoading, true)
+  requests[1].resolve(feedbackPage('RESOLVED'))
+  await newLoad
+  assert.equal(app.state.adminFeedback[0].moderationStatus, 'RESOLVED')
+})
+
 test('changing stars preserves the saved reason and comment and updates history', async () => {
   const { app, recommendation, calls } = fixture()
   const updated = await app.rateRecommendation(recommendation, 4)

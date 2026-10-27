@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { outfitTechniques } from '../src/data/outfitTechniques.js'
 import { formatTechniquePublication, formatTechniqueSourcePublication, mergeOutfitTechniques, normalizeOutfitTechniqueFeed,
-  safeTechniqueSourceUrl } from '../src/utils/outfitTechniqueFeed.js'
+  normalizeTechniqueComparisonVisual, normalizeTechniqueProgress, safeTechniqueSourceUrl,
+  techniqueProgressVersion } from '../src/utils/outfitTechniqueFeed.js'
 
 function lesson(overrides = {}) {
   return { ...structuredClone(outfitTechniques[0]), id: 'weekly-first', title: '一周一练：领口层次',
@@ -96,5 +97,63 @@ test('formats source instants in Shanghai, preserves valid dates and labels unkn
   assert.equal(formatTechniqueSourcePublication('2024-02-29'), '2024-02-29')
   for (const value of [null, undefined, '', 'unknown', '2026-02-30', '2026-02-30T12:00:00Z', '2026-10-16T12:00:00', 123]) {
     assert.equal(formatTechniqueSourcePublication(value), '原帖未标注日期')
+  }
+})
+
+test('accepts sourced curated API lessons without converting reading scope or publication into AI claims', () => {
+  const curated = { ...structuredClone(outfitTechniques[0]), generationMode: 'curated', publishedAt: null,
+    comparisonVisual: { kind: 'generated', images: [{ url: '/api/v1/outfit-techniques/comparison-images/2b0be073-1234-4567-89ab-e12cd34f56ab', alt: '同一件上衣的 A / B 配色练习' }] } }
+  const result = normalizeOutfitTechniqueFeed(feed([curated]))
+  assert.equal(result.items.length, 1)
+  assert.equal(result.items[0].generationMode, 'curated')
+  assert.equal(result.items[0].publishedAt, null)
+  assert.equal(result.items[0].sources[0].scope, curated.sources[0].scope)
+  assert.equal(result.latestPublishedAt, null)
+  assert.equal(mergeOutfitTechniques(result.items, outfitTechniques).length, outfitTechniques.length)
+  assert.equal(mergeOutfitTechniques(result.items, outfitTechniques)[0].comparisonVisual.kind, 'generated')
+})
+
+test('normalizes one combined A/B illustration and a pair of attributable source images', () => {
+  const illustration = { kind: 'generated', images: [{ url: '/api/v1/outfit-techniques/comparison-images/2b0be073-1234-4567-89ab-e12cd34f56ab', alt: ' A / B 两种搭法 ' }], note: ' 同一人物与固定光线下的示意 ' }
+  assert.deepEqual(normalizeTechniqueComparisonVisual(illustration), { ...illustration,
+    images: [{ ...illustration.images[0], alt: 'A / B 两种搭法' }], note: '同一人物与固定光线下的示意' })
+  const source = { kind: 'source', images: [{ url: 'https://images.example.test/left.jpg', alt: '原文第一种搭法' },
+    { url: 'https://images.example.test/right.jpg', alt: '原文第二种搭法' }], sourceUrl: 'https://example.test/article' }
+  assert.deepEqual(normalizeTechniqueComparisonVisual(source), source)
+})
+
+test('rejects unsafe or ambiguous comparison assets without discarding the readable lesson', () => {
+  const goodImage = { url: 'https://images.example.test/comparison.jpg', alt: '原文对照图' }
+  const badVisuals = [null, {}, { kind: 'photo', images: [goodImage] },
+    { kind: 'generated', images: [goodImage] },
+    { kind: 'source', sourceUrl: 'https://example.test/article', images: [{ url: '/api/v1/outfit-techniques/comparison-images/2b0be073-1234-4567-89ab-e12cd34f56ab', alt: '不能把生成图标作原图' }] },
+    { kind: 'source', images: [goodImage] }, { kind: 'source', images: [goodImage], sourceUrl: 'javascript:alert(1)' },
+    { kind: 'generated', images: [] }, { kind: 'generated', images: [goodImage, goodImage] },
+    { kind: 'generated', images: [goodImage, { ...goodImage, url: 'https://images.example.test/second.jpg' }, { ...goodImage, url: 'https://images.example.test/third.jpg' }] },
+    ...['javascript:alert(1)', 'data:image/svg+xml,unsafe', 'http://images.example.test/a.jpg', '//images.example.test/a.jpg',
+      'https://user:secret@images.example.test/a.jpg', '/api/v1/me/photo', '/api/v1/outfit-techniques/foo/comparison-image',
+      '/api/v1/outfit-techniques/comparison-images/not-a-uuid', '/api/v1/outfit-techniques/comparison-images/2b0be073-1234-4567-89ab-e12cd34f56ab?token=secret']
+      .map(url => ({ kind: 'generated', images: [{ url, alt: '示意' }] })),
+    { kind: 'generated', images: [{ ...goodImage, alt: '' }] }]
+  for (const comparisonVisual of badVisuals) {
+    assert.equal(normalizeTechniqueComparisonVisual(comparisonVisual), null)
+    const normalized = normalizeOutfitTechniqueFeed(feed([lesson({ comparisonVisual })]))
+    assert.equal(normalized.items.length, 1)
+    assert.equal(normalized.items[0].comparisonVisual, null)
+  }
+})
+
+test('browser reading progress stores only public IDs and changes version when lesson content changes', () => {
+  const first = lesson()
+  const version = techniqueProgressVersion(first)
+  assert.match(version, /^v1-[a-f0-9]{16}$/)
+  assert.equal(techniqueProgressVersion(structuredClone(first)), version)
+  assert.notEqual(techniqueProgressVersion({ ...first, check: '更新后的自检问题' }), version)
+  assert.notEqual(techniqueProgressVersion({ ...first, example: { ...first.example, after: '新练习' } }), version)
+  const stored = JSON.stringify([[first.id, version]])
+  assert.deepEqual(normalizeTechniqueProgress(stored), [[first.id, version]])
+  for (const value of [null, '', 'malformed', '{}', JSON.stringify([{ username: 'private', lesson: first }]),
+    JSON.stringify([['id', 'not-a-version'], [null, version], ['id', version, 'extra']])]) {
+    assert.deepEqual(normalizeTechniqueProgress(value), [])
   }
 })

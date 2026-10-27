@@ -65,7 +65,7 @@ public class SecurityConfig {
                         .requestMatchers("/error").permitAll()
                         .requestMatchers(HttpMethod.GET,
                                 "/api/v1/auth/csrf", "/api/v1/auth/captcha",
-                                "/api/v1/trends", "/api/v1/outfit-techniques", "/api/v1/weather/**").permitAll()
+                                "/api/v1/trends", "/api/v1/outfit-techniques", "/api/v1/outfit-techniques/comparison-images/**", "/api/v1/weather/**").permitAll()
                         .requestMatchers(HttpMethod.POST,
                                 "/api/v1/auth/login", "/api/v1/auth/register").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")

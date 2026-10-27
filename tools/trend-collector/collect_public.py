@@ -42,6 +42,16 @@ def clean(value):
     return re.sub(r'\s+', ' ', str(value or '')).strip()
 
 
+def truncate_utf16(value, max_units):
+    """Match Java String.length() limits without cutting an emoji in half."""
+    units = 0
+    for index, character in enumerate(value):
+        units += 2 if ord(character) > 0xFFFF else 1
+        if units > max_units:
+            return value[:index]
+    return value
+
+
 def outfit_topic_tags(value):
     """Classify explicit clothing copy, never the creator's identity or follower count.
 
@@ -228,11 +238,13 @@ def feed_item(item, now):
     # Use full original copy before truncation; author names and query terms are not evidence.
     tags = outfit_topic_tags(' '.join(str(item.get(key) or '') for key in ('title', 'summary', 'content', 'topicTags')))
     return {'id': item['platform'] + ':' + identifier,
-            'platform': item['platform'], 'title': item['title'], 'summary': item['summary'],
+            'platform': item['platform'], 'title': truncate_utf16(item['title'], 200),
+            'summary': truncate_utf16(item['summary'], 600),
             'topicTags': tags + ['穿搭灵感'], 'heatScore': 0,
             'publishedAt': publication(item['publishedAt']).isoformat(), 'fetchedAt': now.isoformat(),
             'sourceUrl': item['sourceUrl'], 'imageUrl': item['images'][0],
-            'evidence': {'author': item.get('author') or None, 'mediaType': 'image', 'images': item['images'],
+            'evidence': {'author': truncate_utf16(item.get('author') or '', 120) or None,
+                         'mediaType': 'image', 'images': item['images'],
                          'likes': None, 'favorites': None, 'comments': None, 'reposts': None,
                          'authorFollowers': None, 'fullBodyImageUrl': None}}
 

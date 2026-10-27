@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
@@ -21,6 +22,7 @@ public class WardrobeService {
     private final ImageStorage imageStorage;
     private final GarmentRecognitionService recognitionService;
     private final ImageCleanupRepository imageCleanupRepository;
+    private final TransactionTemplate transactionTemplate;
     private final long maxFileSize;
 
     public WardrobeService(
@@ -28,11 +30,13 @@ public class WardrobeService {
             ImageStorage imageStorage,
             GarmentRecognitionService recognitionService,
             ImageCleanupRepository imageCleanupRepository,
+            TransactionTemplate transactionTemplate,
             @Value("${app.storage.max-file-size:10485760}") long maxFileSize) {
         this.wardrobeRepository = wardrobeRepository;
         this.imageStorage = imageStorage;
         this.recognitionService = recognitionService;
         this.imageCleanupRepository = imageCleanupRepository;
+        this.transactionTemplate = transactionTemplate;
         this.maxFileSize = maxFileSize;
     }
 
@@ -44,7 +48,6 @@ public class WardrobeService {
         return wardrobeRepository.create(userId, request);
     }
 
-    @Transactional
     public WardrobeItem upload(
             String userId,
             MultipartFile image,
@@ -76,12 +79,15 @@ public class WardrobeService {
                 ? "AI 识别未得到完整信息，请手动确认类别、颜色和名称"
                 : "请手动确认类别、颜色和名称";
         try {
-            WardrobeItem item = wardrobeRepository.create(userId,
-                    new WardrobeItemRequest(name, category, color, style, null),
-                    stored.objectKey(), status, message);
-            String imageUrl = "/api/v1/me/wardrobe/" + item.id() + "/image";
-            wardrobeRepository.updateImageUrl(item.id(), userId, imageUrl);
-            return wardrobeRepository.findByIdForUser(item.id(), userId).orElseThrow();
+            // Storage and recognition must not hold a connection while external services respond.
+            return transactionTemplate.execute(transaction -> {
+                WardrobeItem item = wardrobeRepository.create(userId,
+                        new WardrobeItemRequest(name, category, color, style, null),
+                        stored.objectKey(), status, message);
+                String imageUrl = "/api/v1/me/wardrobe/" + item.id() + "/image";
+                wardrobeRepository.updateImageUrl(item.id(), userId, imageUrl);
+                return wardrobeRepository.findByIdForUser(item.id(), userId).orElseThrow();
+            });
         } catch (RuntimeException exception) {
             try {
                 imageStorage.delete(stored.objectKey());

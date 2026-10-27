@@ -26,6 +26,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class RecommendationService {
     private static final long MAX_HISTORY_OFFSET = 1_000_000L;
+    private static final int MAX_SUMMARY_LENGTH = 500;
 
     private static final Logger log = LoggerFactory.getLogger(RecommendationService.class);
     private static final String LLM_ENGINE = "llm";
@@ -251,7 +252,7 @@ public class RecommendationService {
 
     private RecommendationAttempt validateLlmResult(
             LlmRecommendationResult result, List<WardrobeItem> wardrobe, List<Long> lockedItemIds) {
-        if (result == null || !validText(result.summary(), 500) || !validText(result.reason(), 1200)
+        if (result == null || !validText(result.summary(), MAX_SUMMARY_LENGTH) || !validText(result.reason(), 1200)
                 || result.itemIds() == null || result.itemIds().size() < 2 || result.itemIds().size() > 4) {
             log.warn("LLM recommendation failed result validation; falling back to {}", RULE_ENGINE);
             return RecommendationAttempt.fallback(RecommendationFallbackReason.RESULT_INVALID);
@@ -286,6 +287,11 @@ public class RecommendationService {
             RecommendationRequest request, List<WardrobeItem> selected, WeatherSnapshot weather, StyleProfile profile) {
         String itemNames = selected.stream().map(WardrobeItem::name).reduce((left, right) -> left + "、" + right).orElse("");
         String summary = request.occasion().trim() + "推荐：" + itemNames;
+        if (summary.length() > MAX_SUMMARY_LENGTH) {
+            int end = MAX_SUMMARY_LENGTH - 1;
+            if (Character.isHighSurrogate(summary.charAt(end - 1))) end--;
+            summary = summary.substring(0, end) + "…";
+        }
         String reason = buildReason(request, selected, weather, profile);
         return new RecommendationDraft(summary, reason, RULE_ENGINE, selected, null, null, null, null, null, null);
     }

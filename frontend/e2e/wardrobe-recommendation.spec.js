@@ -17,10 +17,14 @@ function uniqueUsername(label, testInfo) {
 async function expectCurrentAuthCopy(page) {
   const heading = page.locator('.fish-auth-login h1')
   if (!(await heading.isVisible())) {
-    await expect(page.getByRole('button', { name: '登录 / 注册', exact: true })).toBeEnabled()
-    await page.getByRole('button', { name: '登录 / 注册', exact: true }).click()
+    if (!(await page.locator('.fish-auth').isVisible())) {
+      await expect(page.getByRole('button', { name: '登录 / 注册', exact: true })).toBeEnabled()
+      await page.getByRole('button', { name: '登录 / 注册', exact: true }).click()
+    }
+    await page.getByRole('button', { name: '直接登录', exact: true }).click()
   }
 
+  await expect(heading).toBeVisible()
   await expect(heading).toHaveText(/^(登录知己|创建知己账户)$/)
   await expect(page.getByText('知己 · 账户服务', { exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: '登录', exact: true })).toBeVisible()
@@ -43,13 +47,31 @@ async function registerThroughUi(page, username, onLoginReady) {
 }
 
 test('opens the double-fish login experience from the guest home', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/')
   await expect(page.getByRole('heading', { name: '先找一点穿搭灵感', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '登录 / 注册', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: '登录 / 注册', exact: true }).click()
   await expect(page.getByText('知己 · 账户服务', { exact: true })).toBeVisible()
+
+  const view = page.locator('.fish-auth')
+  const start = page.getByRole('button', { name: '点击图标，进入知己', exact: true })
+  const login = page.locator('.fish-auth-login')
+  const username = page.locator('input[name="username"]')
+  await expect(view).toHaveAttribute('data-phase', 'intro')
+  await expect(start).toBeFocused()
+  await expect(login).toBeHidden()
+  await expect(login).toHaveJSProperty('inert', true)
+  await expect(page.getByRole('button', { name: '返回首页', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '直接登录', exact: true })).toBeEnabled()
+
+  await start.click()
+  await expect(view).toHaveAttribute('data-phase', 'opening')
+  await expect(view).toHaveAttribute('data-phase', 'login')
   await expect(page.getByRole('heading', { name: '登录知己', exact: true })).toBeVisible()
+  await expect(login).toHaveJSProperty('inert', false)
+  await expect(username).toBeFocused()
 
   const layout = await page.evaluate(() => {
     const view = document.querySelector('.fish-auth')

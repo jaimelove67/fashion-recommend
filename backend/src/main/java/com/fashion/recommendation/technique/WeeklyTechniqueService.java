@@ -17,20 +17,31 @@ public class WeeklyTechniqueService {
     private final TechniqueGenerationClient generator;
     private final boolean enabled;
     private final Clock clock;
+    private final CuratedTechniqueCatalog curated;
+    private final TechniqueComparisonVisualService visuals;
 
     @Autowired
     public WeeklyTechniqueService(OutfitTechniqueRepository repository, TechniqueSourceCollector collector,
-            TechniqueGenerationClient generator, @Value("${app.techniques.enabled:true}") boolean enabled) {
-        this(repository, collector, generator, enabled, Clock.systemUTC());
+            TechniqueGenerationClient generator, @Value("${app.techniques.enabled:true}") boolean enabled,
+            CuratedTechniqueCatalog curated, TechniqueComparisonVisualService visuals) {
+        this(repository, collector, generator, enabled, Clock.systemUTC(), curated, visuals);
     }
 
     WeeklyTechniqueService(OutfitTechniqueRepository repository, TechniqueSourceCollector collector,
             TechniqueGenerationClient generator, boolean enabled, Clock clock) {
+        this(repository, collector, generator, enabled, clock, null, null);
+    }
+
+    WeeklyTechniqueService(OutfitTechniqueRepository repository, TechniqueSourceCollector collector,
+            TechniqueGenerationClient generator, boolean enabled, Clock clock,
+            CuratedTechniqueCatalog curated, TechniqueComparisonVisualService visuals) {
         this.repository = repository;
         this.collector = collector;
         this.generator = generator;
         this.enabled = enabled;
         this.clock = clock;
+        this.curated = curated;
+        this.visuals = visuals;
     }
 
     // A slow source or model call must not hold up wardrobe cleanup or daily trends.
@@ -58,9 +69,12 @@ public class WeeklyTechniqueService {
     public void scheduledRefresh() { refresh(); }
 
     public TechniqueFeed currentFeed() {
-        List<OutfitTechnique> items = repository.latest();
+        List<OutfitTechnique> weekly = repository.latest();
+        List<OutfitTechnique> items = curated == null ? weekly
+                : java.util.stream.Stream.concat(weekly.stream(), curated.items().stream()).toList();
+        if (visuals != null) items = items.stream().map(visuals::decorate).toList();
         OperationalStatus status = status();
-        return new TechniqueFeed(items, items.isEmpty() ? null : items.get(0).publishedAt(), "weekly", status.status());
+        return new TechniqueFeed(items, weekly.isEmpty() ? null : weekly.get(0).publishedAt(), "weekly", status.status());
     }
 
     public OperationalStatus status() {
@@ -95,6 +109,10 @@ public class WeeklyTechniqueService {
             errorCode = "internal-failure";
             boolean published = repository.publish(token, result, clock.instant());
             if (!published) repository.fail(token, "internal-failure", clock.instant());
+            if (published && visuals != null) {
+                try { visuals.start(); }
+                catch (RuntimeException ignored) { /* Illustration failure must not undo a published lesson. */ }
+            }
             return new RefreshResult(true, published ? "published" : "waiting-for-quality", status());
         } catch (RuntimeException exception) {
             // Persist only a bounded classification; provider messages can contain keys or article text.

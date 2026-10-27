@@ -217,6 +217,135 @@ class TechniqueSourceCollectorTest {
         }
     }
 
+    @Test
+    void retainsExplicitCompositeComparisonWithOriginalCaptionAndSignedRelativeImageUrl() {
+        page(ARTICLE, "text/html", article("<meta property=og:image content=https://style.example.com/cover.jpg>")
+                .replace("</article>", """
+                        <figure><img src="data:image/gif;base64,placeholder" data-src="/images/trousers.jpg?signature=a%2Fb&amp;utm_source=original"
+                        alt="Before and after: trouser length comparison">
+                        <figcaption>Keep the same trousers: before and after hem length adjustment.</figcaption></figure>
+                        </article>
+                        """));
+
+        TechniqueArticle result = collector(List.of(), List.of(ARTICLE)).collect().get(0);
+
+        assertEquals(1, result.comparisonImages().size());
+        var image = result.comparisonImages().get(0);
+        assertEquals("https://style.example.com/images/trousers.jpg?signature=a%2Fb&utm_source=original", image.url());
+        assertEquals("Before and after: trouser length comparison", image.alt());
+        assertEquals("Keep the same trousers: before and after hem length adjustment.", image.caption());
+        assertTrue(image.context().contains("Keep the same trousers"));
+        assertEquals(List.of(ARTICLE), requested); // Metadata extraction does not download any image.
+    }
+
+    @Test
+    void pairsExplicitIndividualCaptionsAndKeepsBeforeThenAfterOrder() {
+        page(ARTICLE, "text/html", article("").replace("</article>", """
+                <figure><img src="/after.jpg" alt="Shirt length and outfit proportion">
+                <figcaption>After: shorter shirt length and balanced outfit proportion.</figcaption></figure>
+                <figure><img src="/before.jpg" alt="Shirt length and outfit proportion">
+                <figcaption>Before: longer shirt length and outfit proportion.</figcaption></figure>
+                </article>
+                """));
+
+        var images = collector(List.of(), List.of(ARTICLE)).collect().get(0).comparisonImages();
+
+        assertEquals(List.of("https://style.example.com/before.jpg", "https://style.example.com/after.jpg"),
+                images.stream().map(TechniqueArticle.ComparisonImage::url).toList());
+        assertTrue(images.get(0).caption().startsWith("Before:"));
+    }
+
+    @Test
+    void retainsClearlyLabelledABOutfitComparisonAndNeverMoreThanOnePair() {
+        page(ARTICLE, "text/html", article("").replace("</article>", """
+                <figure><img src="/a.jpg" alt="A: shirt length and outfit proportion">
+                <img src="/b.jpg" alt="B: shirt length and outfit proportion">
+                <figcaption>Compare shirt length while keeping the same trousers.</figcaption></figure>
+                <figure><img src="/extra.jpg" alt="Shirt styling photo"></figure></article>
+                """));
+        var images = collector(List.of(), List.of(ARTICLE)).collect().get(0).comparisonImages();
+        assertEquals(List.of("https://style.example.com/a.jpg", "https://style.example.com/b.jpg"),
+                images.stream().map(TechniqueArticle.ComparisonImage::url).toList());
+    }
+
+    @Test
+    void doesNotTreatCoversGenericFirstImagesOrUnrelatedComparisonsAsOutfitComparison() {
+        page(ARTICLE, "text/html", article("<meta property=og:image content=https://style.example.com/cover.jpg>")
+                .replace("</article>", """
+                        <figure><img src="/outfit.jpg" alt="A nice outfit"><figcaption>Shirt and trousers.</figcaption></figure>
+                        <figure><img src="/logo.jpg" alt="Before and after logo design comparison"></figure>
+                        <img src="/first.jpg" alt="Shirt texture"></article>
+                        """));
+        assertTrue(collector(List.of(), List.of(ARTICLE)).collect().get(0).comparisonImages().isEmpty());
+        assertEquals(List.of(ARTICLE), requested);
+    }
+
+    @Test
+    void doesNotPairUnrelatedBeforeAndAfterPhotosFromDistantSections() {
+        page(ARTICLE, "text/html", article("").replace("</article>", """
+                <figure><img src="/before.jpg" alt="Before: shirt length and outfit proportion"></figure>
+                <h2>A separate tutorial section</h2><p>Another topic needs its own evidence.</p>
+                <figure><img src="/after.jpg" alt="After: shirt length and outfit proportion"></figure>
+                </article>
+                """));
+        assertTrue(collector(List.of(), List.of(ARTICLE)).collect().get(0).comparisonImages().isEmpty());
+    }
+
+    @Test
+    void rejectsUnsafeOrUnconfiguredImageTargetsWithoutDiscardingTheReadableArticle() throws Exception {
+        for (String target : List.of("javascript:alert(1)", "data:image/png;base64,abc", "http://style.example.com/a.jpg",
+                "https://user:secret@style.example.com/a.jpg", "https://style.example.com:8443/a.jpg",
+                "https://127.0.0.1/a.jpg", "https://other.example.net/a.jpg", "https://private.style.example.com/a.jpg")) {
+            requested.clear();
+            page(ARTICLE, "text/html", article("").replace("</article>", "<figure><img src='" + target
+                    + "' alt='Before and after: trouser length comparison'></figure></article>"));
+            var collector = new TechniqueSourceCollector(new ObjectMapper(), List.of(), List.of(ARTICLE), this::fetch,
+                    host -> new InetAddress[]{InetAddress.getByName(host.startsWith("private.") ? "10.0.0.1" : "93.184.215.14")}, CLOCK);
+            assertTrue(collector.collect().get(0).comparisonImages().isEmpty(), target);
+            assertEquals(List.of(ARTICLE), requested);
+        }
+    }
+
+    @Test
+    void comparisonImagesNeverBypassRobotsOrPaywallRestrictions() {
+        for (String metadata : List.of("<meta name=robots content=noai>", "<meta name=robots content=nosnippet>",
+                "<div class=paywall>Subscribe</div>")) {
+            page(ARTICLE, "text/html", article(metadata).replace("</article>",
+                    "<figure><img src='/comparison.jpg' alt='Before and after: trouser length comparison'></figure></article>"));
+            assertThrows(TechniqueSourceException.class, () -> collector(List.of(), List.of(ARTICLE)).collect());
+        }
+    }
+
+    @Test
+    void attributedSourceReadsPreserveExistingSourceIdsAndKeepTheSamePublisherBoundary() {
+        page(ARTICLE, "text/html", article("").replace("</article>",
+                "<figure><img src='/comparison.jpg' alt='Before and after: trouser length comparison'></figure></article>"));
+        var good = new OutfitTechnique.Source("curated-source", "Known title", ARTICLE.toString(), null, "Publisher", null, null, "Text");
+        var outside = new OutfitTechnique.Source("outside", "Unknown", "https://outside.example.net/a", null, null, null, null, "Text");
+        var collector = collector(List.of(), List.of(ARTICLE));
+
+        var result = collector.collectSources(List.of(good, outside));
+
+        assertEquals(1, result.size());
+        assertEquals("curated-source", result.get(0).id());
+        assertEquals(1, result.get(0).comparisonImages().size());
+        assertEquals(List.of(ARTICLE), requested);
+        assertTrue(collector.collectSources(null).isEmpty());
+        pages.clear();
+        assertTrue(collector.collectSources(List.of(good)).isEmpty());
+    }
+
+    @Test
+    void originalArticleConstructorRemainsCompatibleAndComparisonEvidenceIsImmutable() {
+        var legacy = new TechniqueArticle("source", "Title", ARTICLE.toString(), null, null, null, CLOCK.instant(), "Body");
+        assertEquals(List.of(), legacy.comparisonImages());
+        var evidence = new ArrayList<TechniqueArticle.ComparisonImage>();
+        var article = new TechniqueArticle("source", "Title", ARTICLE.toString(), null, null, null, CLOCK.instant(), "Body", evidence);
+        evidence.add(new TechniqueArticle.ComparisonImage("https://style.example.com/a.jpg", "Before", null, ""));
+        assertTrue(article.comparisonImages().isEmpty());
+        assertThrows(UnsupportedOperationException.class, () -> article.comparisonImages().add(evidence.get(0)));
+    }
+
     private TechniqueSourceCollector collector(List<URI> feeds, List<URI> articles) {
         return new TechniqueSourceCollector(new ObjectMapper(), feeds, articles, this::fetch,
                 host -> new InetAddress[]{InetAddress.getByAddress(new byte[]{93, (byte)184, (byte)215, 14})}, CLOCK);

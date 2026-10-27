@@ -34,6 +34,15 @@ class CollectorTests(unittest.TestCase):
         self.assertIsNone(item["evidence"]["favorites"])
         self.assertIsNone(count("1.2万"))
 
+    def test_import_limits_title_and_author_by_java_utf16_units(self):
+        row = {**self.row(), 'title': '穿搭' + '衣' * 197 + '😀',
+               'nickname': '名' * 119 + '😀', 'desc': '衣' * 299 + '😀'}
+        item = normalize(row, 'weibo')
+        self.assertEqual('穿搭' + '衣' * 197, item['title'])
+        self.assertEqual('名' * 119, item['evidence']['author'])
+        self.assertEqual(row['desc'], item['summary'])
+        self.assertEqual(row['note_url'], item['sourceUrl'])
+
     def test_preserves_rounded_follower_label_without_inventing_an_exact_count(self):
         item = normalize({**self.row(), "author_followers_count": "23.2万"}, "weibo")
         self.assertIsNone(item["evidence"]["authorFollowers"])
