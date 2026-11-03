@@ -4,6 +4,8 @@ import { isConfiguredDemoTrend } from '../utils/trendSources.js'
 import { isTrendAnalysisExample, trendOutfitAnalysis } from '../data/trendOutfitAnalyses.js'
 import { outfitModelReferenceKey } from '../utils/outfitModel.js'
 import { favoriteUploadForm } from '../utils/tryOnFavorites.js'
+import { prepareTryOnImage } from '../utils/liveTryOn.js'
+import { recommendationSelectionError } from '../utils/recommendationSelection.js'
 
 const VALID_VIEWS = new Set(['home', 'trend', 'recommend', 'wardrobe', 'history', 'favorites', 'profile', 'admin'])
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
@@ -87,7 +89,7 @@ function createGarmentForm() {
 }
 
 function createRecommendationForm() {
-  return { occasion: '通勤', city: readStoredWeatherCity(), styleHint: '' }
+  return { occasion: '通勤', city: readStoredWeatherCity(), styleHint: '', lockedItemIds: [], excludedItemIds: [] }
 }
 
 function createProfileForm() {
@@ -141,6 +143,7 @@ export function useFashionApp() {
     galleryTrends: [],
     trendPeriod: 'day',
     trendPlatform: '',
+    trendTopic: '',
     trendStyles: [],
     trendError: '',
     selectedTrendReference: null,
@@ -170,6 +173,7 @@ export function useFashionApp() {
     profileLoading: false,
     weatherLoading: false,
     generating: false,
+    consulting: false,
     saving: false,
     adding: false,
     profileSaving: false,
@@ -211,6 +215,12 @@ export function useFashionApp() {
     adminTrendReviewsLoading: false,
     adminTrendReviewAction: null,
     adminTrendReviewError: '',
+    adminTechniqueStatus: null,
+    adminTechniqueBudget: null,
+    adminTechniquesLoading: false,
+    adminTechniqueAction: '',
+    adminTechniqueError: '',
+    adminTechniqueNotice: '',
     globalQuery: '',
     searchOpen: false,
     notificationsOpen: false,
@@ -255,6 +265,7 @@ export function useFashionApp() {
     state.profileLoading = false
     state.weatherLoading = false
     state.generating = false
+    state.consulting = false
     state.saving = false
     state.adding = false
     state.profileSaving = false
@@ -296,6 +307,12 @@ export function useFashionApp() {
     state.adminTrendReviewsLoading = false
     state.adminTrendReviewAction = null
     state.adminTrendReviewError = ''
+    state.adminTechniqueStatus = null
+    state.adminTechniqueBudget = null
+    state.adminTechniquesLoading = false
+    state.adminTechniqueAction = ''
+    state.adminTechniqueError = ''
+    state.adminTechniqueNotice = ''
     state.globalQuery = ''
     state.searchOpen = false
     state.notificationsOpen = false
@@ -513,9 +530,10 @@ export function useFashionApp() {
     state.trendsLoading = true
     state.trendError = ''
     try {
-      const period = 'day'
+      const period = state.trendPeriod === 'week' ? 'week' : 'day'
       const platform = state.trendPlatform
       const params = new URLSearchParams({ period, platform })
+      if (state.trendTopic.trim()) params.set('topic', state.trendTopic.trim())
       const feed = await request(`/api/v1/trends?${params}`)
       if (version !== trendRequestVersion) return
       const slots = new Map((feed.dailySelection?.assignments || []).map(slot => [slot.id, slot]))
@@ -527,6 +545,7 @@ export function useFashionApp() {
       state.galleryTrends = galleryItems
       state.trendStyles = feed.styles || []
       state.trendMeta = {
+        period,
         primarySource: feed.primarySource || '',
         fetchedAt: feed.fetchedAt || null,
         demoMode: Boolean(feed.demoMode),
@@ -626,6 +645,14 @@ export function useFashionApp() {
   async function saveTryOnFavorite(item, imageData) {
     if (state.authPhase !== 'authenticated') throw sessionChangedError()
     const version = sessionVersion
+    if (!imageData) {
+      if (item?.sourceKind !== 'TREND_ILLUSTRATION'
+        || !/^\/assets\/trend-pieces\/[a-z0-9-]+\.(png|jpe?g|webp)$/i.test(item?.imageUrl || '')) {
+        throw new Error('请选择本站提供的单品示意图后收藏。')
+      }
+      imageData = await prepareTryOnImage(item.imageUrl, { origin: window.location.origin, signal: AbortSignal.timeout(15000) })
+    }
+    if (!isCurrentSession(version)) throw sessionChangedError()
     const form = favoriteUploadForm(item, imageData, state.authUser.username)
     const saved = await requestMultipart('/api/v1/me/try-on-favorites', form)
     if (!isCurrentSession(version)) throw sessionChangedError()
@@ -917,6 +944,68 @@ export function useFashionApp() {
       if (isCurrentSession(version)) state.adminTrendReviewAction = null
     }
   }
+
+  async function loadAdminTechniques() {
+    if (!isAdmin.value || state.adminTechniquesLoading) return null
+    const version = sessionVersion
+    state.adminTechniquesLoading = true
+    state.adminTechniqueError = ''
+    try {
+      const [status, budget] = await Promise.allSettled([
+        request('/api/v1/admin/outfit-techniques/status'),
+        request('/api/v1/admin/outfit-techniques/comparison-visuals/status')
+      ])
+      if (!isCurrentSession(version)) return null
+      // Keep a failed read unknown; never display an old quota as current.
+      state.adminTechniqueStatus = status.status === 'fulfilled' ? status.value : null
+      state.adminTechniqueBudget = budget.status === 'fulfilled' ? budget.value : null
+      const errors = []
+      if (status.status === 'rejected') errors.push('技巧运行状态读取失败')
+      if (budget.status === 'rejected') errors.push('配图额度读取失败')
+      state.adminTechniqueError = errors.length ? `${errors.join('；')}，请刷新状态后重试。` : ''
+      return state.adminTechniqueStatus
+    } finally {
+      if (isCurrentSession(version)) state.adminTechniquesLoading = false
+    }
+  }
+
+  async function runAdminTechniqueAction(action) {
+    if (!isAdmin.value || state.adminTechniqueAction || state.adminTechniquesLoading) return null
+    const version = sessionVersion
+    state.adminTechniqueAction = action
+    state.adminTechniqueError = ''
+    state.adminTechniqueNotice = ''
+    try {
+      const path = action === 'refresh' ? 'refresh' : 'comparison-visuals'
+      const result = await request(`/api/v1/admin/outfit-techniques/${path}`, { method: 'POST' })
+      if (!isCurrentSession(version)) return null
+      if (action === 'refresh') {
+        state.adminTechniqueStatus = result.state
+        const notices = {
+          published: '已发布新技巧。配图如需补全，将由后台继续处理。',
+          'not-due': '本次未执行：尚未到可更新时间，或已有任务正在执行。',
+          disabled: '本次未执行：自动整理或文本模型尚未启用。',
+          'waiting-for-quality': '本次未发布新技巧，现有内容已保留；请查看运行状态与失败原因。'
+        }
+        state.adminTechniqueNotice = notices[result.outcome] || '本次整理已结束，请查看最新运行状态。'
+      } else {
+        state.adminTechniqueBudget = result.budget
+        state.adminTechniqueNotice = result.accepted
+          ? '补图任务已进入队列，尚不代表配图已生成。稍后可刷新额度并到穿搭鉴赏查看。'
+          : '本次未排队，可能已有任务正在执行。请稍后刷新状态。'
+      }
+      await Promise.allSettled([loadAdminTechniques(), loadAdminAuditLogs({ page: 0 })])
+      return isCurrentSession(version) ? result : null
+    } catch (cause) {
+      if (isCurrentSession(version)) state.adminTechniqueError = cause.message || '操作失败，请刷新状态后重试。'
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.adminTechniqueAction = ''
+    }
+  }
+
+  function refreshAdminTechniques() { return runAdminTechniqueAction('refresh') }
+  function generateAdminTechniqueVisuals() { return runAdminTechniqueAction('visuals') }
 
   async function saveAdminAiModel(capability, configuration) {
     if (!isAdmin.value || !capability || state.adminAiModelAction) return null
@@ -1216,6 +1305,25 @@ export function useFashionApp() {
     }
   }
 
+  async function consultAssistant(question, history = []) {
+    if (state.consulting || state.authPhase !== 'authenticated') return null
+    const version = sessionVersion
+    state.consulting = true
+    clearError()
+    try {
+      const answer = await request('/api/v1/assistant/consult', {
+        method: 'POST',
+        body: JSON.stringify({ question, history: history.slice(-10) })
+      })
+      return isCurrentSession(version) ? answer : null
+    } catch (cause) {
+      if (isCurrentSession(version)) showError(cause)
+      return null
+    } finally {
+      if (isCurrentSession(version)) state.consulting = false
+    }
+  }
+
   async function generateRecommendation(options = {}) {
     if (state.generating) return null
     if (state.authPhase !== 'authenticated') return null
@@ -1223,6 +1331,12 @@ export function useFashionApp() {
     state.generating = true
     clearError()
     try {
+      const selection = {
+        lockedItemIds: options.lockedItemIds ?? state.recommendationForm.lockedItemIds ?? [],
+        excludedItemIds: options.excludedItemIds ?? state.recommendationForm.excludedItemIds ?? []
+      }
+      const selectionError = recommendationSelectionError(selection, state.wardrobe)
+      if (selectionError) throw new Error(selectionError)
       const recommendation = await request('/api/v1/recommendations', {
         method: 'POST',
         body: JSON.stringify({ ...state.recommendationForm,
@@ -1504,14 +1618,14 @@ export function useFashionApp() {
   function syncViewFromLocation() {
     const view = window.location.hash.slice(1)
     const nextView = resolveView(view)
-    if (view !== nextView) window.history.replaceState(null, '', `#${nextView}`)
+    if (view && view !== nextView) window.history.replaceState(null, '', `#${nextView}`)
     selectView(nextView, { updateHistory: false, instant: true })
   }
 
   async function initialize() {
     const requestedView = window.location.hash.slice(1)
     state.activeView = VALID_VIEWS.has(requestedView) ? requestedView : 'home'
-    if (!VALID_VIEWS.has(requestedView)) window.history.replaceState(null, '', '#home')
+    if (requestedView && !VALID_VIEWS.has(requestedView)) window.history.replaceState(null, '', '#home')
     window.addEventListener('hashchange', syncViewFromLocation)
     state.authPhase = 'checking'
     state.authError = ''
@@ -1574,6 +1688,9 @@ export function useFashionApp() {
     loadWardrobe,
     loadTryOnFavorites,
     saveTryOnFavorite,
+    loadAdminTechniques,
+    refreshAdminTechniques,
+    generateAdminTechniqueVisuals,
     loadHistory,
     loadProfile,
     loadAdminOverview,
@@ -1603,6 +1720,7 @@ export function useFashionApp() {
     addGarment,
     deleteGarment,
     generateRecommendation,
+    consultAssistant,
     generateRecommendationVisual,
     rateRecommendation,
     saveRecommendation,

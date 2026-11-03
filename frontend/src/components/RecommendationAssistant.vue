@@ -1,10 +1,10 @@
 <script setup>
 import OutfitAdjustment from './OutfitAdjustment.vue'
+import RecommendationGarmentPicker from './RecommendationGarmentPicker.vue'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import {
   Bookmark,
   Check,
-  CloudSun,
   LoaderCircle,
   Send,
   Shirt,
@@ -12,6 +12,7 @@ import {
   X
 } from '@lucide/vue'
 import { formatRecommendationReason, formatRecommendationTitle } from '../utils/recommendationReason'
+import { isWardrobeGenerationRequest } from '../utils/assistantIntent'
 
 const props = defineProps({
   app: { type: Object, required: true },
@@ -24,6 +25,16 @@ const assistantOpen = computed({
   set: (value) => emit('update:open', value)
 })
 const assistantDraft = ref('')
+const assistantMode = ref('consult')
+const consultationOnly = ref(false)
+const busy = computed(() => state.value.generating || state.value.consulting)
+const willGenerate = computed(() => assistantMode.value === 'outfit'
+  || (!consultationOnly.value && isWardrobeGenerationRequest(assistantDraft.value)))
+
+function selectAssistantMode(mode) {
+  assistantMode.value = mode
+  consultationOnly.value = mode === 'consult'
+}
 const manualWeather = ref(false)
 const manualTemperature = ref('')
 const weatherRecoveryNeeded = ref(false)
@@ -33,7 +44,7 @@ const recoveryMessage = ref('')
 const cityWeatherFailed = ref(false)
 const recoveredCity = ref('')
 const recoveredDraft = ref('')
-const recoveryVisible = computed(() => !currentWeather.value || weatherRecoveryNeeded.value)
+const recoveryVisible = computed(() => willGenerate.value && (!currentWeather.value || weatherRecoveryNeeded.value))
 watch(assistantDraft, value => {
   if (value.trim() && value.trim() !== recoveredDraft.value) recoveredCity.value = ''
 })
@@ -103,15 +114,15 @@ const assistantMessages = ref([
     id: 'welcome',
     role: 'assistant',
     type: 'text',
-    text: '请说明所在城市、出行场合与风格需求。推荐将结合当前天气、衣橱单品及已保存的个人资料，生成搭配方案。'
+    text: '可以直接问我配色、单品搭配和穿衣技巧。有相关衣物时，我会结合你的衣橱举例，也会用色卡说明搭配思路。想生成完整搭配时，请明确说“用我的衣橱生成搭配”，或选择下方的“衣橱搭配”。'
   }
 ])
 
 const assistantPrompts = [
-  { label: '日常通勤', prompt: '日常通勤，希望搭配简洁、得体' },
-  { label: '周末出行', prompt: '周末出行，希望穿着舒适并具有层次感' },
-  { label: '正式场合', prompt: '正式场合，希望搭配正式、简洁' },
-  { label: '协调配色', prompt: '请使用衣橱单品搭配，保持配色协调' }
+  { label: '配色怎么选', prompt: '蓝色和哪些颜色搭配比较协调？' },
+  { label: '衬衫怎么搭', prompt: '白衬衫怎么搭出不同风格？' },
+  { label: '穿衣小技巧', prompt: '怎样用穿衣比例让整体更利落？' },
+  { label: '用衣橱生成', prompt: '请用我的衣橱生成一套日常通勤搭配' }
 ]
 
 const knownCities = [
@@ -197,6 +208,7 @@ function openAssistant(plan = null, prompt = '') {
   if (plan?.palette) state.value.recommendationForm.styleHint = plan.palette
   if (plan?.city && plan.city !== '当前城市') state.value.recommendationForm.city = plan.city
   if (prompt) assistantDraft.value = prompt
+  if (plan || isWardrobeGenerationRequest(prompt)) selectAssistantMode('outfit')
   assistantOpen.value = true
 }
 
@@ -204,10 +216,30 @@ function closeAssistant() {
   assistantOpen.value = false
 }
 
-async function submitAssistantPrompt(promptOverride = '') {
-  if (state.value.generating || state.value.weatherLoading) return
+async function submitAssistantPrompt(promptOverride = '', forceOutfit = false) {
+  if (busy.value) return
   const text = String(promptOverride || assistantDraft.value).trim()
   if (!text) return
+
+  const generate = forceOutfit || (promptOverride ? isWardrobeGenerationRequest(text) : willGenerate.value)
+  if (!generate) {
+    assistantMode.value = 'consult'
+    const history = assistantMessages.value.filter(message => message.consultation)
+      .slice(-10).map(message => ({ role: message.role, text: message.text }))
+    appendMessage({ role: 'user', type: 'text', text, consultation: true })
+    assistantDraft.value = ''
+    const answer = await props.app.consultAssistant(text, history)
+    if (!isComponentActive || state.value.authPhase !== 'authenticated') return
+    if (answer) {
+      appendMessage({ role: 'assistant', type: 'consultation', text: answer.answer, answer, consultation: true })
+    } else {
+      assistantDraft.value = text
+      appendMessage({ role: 'assistant', type: 'text', text: state.value.error || '暂时未能回答，请稍后重试。' })
+    }
+    return
+  }
+  if (state.value.weatherLoading) return
+  selectAssistantMode('outfit')
 
   if (manualWeather.value && (manualTemperature.value === '' || !Number.isFinite(Number(manualTemperature.value))
       || Number(manualTemperature.value) < -50 || Number(manualTemperature.value) > 60)) {
@@ -247,6 +279,8 @@ async function submitAssistantPrompt(promptOverride = '') {
   const recommendation = await props.app.generateRecommendation(manualWeather.value ? { manualTemperatureC: Number(manualTemperature.value) } : {})
   if (!isComponentActive || state.value.authPhase !== 'authenticated') return
   if (recommendation) {
+    assistantMode.value = 'consult'
+    consultationOnly.value = false
     if (!manualWeather.value) useRecoveredWeather()
     appendMessage({
       role: 'assistant',
@@ -292,7 +326,7 @@ function handleResultAction(action, message) {
     state.value.recommendationForm.city = message.recommendation.city
     state.value.recommendationForm.occasion = message.recommendation.occasion
   }
-  return submitAssistantPrompt(followUpPrompt(action))
+  return submitAssistantPrompt(followUpPrompt(action), true)
 }
 
 function restoreBackground(restoreFocus = false) {
@@ -366,7 +400,7 @@ defineExpose({ open: openAssistant })
           <div class="assistant-drawer-heading">
             <div class="assistant-drawer-mark"><Sparkles :size="16" aria-hidden="true" />知己助手</div>
             <h2 id="assistant-title">知己 AI 助手</h2>
-            <p>请说明城市、出行场合与风格偏好，推荐将从当前衣橱中选择单品。</p>
+            <p>聊配色、风格与穿衣技巧，也可以用你的衣橱生成搭配。</p>
           </div>
           <button class="assistant-close" type="button" aria-label="关闭知己助手" title="关闭" @click="closeAssistant"><X :size="18" /></button>
         </header>
@@ -386,6 +420,32 @@ defineExpose({ open: openAssistant })
             <div v-if="message.role === 'assistant'" class="assistant-message-avatar" aria-hidden="true"><Sparkles :size="14" /></div>
             <div class="assistant-message-content">
               <p class="assistant-message-text">{{ message.text }}</p>
+              <div v-if="message.type === 'consultation'" class="assistant-explanation">
+                <template v-if="message.answer.examples?.length">
+                  <h3>用你的衣物举例</h3>
+                  <ul class="assistant-result-items" aria-label="问答引用的衣橱单品">
+                    <li v-for="item in message.answer.examples" :key="item.id">
+                      <img v-if="imageSource(item, message.id)" :src="imageSource(item, message.id)" :alt="item.name" @error="imageFailed(message.id, item)" />
+                      <span v-else class="assistant-image-missing"><Shirt :size="16" aria-hidden="true" /><small>暂无图片</small></span>
+                      <div><span>{{ item.category }} · {{ item.color }}</span><strong>{{ item.name }}</strong></div>
+                    </li>
+                  </ul>
+                </template>
+                <template v-if="message.answer.visuals?.length">
+                  <h3>搭配思路示意</h3>
+                  <p class="assistant-visual-note">色块为近似示意；以下组合不代表你已拥有这些单品。</p>
+                  <figure v-for="(visual, index) in message.answer.visuals" :key="index" class="assistant-color-example">
+                    <figcaption>{{ visual.title }}</figcaption>
+                    <div class="assistant-color-pieces">
+                      <div v-for="(piece, pieceIndex) in visual.pieces" :key="pieceIndex">
+                        <span class="assistant-color-swatch" :style="{ backgroundColor: /^#[0-9a-fA-F]{6}$/.test(piece.hex) ? piece.hex : '#EAE5DB' }" aria-hidden="true"></span>
+                        <strong>{{ piece.label }}</strong><span>{{ piece.color }}</span>
+                      </div>
+                    </div>
+                    <p>{{ visual.explanation }}</p>
+                  </figure>
+                </template>
+              </div>
               <div v-if="message.type === 'result' && message.recommendation" class="assistant-result-card">
                 <div class="assistant-result-meta">
                   <span><Sparkles :size="12" />{{ props.app.engineLabel(message.recommendation.engine) }}</span>
@@ -414,19 +474,23 @@ defineExpose({ open: openAssistant })
               </div>
             </div>
           </div>
-          <div v-if="props.app.state.generating" class="assistant-generating" role="status">
-            <LoaderCircle class="spinning" :size="16" />正在生成搭配方案…
+          <div v-if="busy" class="assistant-generating" role="status">
+            <LoaderCircle class="spinning" :size="16" />{{ state.consulting ? '正在整理穿搭建议…' : '正在生成搭配方案…' }}
           </div>
         </div>
 
         <div class="assistant-intents">
           <span>常用需求</span>
           <div>
-            <button v-for="item in assistantPrompts" :key="item.label" type="button" :disabled="props.app.state.generating" @click="submitAssistantPrompt(item.prompt)">{{ item.label }}</button>
+            <button v-for="item in assistantPrompts" :key="item.label" type="button" :disabled="busy" @click="submitAssistantPrompt(item.prompt)">{{ item.label }}</button>
           </div>
         </div>
 
         <form class="assistant-composer" @submit.prevent="submitAssistantPrompt()">
+          <div class="assistant-modes" role="group" aria-label="助手模式">
+            <button type="button" :aria-pressed="!willGenerate" :disabled="busy" @click="selectAssistantMode('consult')">穿搭问答</button>
+            <button type="button" :aria-pressed="willGenerate" :disabled="busy" @click="selectAssistantMode('outfit')">衣橱搭配</button>
+          </div>
           <div v-if="recoveryVisible && !manualWeather" class="weather-recovery" aria-label="获取天气">
             <p>{{ state.weatherLoading ? '正在获取天气…' : '优先获取真实天气' }}</p>
             <button type="button" :disabled="state.weatherLoading || state.generating" @click="locateWeather">开启定位获取天气</button>
@@ -442,12 +506,13 @@ defineExpose({ open: openAssistant })
             <label v-if="manualWeather">温度（℃）<input v-model="manualTemperature" type="number" min="-50" max="60" step="0.1" required :disabled="state.generating" aria-label="手动温度" /></label>
             <small v-if="manualWeather">仅使用你填写的温度，不推断晴雨和风速。</small>
           </div>
+          <RecommendationGarmentPicker v-if="willGenerate" :app="app" />
           <label class="sr-only" for="assistant-draft">穿搭需求</label>
-          <textarea id="assistant-draft" ref="assistantInput" v-model="assistantDraft" maxlength="160" rows="2" :disabled="props.app.state.generating" placeholder="例如：长沙晚餐约会，希望简洁得体、穿着舒适" />
+          <textarea id="assistant-draft" ref="assistantInput" v-model="assistantDraft" maxlength="2000" rows="2" :disabled="busy" :placeholder="willGenerate ? '例如：用我的衣橱生成一套通勤搭配，简洁舒适' : '例如：蓝色衬衫怎么配色？没有衣物也可以问'" />
           <div class="assistant-composer-footer">
-            <span><CloudSun :size="14" aria-hidden="true" />{{ props.app.state.generating ? '正在生成搭配方案…' : '参考天气、场合、衣橱与个人资料' }}</span>
-            <button class="assistant-send" type="submit" :disabled="!assistantDraft.trim() || props.app.state.generating || props.app.state.weatherLoading" aria-label="生成穿搭推荐">
-              <LoaderCircle v-if="props.app.state.generating" class="spinning" :size="17" />
+            <span><Sparkles :size="14" aria-hidden="true" />{{ state.consulting ? '正在整理穿搭建议…' : state.generating ? '正在生成搭配方案…' : willGenerate ? '使用衣橱、天气与个人资料' : '直接提问，无需定位或完整衣橱' }}</span>
+            <button class="assistant-send" type="submit" :disabled="!assistantDraft.trim() || busy || (willGenerate && state.weatherLoading)" :aria-label="willGenerate ? '生成穿搭推荐' : '发送穿搭问题'">
+              <LoaderCircle v-if="busy" class="spinning" :size="17" />
               <Send v-else :size="17" aria-hidden="true" />
             </button>
           </div>
@@ -458,6 +523,19 @@ defineExpose({ open: openAssistant })
 </template>
 
 <style scoped>
+.assistant-modes { display: flex; gap: 6px; margin-bottom: 10px; }
+.assistant-modes button { min-height: 34px; padding: 6px 12px; border: 1px solid var(--rec-line-dark); border-radius: 6px; color: var(--rec-ink); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.assistant-modes button[aria-pressed="true"] { color: var(--rec-paper); background: var(--rec-dark); border-color: var(--rec-dark); }
+.assistant-modes button:disabled { opacity: .6; cursor: wait; }
+.assistant-explanation { margin-top: 14px; }
+.assistant-explanation h3 { margin: 18px 0 8px; font-size: 13px; }
+.assistant-color-example { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--rec-line); }
+.assistant-color-example figcaption { margin-bottom: 10px; font-size: 12px; font-weight: 650; }
+.assistant-color-pieces { display: flex; gap: 8px; }
+.assistant-color-pieces > div { flex: 1; min-width: 0; display: grid; gap: 4px; font-size: 11px; overflow-wrap: anywhere; }
+.assistant-color-swatch { display: block; height: 48px; border: 1px solid var(--rec-line-dark); border-radius: 4px; }
+.assistant-color-example p, .assistant-visual-note { margin: 10px 0 0; font-size: 12px; line-height: 1.7; }
+.assistant-visual-note { color: var(--rec-muted); }
 .weather-recovery { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; margin-bottom: 12px; }
 .weather-recovery p { width: 100%; margin: 0; }
 .weather-recovery button { padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: transparent; color: inherit; }
@@ -642,6 +720,8 @@ defineExpose({ open: openAssistant })
 }
 
 .assistant-message-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   margin: 0;
   border: 1px solid var(--rec-line);
   border-radius: 3px 14px 14px 14px;
@@ -857,6 +937,9 @@ defineExpose({ open: openAssistant })
 }
 
 .assistant-composer {
+  max-height: 52dvh;
+  overflow-y: auto;
+  min-height: 0;
   border-top: 1px solid var(--rec-line-dark);
   padding: 14px 25px 20px;
   background: var(--rec-paper);

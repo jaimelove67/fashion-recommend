@@ -36,11 +36,11 @@ const analysisPhase = computed(() => props.app.state.profileAnalyzing || props.a
   ? 'analyzing' : analysisReady.value ? 'complete' : 'idle')
 const analysisStatusLabel = computed(() => analysisPhase.value === 'analyzing' ? '分析中'
   : profile.value.stale ? '资料已变更 · 待重新确认'
-    : analysisReady.value ? profile.value.analysisSource === 'MANUAL' ? '已手动确认' : '分析完成' : '待完善')
+    : analysisReady.value ? profile.value.analysisSource === 'MANUAL' ? '已手动修正' : '分析完成' : '待完善')
 const analysisStatusClass = computed(() => analysisPhase.value === 'analyzing' ? 'analyzing' : analysisReady.value ? 'complete' : 'pending')
 const analysisSourceLabel = computed(() => profile.value.stale ? '资料已变更，原分析暂不参与推荐；请重新分析或手动确认。'
   : profile.value.analysisSource === 'MODEL' ? 'AI 视觉分析 · ' + (profile.value.analysisModelName || '已配置模型')
-    : profile.value.analysisSource === 'MANUAL' ? '手动填写或修正 · 后续推荐将参考这些资料' : '暂无分析结果，可选择 AI 分析或手动填写。')
+    : profile.value.analysisSource === 'MANUAL' ? '已手动修正 · 其他建议未逐项确认' : '暂无分析结果，可选择 AI 分析或手动填写。')
 const profileGender = computed(() => {
   const value = String(profile.value.gender || '').trim().toUpperCase()
   return value === 'MALE' || value === 'FEMALE' ? value : ''
@@ -49,22 +49,30 @@ const profileGenderLabel = computed(() => ({ MALE: '男', FEMALE: '女' }[profil
 const displayName = computed(() => profile.value.displayName || owner() || '你')
 const styleTags = computed(() => unique([...(profile.value.styleTags || []), ...(profile.value.stylePreferences || [])]).slice(0, 4))
 const styleKeywords = computed(() => styleTags.value)
+const tryStyleTags = computed(() => analysisReady.value ? profile.value.tryStyleTags || [] : [])
 const recommendedPalette = computed(() => unique(profile.value.colorSuggestions || []).slice(0, 6)
   .map((name, index) => ({ name, color: colorFor(name, index) })))
 const summary = computed(() => profile.value.stale ? '基础资料已更新，请重新分析或手动确认形象特征，以供后续推荐参考。'
   : profile.value.reasonSummary || '保存基础资料后，可上传照片进行 AI 分析，或手动填写形象特征与穿搭建议。')
 const analysisRows = computed(() => [
-  { key: 'faceShape', label: '脸型', icon: ScanFace },
-  { key: 'facialLine', label: '面部线条', icon: UserRound },
-  { key: 'visualContrast', label: '视觉对比', icon: Palette },
-  { key: 'hairFeatures', label: '发型特征', icon: Sparkles },
-  { key: 'bodyProportions', label: '身体比例', icon: Ruler },
-  { key: 'fitSuggestions', label: '剪裁建议', icon: Shirt, list: true },
-  { key: 'colorSuggestions', label: '颜色建议', icon: Palette, list: true }
+  { key: 'faceShape', label: '脸型', icon: ScanFace, maxLength: 120, observation: true },
+  { key: 'facialLine', label: '面部线条', icon: UserRound, maxLength: 120, observation: true },
+  { key: 'visualContrast', label: '视觉对比', icon: Palette, maxLength: 120, observation: true },
+  { key: 'hairFeatures', label: '发型特征', icon: Sparkles, maxLength: 120, observation: true },
+  { key: 'bodyProportions', label: '身体比例', icon: Ruler, maxLength: 240, observation: true },
+  { key: 'fitSuggestions', label: '剪裁建议', icon: Shirt, list: true, itemMaxLength: 80 },
+  { key: 'styleTags', label: '分析风格标签', icon: Sparkles, list: true, itemMaxLength: 40 },
+  { key: 'tryStyleTags', label: '风格拓展建议', icon: Sparkles, list: true, itemMaxLength: 40 },
+  { key: 'colorSuggestions', label: '颜色建议', icon: Palette, list: true, itemMaxLength: 40 },
+  { key: 'itemSuggestions', label: '单品建议', icon: Shirt, list: true, itemMaxLength: 80 },
+  { key: 'reasonSummary', label: '建议说明', icon: Info, maxLength: 1200, multiline: true }
 ].map((row) => {
   const value = profile.value.analysis?.[row.key]
-  return { ...row, value: row.list ? (value || []).join('、') : value || '',
-    detail: row.list ? '多个关键词请用顿号或逗号分隔，保存后将用于推荐参考。' : '请填写已确认的特征；无法确认时可留空。' }
+  return { ...row, maxLength: row.list ? 10 * row.itemMaxLength + 9 : row.maxLength,
+    value: row.list ? (value || []).join('、') : value || '',
+    detail: row.list ? `最多 10 项，每项 ${row.itemMaxLength} 字；用顿号或逗号分隔。`
+      : row.multiline ? '说明建议与形象特征的关系，最多 1200 字。'
+        : `请填写已确认的特征，最多 ${row.maxLength} 字；无法确认时可留空。` }
 }))
 const flowSteps = computed(() => [
   { key: 'basics', label: '基础资料', note: basicsReady.value ? '身高、体重已保存 · 模特性别：' + profileGenderLabel.value : '基础资料待保存', status: basicsReady.value ? 'done' : 'current' },
@@ -263,26 +271,46 @@ async function finishManualSetup() {
   document.querySelector('.analysis-inline-input')?.focus()
 }
 
-function beginEdit(row) {
+async function beginEdit(row) {
   if (busy.value) return
   editingField.value = row.key
   editingValue.value = row.value
+  analysisError.value = ''
+  await nextTick()
+  document.querySelector('.analysis-inline-input')?.focus()
+}
+
+function cancelEdit() {
+  if (busy.value) return
+  editingField.value = ''
+  editingValue.value = ''
   analysisError.value = ''
 }
 
 async function saveEditedField() {
   if (!editingField.value || busy.value) return
   const row = analysisRows.value.find((item) => item.key === editingField.value)
+  if (!row) return
   const value = editingValue.value.trim()
+  const values = row.list ? value.split(/[,，、]/).map(item => item.trim()).filter(Boolean) : null
+  if (row.list && (values.length > 10 || values.some(item => item.length > row.itemMaxLength))) {
+    analysisError.value = `${row.label}最多 10 项，每项不超过 ${row.itemMaxLength} 字。请缩短后重试。`
+    return
+  }
+  if (!row.list && value.length > row.maxLength) {
+    analysisError.value = `${row.label}不能超过 ${row.maxLength} 字。请缩短后重试。`
+    return
+  }
+  analysisError.value = ''
   const analysis = profile.value.stale ? {} : { ...(profile.value.analysis || {}) }
-  const correctedObservation = !row.list && value !== row.value && profile.value.analysisSource === 'MODEL'
+  // A partial manual edit changes the profile's source, but may retain model advice.
+  // Recheck all derived suggestions whenever an observation changes.
+  const correctedObservation = row.observation && value !== row.value && profile.value.analysis
   if (correctedObservation) {
     for (const key of ['fitSuggestions', 'styleTags', 'tryStyleTags', 'colorSuggestions', 'itemSuggestions']) analysis[key] = []
+    analysis.reasonSummary = ''
   }
-  analysis[row.key] = row.list ? value.split(/[,，、]/).map((item) => item.trim()).filter(Boolean) : value
-  analysis.reasonSummary = correctedObservation
-    ? '形象特征已更新。可重新分析或手动完善穿搭建议，后续推荐将参考最新确认的资料与偏好。'
-    : '形象特征与穿搭建议已保存，后续推荐将参考这些资料。'
+  analysis[row.key] = row.list ? values : value
   const account = owner()
   const saved = await props.app.saveProfileAnalysis(analysis)
   if (account !== owner()) return
@@ -431,26 +459,30 @@ onDeactivated(() => {
               <p class="module-kicker">分析</p>
                <h2 id="analysis-card-title">形象分析结果</h2>
             </div>
-             <button class="quiet-action" type="button" @click="openSetup">编辑结果 <Pencil :size="13" /></button>
+             <button class="quiet-action" type="button" :disabled="busy" @click="beginEdit(analysisRows[0])">编辑结果 <Pencil :size="13" /></button>
           </header>
            <p class="analysis-card-intro">{{ analysisSourceLabel }}</p>
-           <p v-if="analysisError" class="dialog-error" role="alert">{{ analysisError }}</p>
+           <p v-if="analysisError" id="analysis-edit-error" class="dialog-error" role="alert">{{ analysisError }}</p>
 
           <div class="analysis-row-list">
-            <div v-for="row in analysisRows" :key="row.key" class="analysis-row">
+            <div v-for="row in analysisRows" :key="row.key" class="analysis-row" :data-analysis-field="row.key">
               <span class="analysis-row-icon"><component :is="row.icon" :size="16" /></span>
               <div class="analysis-row-main">
                 <span>{{ row.label }}</span>
                 <template v-if="editingField === row.key">
-                   <input v-model="editingValue" class="analysis-inline-input" :disabled="busy" :maxlength="row.list ? 800 : row.key === 'bodyProportions' ? 240 : 120" :aria-label="`编辑${row.label}`" @keyup.enter="saveEditedField" @keyup.esc="editingField = ''" />
-                  <small>{{ row.detail }}</small>
+                  <textarea v-if="row.multiline" v-model="editingValue" class="analysis-inline-input analysis-inline-textarea" rows="4" :disabled="busy" :maxlength="row.maxLength" :aria-label="`编辑${row.label}`" :aria-invalid="Boolean(analysisError)" :aria-describedby="`analysis-hint-${row.key}${analysisError ? ' analysis-edit-error' : ''}`" @keyup.ctrl.enter="!$event.isComposing && saveEditedField()" @keyup.esc="cancelEdit" />
+                  <input v-else v-model="editingValue" class="analysis-inline-input" :disabled="busy" :maxlength="row.maxLength" :aria-label="`编辑${row.label}`" :aria-invalid="Boolean(analysisError)" :aria-describedby="`analysis-hint-${row.key}${analysisError ? ' analysis-edit-error' : ''}`" @keyup.enter="!$event.isComposing && saveEditedField()" @keyup.esc="cancelEdit" />
+                  <small :id="`analysis-hint-${row.key}`">{{ row.detail }}</small>
+                  <small v-if="row.observation && profile.analysis">修正特征会清除当前建议与说明，请随后补充。</small>
                 </template>
                 <template v-else>
                   <strong>{{ row.value || '未填写' }}</strong>
-                  <small>{{ row.detail }}</small>
                 </template>
               </div>
-              <button v-if="editingField === row.key" class="row-edit-button" type="button" :disabled="busy" @click="saveEditedField">{{ busy ? '保存中' : '保存' }}</button>
+              <div v-if="editingField === row.key" class="row-edit-actions">
+                <button class="row-edit-button" type="button" :disabled="busy" @click="saveEditedField">{{ busy ? '保存中' : '保存' }}</button>
+                <button class="row-edit-button" type="button" :disabled="busy" @click="cancelEdit">取消</button>
+              </div>
                <button v-else class="row-edit-button" type="button" :disabled="busy" @click="beginEdit(row)">编辑</button>
             </div>
           </div>
@@ -483,6 +515,13 @@ onDeactivated(() => {
           <p class="module-subtitle">已保存的风格参考</p>
           <div class="keyword-list">
             <span v-for="keyword in styleKeywords" :key="keyword">{{ keyword }}</span>
+          </div>
+          <div class="style-exploration">
+            <h3>可尝试的风格</h3>
+            <div v-if="tryStyleTags.length" class="keyword-list">
+              <span v-for="tag in tryStyleTags" :key="tag">{{ tag }}</span>
+            </div>
+            <p v-else>暂无拓展建议</p>
           </div>
 
            <p class="module-footnote">{{ analysisReady ? '根据已保存的分析结果与个人偏好整理，供后续搭配参考。' : '保存分析结果后，可查看相应的风格建议。' }}</p>
@@ -766,15 +805,20 @@ onDeactivated(() => {
 .quiet-action { padding: 4px 0; color: var(--accent-strong); background: transparent; }
 .analysis-card-intro { margin: 14px 0 11px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .analysis-row-list { border-top: 1px solid var(--line); }
-.analysis-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 9px; align-items: center; min-height: 65px; border-bottom: 1px solid var(--line); }
+.analysis-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 9px; align-items: center; min-height: 65px; padding-block: 10px; border-bottom: 1px solid var(--line); }
 .analysis-row-icon { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 50%; color: var(--accent-strong); background: var(--surface-soft); }
 .analysis-row-main { display: grid; gap: 3px; min-width: 0; }
 .analysis-row-main > span { color: var(--muted); font-size: 10px; }
-.analysis-row-main strong { font-size: 13px; }
-.analysis-row-main small { overflow: hidden; color: var(--muted); font-size: 9px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+.analysis-row-main strong { font-size: 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.analysis-row-main small { color: var(--muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.row-edit-actions { display: grid; gap: 5px; align-self: start; }
 .row-edit-button { padding: 4px 0 4px 8px; color: var(--accent-strong); background: transparent; white-space: nowrap; }
-.analysis-inline-input { width: min(100%, 170px); border: 1px solid var(--line-strong); border-radius: 5px; padding: 4px 7px; outline: none; background: #fff; font-size: 12px; }
+.analysis-inline-input { width: 100%; min-width: 0; border: 1px solid var(--line-strong); border-radius: 5px; padding: 7px; outline: none; color: var(--ink); background: var(--surface); font: inherit; font-size: 14px; caret-color: var(--accent-strong); }
+.analysis-inline-textarea { resize: vertical; min-height: 100px; line-height: 1.6; }
 .analysis-inline-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.style-exploration { margin-top: 18px; }
+.style-exploration h3 { margin: 0 0 8px; font-size: 13px; }
+.style-exploration p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .palette-block { padding-top: 16px; }
 .palette-heading { display: flex; align-items: center; gap: 5px; color: var(--ink); font-size: 11px; font-weight: 700; }
 .palette-heading svg { color: var(--muted); }
@@ -943,6 +987,7 @@ onDeactivated(() => {
   .fact-photo { grid-template-columns: auto 1fr; }
   .fact-photo svg { grid-row: span 2; }
   .analysis-card { grid-column: auto; padding: 20px 17px 16px; }
+  .analysis-inline-input { font-size: 16px; }
   .swatch-row { justify-content: space-between; gap: 6px; }
   .profile-module-grid { grid-template-columns: 1fr; gap: 12px; padding: 19px 0; }
   .recommendation-module { grid-column: auto; }

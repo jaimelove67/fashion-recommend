@@ -1,0 +1,11 @@
+[Unit]
+Description=Check the Zhiji HTTPS certificate every day
+
+[Timer]
+OnCalendar=*-*-* 03:25:00 Asia/Shanghai
+RandomizedDelaySec=30m
+Persistent=true
+Unit=zhiji-acme-renew.service
+
+[Install]
+WantedBy=timers.target

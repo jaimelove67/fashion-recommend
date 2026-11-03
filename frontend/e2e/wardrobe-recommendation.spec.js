@@ -248,6 +248,7 @@ test('adds a garment, generates an outfit, saves it, and persists feedback', asy
     await page.getByRole('button', { name: '打开知己 AI 助手', exact: true }).click()
     const assistant = page.getByRole('dialog')
     await expect(assistant).toBeVisible()
+    await assistant.getByRole('button', { name: '衣橱搭配', exact: true }).click()
     await assistant.getByRole('textbox', { name: '穿搭需求' }).fill(`杭州 E2E 答辩通勤，正式、简洁、适合室内汇报`)
 
     const recommendationResponsePromise = page.waitForResponse((response) => {

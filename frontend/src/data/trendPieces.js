@@ -210,7 +210,7 @@ pieceGuides.push(
 
 export const pieceCategories = ['全部', '裤装', '上装', '外套', '裙装', '袜品', '鞋履', '配饰']
 
-const socialPlatforms = new Set(['douyin', 'weibo'])
+const socialPlatforms = new Set(['douyin', 'weibo', 'xiaohongshu'])
 const seasonLabels = { spring: '春季', summer: '夏季', autumn: '秋季', winter: '冬季' }
 const seasonalCategoryPairings = {
   spring: {

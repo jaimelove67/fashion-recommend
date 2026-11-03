@@ -12,6 +12,7 @@ services:
 
   frontend:
     ports: !override
+      - "${FRONTEND_BIND_IP:-127.0.0.1}:${FRONTEND_PORT:-8090}:80"
       - "${FRONTEND_TLS_BIND_IP:-127.0.0.1}:${FRONTEND_TLS_PORT:-8443}:443"
     volumes:
       - ./docker/cloud/nginx.tls.conf:/etc/nginx/conf.d/default.conf:ro

@@ -101,7 +101,7 @@ FRONTEND_PORT=80
 
 在当前发布目录运行 `bash scripts/cloud-deploy.sh http --no-build`，并在云安全组放行 TCP 80。`FRONTEND_BIND_IP` 默认仍为 `127.0.0.1`，上述配置只开放前端网站，数据库、MinIO 和后端端口继续绑定回环地址。公网 HTTP 不加密传输，配套扩展不支持公网 HTTP；正式切换前应确认适用的备案手续已完成。使用前述 SSH 隧道地址验收的部署切换后，应改用这里的 HTTP 域名访问。
 
-后续开启 HTTPS 时按下一节准备证书并切换 TLS 覆盖配置；HTTP 与 TLS 使用不同的监听变量，TLS 覆盖会替换这里的 HTTP 端口映射。
+后续开启 HTTPS 时按下一节准备证书并切换 TLS 覆盖配置；HTTP 与 TLS 使用不同的监听变量，TLS 覆盖保留 HTTP 端口，用于证书验证和 HTTPS 跳转。
 
 ## HTTPS 公网接入
 
@@ -110,8 +110,9 @@ FRONTEND_PORT=80
 域名、备案和可信证书准备完成后，在服务器的 `.env.cloud` 中设置：
 
 ```dotenv
-PUBLIC_ORIGIN=https://实际域名
+PUBLIC_ORIGIN=https://www.jaime.ltd
 TLS_CERT_DIR=/etc/zhiji/tls
+ACME_WEBROOT=/opt/zhiji/shared/acme-webroot
 FRONTEND_TLS_BIND_IP=0.0.0.0
 FRONTEND_TLS_PORT=443
 ```
@@ -126,7 +127,37 @@ TLS 检查需要系统 OpenSSL 和可信 CA 根证书。部署脚本在替换服
 
 TLS 在现有前端容器内终止，后端使用安全 Cookie 和正确的转发协议。仅放行网站所需的公网端口，数据库、MinIO 控制台和后端继续保持回环访问。TLS 覆盖默认只绑定 `127.0.0.1:8443`，公网发布需显式设置上述绑定和端口。
 
-TLS 覆盖会替换原有 HTTP 监听，因此切换后使用 `PUBLIC_ORIGIN` 中的 HTTPS 域名访问，原 `open-cloud-tunnel.ps1` 的 HTTP 地址不再适用。现有 TLS 配置只提供 HTTPS，不包含证书申请、自动续签或 HTTP 跳转；正式接入时应另行配置证书续签和成功后的 Nginx 检查与重载。
+当前 TLS 配置保留 HTTP 监听：`/.well-known/acme-challenge/` 从专用的只读验证目录提供文件，其余 HTTP 请求以 308 跳转到 `https://www.jaime.ltd`。原 HTTP 隧道入口也会跳转到此公网 HTTPS 域名。修改主域名时，需要同步修改 `PUBLIC_ORIGIN`、`docker/cloud/nginx.tls.conf` 的跳转目标，以及证书加载脚本中的域名校验列表。
+
+首次上线仅启用 300 秒 HSTS，确认长期访问、续期稳定后可再增加时长。证书目录与 ACME 验证目录分开，私钥不会通过 HTTP 提供。
+
+### Let's Encrypt 与 acme.sh 自动续期
+
+2026 年 10 月 31 日已在现有前端容器中启用 HTTPS，证书覆盖 `jaime.ltd` 和 `www.jaime.ltd`。沿用原前后端镜像及业务数据，没有发布本机其他前端改动。
+
+- 客户端：acme.sh 3.1.6，来自官方签名标签；已验证 GitHub 发布签名和维护者 SSH 签名。
+- 客户端目录：`/opt/zhiji/shared/acme/client`。
+- 正式账户配置和证书工作目录：`/opt/zhiji/shared/acme/production`、`/opt/zhiji/shared/acme/certificates`，均仅供服务器管理用户访问。
+- Nginx 使用的证书：`/etc/zhiji/tls/fullchain.pem` 和 `privkey.pem`。证书与私钥由 acme.sh 的 `--install-cert` 安装，私钥权限为 `600`。
+- 验证方式：HTTP-01 webroot，不使用 DNS 管理凭据；80 端口及验证目录需要持续可用。
+- 定时任务：`zhiji-acme-renew.timer`，每天北京时间 03:25 起随机延迟最多 30 分钟检查，错过执行时间会补跑。客户端根据证书及 CA 的续期建议决定何时实际申请，定时检查不等于每日重新签发。
+- 续期入口：`scripts/renew-cloud-certificate.sh`。成功部署新证书后，`scripts/reload-cloud-certificate.sh` 独立检查可信链、两个域名、有效期和私钥匹配，再检查并重载 Nginx。
+
+可在服务器检查定时任务：
+
+```bash
+systemctl status zhiji-acme-renew.timer
+systemctl list-timers zhiji-acme-renew.timer
+journalctl -u zhiji-acme-renew.service --no-pager -n 30
+```
+
+本次已验证正式签发、测试环境续期、正式续期检查任务和 Nginx 回调；测试续期使用独立的 staging 账户及目录，没有覆盖正式证书。外网使用 Mozilla CA 验证链与主机名，并在独立 Chrome 和 Edge 中验证首页、登录页面、会话和 CSRF 流程，未忽略证书错误。TLS 1.2、TLS 1.3 均已实测可连接。没有使用真实账户测试密码登录、图片上传或计费生图。
+
+定时任务和证书回调通过 Bash 调用维护脚本，避免后续打包、发布丢失脚本可执行位导致续期或重载失败。
+
+本机 Python 使用 Windows 默认证书库时曾报旧链过期，使用 Mozilla CA 库和 Chrome 均通过；这是本次客户端兼容性观察，未通过关闭证书校验规避。正式证书本身有效至北京时间 2027 年 1 月 29 日 09:23，后续以自动续期后的证书为准。
+
+上线前配置和环境文件备份位于 `/opt/zhiji/shared/backups/https-acme-20261031T021947Z`，操作状态记录位于 `/opt/zhiji/shared/https-deployment/state.json`。回滚前应先核对后续配置是否有独立改动；恢复 HTTP 原环境后，仅重新创建原前后端，不删除数据库或对象存储卷。
 
 ## 检查与更新
 
@@ -141,3 +172,11 @@ docker compose --env-file .env.cloud -f docker-compose.yml -f docker-compose.clo
 TLS 部署需追加 `-f docker-compose.cloud.tls.yml`。不要把完整 `docker compose config` 或包含密钥的日志公开分享。升级前备份 PostgreSQL、MinIO 数据和环境文件，备份至少另存一份到服务器之外；Flyway 迁移不代替备份。新版本使用相同项目名和卷，先检查健康再切换常用发布目录链接。不得使用 `docker compose down -v`，该命令会删除业务数据。
 
 本次部署已将初始化后的 PostgreSQL、MinIO 和环境配置备份到当前电脑的 `.codex_tmp/cloud-deploy/initial-backup/`，目录仅当前 Windows 用户可访问，且不进入 Git 或部署包。已检查备份可以解压、数据库结构存在且验收账号已清理；未进行完整恢复演练。此为初始恢复点，后续新增数据仍需定期另存备份。
+
+## 2026-10-31 应用版本同步
+
+当天在 HTTPS 开通后，已先发布[新的分享首页](deployments/web-share-2026-10-31.md)，再将后端和采集器同步到 `3cb0f7638c32eeea33c06c12aa6eca61572f8f56`，完成 V15 数据库迁移。当前发布目录为 `/opt/zhiji/releases/backend-sync-20261031-01a18fad`，`/opt/zhiji/current` 已指向该目录。
+
+更新前已制作服务器及本机私有备份，并在隔离 PostgreSQL 副本完成恢复、迁移、鉴权与旧后端兼容性演练。完整制品、验证范围和回滚入口见[应用同步发布记录](deployments/project-sync-2026-10-31.md)。
+
+采集器通过 `TREND_COLLECTOR_DATA_PATH` 固定使用原有数据目录，后端继续读取原有已复核导入目录；旧发布目录仍包含采集数据，不能作为纯源码目录清理。环境中的模型与存储凭据、加密密钥和 HTTPS 配置已保留。

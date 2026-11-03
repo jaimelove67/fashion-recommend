@@ -4,7 +4,7 @@ import { useFashionApp } from '../src/composables/useFashionApp.js'
 import { createTrendAnalysisExamples, isTrendAnalysisExample, trendOutfitAnalysis } from '../src/data/trendOutfitAnalyses.js'
 import { trendGalleryImageUrl } from '../src/utils/trendGallery.js'
 
-test('requests only the last 24 hours even when an old weekly selection remains', async (t) => {
+test('defaults to the last 24 hours and does not mix in weekly demo content', async (t) => {
   const originalFetch = globalThis.fetch
   const requestedPeriods = []
   const realItem = {
@@ -40,7 +40,6 @@ test('requests only the last 24 hours even when an old weekly selection remains'
 
   const app = useFashionApp()
   assert.equal(app.state.trendPeriod, 'day')
-  app.state.trendPeriod = 'week'
   await app.loadTrends()
 
   assert.deepEqual(requestedPeriods, ['day'])

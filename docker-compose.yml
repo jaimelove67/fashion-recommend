@@ -57,7 +57,7 @@ services:
     restart: unless-stopped
     shm_size: 256mb
     volumes:
-      - ./tools/trend-collector/data:/app/data
+      - ${TREND_COLLECTOR_DATA_PATH:-./tools/trend-collector/data}:/app/data
 
   backend:
     profiles: ["app"]

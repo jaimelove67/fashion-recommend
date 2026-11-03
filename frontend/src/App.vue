@@ -27,9 +27,12 @@ import HistoryView from './views/HistoryView.vue'
 import ProfileView from './views/ProfileView.vue'
 import LoginView from './views/LoginView.vue'
 import AdminView from './views/AdminView.vue'
+import WebShareHomeView from './views/WebShareHomeView.vue'
 
 const fashion = reactive(useFashionApp())
 const guestLoginOpen = ref(false)
+const landingRequested = ref(typeof window !== 'undefined' && !window.location.hash)
+let fashionInitialized = false
 const searchInput = ref(null)
 const weatherOpen = ref(false)
 const assistantOpen = ref(false)
@@ -68,6 +71,10 @@ const viewComponents = {
 }
 
 const currentView = computed(() => viewComponents[fashion.state.activeView] || RecommendationView)
+const showWebShareHome = computed(() => landingRequested.value)
+watch(showWebShareHome, visible => {
+  document.title = visible ? 'jaime的web分享' : '知己 · 个性化穿搭推荐'
+}, { immediate: true })
 const normalizedQuery = computed(() => fashion.state.globalQuery.trim().toLocaleLowerCase('zh-CN'))
 const searchResults = computed(() => {
   const query = normalizedQuery.value
@@ -148,6 +155,24 @@ function returnToGuestHome() {
   void fashion.selectView('home', { instant: true })
 }
 
+function enterZhijiHome() {
+  landingRequested.value = false
+  void fashion.selectView('home', { instant: true })
+  initializeFashion()
+}
+
+function initializeFashion() {
+  if (fashionInitialized) return
+  fashionInitialized = true
+  void fashion.initialize()
+}
+
+function syncLandingFromLocation() {
+  landingRequested.value = !window.location.hash
+  if (landingRequested.value) guestLoginOpen.value = false
+  else initializeFashion()
+}
+
 function browseGuestSection(id) {
   document.getElementById(id)?.scrollIntoView({
     behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
@@ -206,7 +231,9 @@ watch(() => [fashion.state.authPhase, fashion.state.authUser?.username, fashion.
 
 watch(() => [fashion.state.authPhase, fashion.state.authUser?.username], (_value, previous) => {
   assistantOpen.value = false
-  if (fashion.state.authPhase === 'authenticated') guestLoginOpen.value = false
+  if (fashion.state.authPhase === 'authenticated') {
+    guestLoginOpen.value = false
+  }
   if (previous?.[0] === 'authenticated') {
     disconnectTryOnExtension()
     guestLoginOpen.value = fashion.state.authPhase === 'guest' && Boolean(fashion.state.authError)
@@ -220,13 +247,19 @@ function onExtensionMessage(event) {
 }
 onMounted(() => window.addEventListener('message', onExtensionMessage))
 onBeforeUnmount(() => window.removeEventListener('message', onExtensionMessage))
-onMounted(() => fashion.initialize())
+onMounted(() => window.addEventListener('hashchange', syncLandingFromLocation))
+onBeforeUnmount(() => window.removeEventListener('hashchange', syncLandingFromLocation))
+onMounted(() => {
+  if (!landingRequested.value) initializeFashion()
+})
 onBeforeUnmount(() => fashion.dispose())
 </script>
 
 <template>
+  <WebShareHomeView v-if="showWebShareHome" @enter-zhiji="enterZhijiHome" />
+
   <LoginView
-    v-if="fashion.state.authPhase === 'guest' && guestLoginOpen"
+    v-else-if="fashion.state.authPhase === 'guest' && guestLoginOpen"
     :app="fashion"
     :direct-entry="Boolean(fashion.state.authError)"
     can-browse
