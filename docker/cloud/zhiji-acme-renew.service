@@ -1,0 +1,12 @@
+[Unit]
+Description=Renew the Zhiji Let's Encrypt certificate with acme.sh
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+TimeoutStartSec=900
+ExecStart=/bin/bash /opt/zhiji/current/scripts/renew-cloud-certificate.sh

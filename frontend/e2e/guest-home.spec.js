@@ -41,6 +41,13 @@ async function mockApp(page, { restoredSession = false, admin = false, unavailab
   return { requests, errors }
 }
 
+async function openGuestHome(page, options = {}) {
+  await page.goto('/', options)
+  await expect(page.getByRole('heading', { name: 'jaime的web分享', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '知己', exact: true }).click()
+  await expect(page.locator('.guest-header')).toBeVisible()
+}
+
 async function showLoginForm(page) {
   const heading = page.getByRole('heading', { name: '登录知己', exact: true })
   const shortcut = page.getByRole('button', { name: '直接登录', exact: true })
@@ -62,10 +69,48 @@ async function signIn(page) {
   await expect(page.getByRole('button', { name: '退出登录', exact: true })).toBeVisible()
 }
 
+test('the web sharing home links to the guest Zhiji home', async ({ page }) => {
+  const api = await mockApp(page)
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'jaime的web分享', exact: true })).toBeVisible()
+  await expect(page).toHaveTitle('jaime的web分享')
+  expect(api.requests).toEqual([])
+  await expect(page.locator('.guest-header')).toHaveCount(0)
+  await page.getByRole('button', { name: '敬请期待', exact: true }).click()
+  await expect(page.getByText('该入口正在准备中，敬请期待。', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '知己', exact: true }).click()
+  await expect(page).toHaveURL(/#home$/)
+  await expect(page.locator('.guest-header')).toBeVisible()
+  await expect(page).toHaveTitle('知己 · 个性化穿搭推荐')
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: 'jaime的web分享', exact: true })).toBeVisible()
+  expect(new URL(page.url()).hash).toBe('')
+  await page.goForward()
+  await expect(page.locator('.guest-header')).toBeVisible()
+  expect(api.errors).toEqual([])
+})
+
+test('the root keeps the sharing home until a returning user enters Zhiji', async ({ page }) => {
+  const api = await mockApp(page, { restoredSession: true })
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'jaime的web分享', exact: true })).toBeVisible()
+  expect(api.requests).toEqual([])
+  expect(new URL(page.url()).hash).toBe('')
+  await page.getByRole('button', { name: '知己', exact: true }).click()
+  await expect(page).toHaveURL(/#recommend$/)
+  await expect(page.locator('.recommendation-view')).toBeVisible()
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: 'jaime的web分享', exact: true })).toBeVisible()
+  expect(new URL(page.url()).hash).toBe('')
+  await page.goForward()
+  await expect(page.locator('.recommendation-view')).toBeVisible()
+  expect(api.errors).toEqual([])
+})
+
 test('plays the double-fish intro before revealing the login form', async ({ page }) => {
   const api = await mockApp(page)
   await page.emulateMedia({ reducedMotion: 'no-preference' })
-  await page.goto('/')
+  await openGuestHome(page)
   await page.getByRole('button', { name: '登录 / 注册', exact: true }).click()
   await expect(page.locator('.fish-auth')).toHaveAttribute('data-phase', 'intro')
   await expect(page.getByRole('heading', { name: '登录知己', exact: true })).toBeHidden()
@@ -91,7 +136,7 @@ test('late fish images do not hide a form opened through the login shortcut', as
     await route.continue()
   })
   try {
-    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    await openGuestHome(page, { waitUntil: 'domcontentloaded' })
     await page.getByRole('button', { name: '登录 / 注册', exact: true }).click()
     await expect(page.locator('.fish-auth')).toHaveAttribute('data-phase', 'loading')
     await page.getByRole('button', { name: '直接登录', exact: true }).click()
@@ -119,7 +164,7 @@ test('a late image failure does not move focus away from the password field', as
     await route.abort()
   })
   try {
-    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    await openGuestHome(page, { waitUntil: 'domcontentloaded' })
     await page.getByRole('button', { name: '登录 / 注册', exact: true }).click()
     await page.getByRole('button', { name: '直接登录', exact: true }).click()
     const password = page.locator('input[name="password"]')
@@ -138,7 +183,7 @@ test('a late image failure does not move focus away from the password field', as
 test('reduced motion opens the form without the swimming transition', async ({ page }) => {
   const api = await mockApp(page)
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.goto('/')
+  await openGuestHome(page)
   await page.getByRole('button', { name: '登录 / 注册', exact: true }).click()
   await expect(page.locator('.fish-auth')).toHaveAttribute('data-phase', 'intro')
   await page.getByRole('button', { name: '点击图标，进入知己', exact: true }).click()
@@ -150,7 +195,7 @@ test('reduced motion opens the form without the swimming transition', async ({ p
 test('missing fish images leave a usable login form and a way back home', async ({ page }) => {
   const api = await mockApp(page)
   await page.route('**/prototypes/zhiji-fish/assets/fish-atlas.png', route => route.abort())
-  await page.goto('/')
+  await openGuestHome(page)
   await page.getByRole('button', { name: '登录 / 注册', exact: true }).click()
   await expect(page.getByText('开场动画加载失败，可直接使用登录表单。', { exact: true })).toBeVisible()
   await expect(page.getByRole('textbox', { name: '账号', exact: true })).toBeEditable()
@@ -161,7 +206,7 @@ test('missing fish images leave a usable login form and a way back home', async 
 
 test('shows outfit examples and features to guests without loading private data', async ({ page }) => {
   const api = await mockApp(page)
-  await page.goto('/')
+  await openGuestHome(page)
   await expect(page.getByRole('heading', { name: '先找一点穿搭灵感', exact: true })).toBeVisible()
   await expect(page.locator('.guest-look')).toHaveCount(3)
   await expect(page.locator('.home-guide-card')).toHaveCount(4)
@@ -181,7 +226,7 @@ test('guest content is visible while the session check is still pending', async 
   let releaseSession
   const sessionGate = new Promise(resolve => { releaseSession = resolve })
   await mockApp(page, { sessionGate })
-  await page.goto('/')
+  await openGuestHome(page)
   try {
     await expect(page.getByRole('heading', { name: '先找一点穿搭灵感', exact: true })).toBeVisible({ timeout: 3000 })
     await expect(page.locator('.guest-login-button')).toBeDisabled()
@@ -195,7 +240,7 @@ test('guest content is visible while the session check is still pending', async 
 
 test('guest examples remain available when the backend is unavailable', async ({ page }) => {
   const api = await mockApp(page, { unavailable: true })
-  await page.goto('/')
+  await openGuestHome(page)
   await expect(page.locator('.guest-look')).toHaveCount(3)
   await expect(page.getByRole('button', { name: '登录 / 注册', exact: true })).toBeEnabled()
   await expect(page.getByText('暂无穿搭内容', { exact: true })).toHaveCount(0)
@@ -207,7 +252,7 @@ test('guest examples remain available when the backend is unavailable', async ({
 
 test('guests can open login and registration and return to browsing', async ({ page }) => {
   const api = await mockApp(page)
-  await page.goto('/')
+  await openGuestHome(page)
   await openLogin(page)
   await expect(page.getByRole('heading', { name: '登录知己', exact: true })).toBeVisible()
   await page.getByRole('tab', { name: '注册', exact: true }).click()
@@ -222,7 +267,7 @@ test('guests can open login and registration and return to browsing', async ({ p
 
 test('a protected feature opens login and continues to that feature after signing in', async ({ page }) => {
   const api = await mockApp(page)
-  await page.goto('/')
+  await openGuestHome(page)
   await expect(page.getByRole('button', { name: '登录 / 注册', exact: true })).toBeEnabled()
   await page.locator('.home-guide-card').filter({ hasText: '我的衣橱' }).click()
   await showLoginForm(page)
@@ -238,7 +283,7 @@ test('a protected feature opens login and continues to that feature after signin
 
 test('registration from the guest home starts a personal space without copying examples into it', async ({ page }) => {
   const api = await mockApp(page)
-  await page.goto('/')
+  await openGuestHome(page)
   await openLogin(page)
   await page.getByRole('tab', { name: '注册', exact: true }).click()
   await page.locator('input[name="username"]').fill('guest-test')
@@ -257,7 +302,7 @@ test('registration from the guest home starts a personal space without copying e
 
 test('registration refreshes a rejected captcha and clears the previous input', async ({ page }) => {
   const api = await mockApp(page, { rejectRegistration: true })
-  await page.goto('/')
+  await openGuestHome(page)
   await openLogin(page)
   await page.getByRole('tab', { name: '注册', exact: true }).click()
   await page.locator('input[name="username"]').fill('captcha-test')
@@ -277,7 +322,7 @@ test('registration refreshes a rejected captcha and clears the previous input', 
 
 test('captcha load failures prevent registration and allow retrying the image', async ({ page }) => {
   const api = await mockApp(page, { captchaUnavailable: true })
-  await page.goto('/')
+  await openGuestHome(page)
   await openLogin(page)
   await page.getByRole('tab', { name: '注册', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('服务暂时不可用')
@@ -292,7 +337,7 @@ test('captcha load failures prevent registration and allow retrying the image', 
 test('a small-screen registration form can refresh the captcha without submitting credentials', async ({ page }) => {
   const api = await mockApp(page)
   await page.setViewportSize({ width: 320, height: 740 })
-  await page.goto('/')
+  await openGuestHome(page)
   await openLogin(page)
   await page.getByRole('tab', { name: '注册', exact: true }).click()
   await page.locator('input[name="captcha"]').fill('ABC23')
@@ -312,7 +357,7 @@ test('a small-screen registration form can refresh the captcha without submittin
 
 test('a rejected login stays on the form and lets the visitor return to examples', async ({ page }) => {
   const api = await mockApp(page, { rejectLogin: true })
-  await page.goto('/')
+  await openGuestHome(page)
   await openLogin(page)
   await page.getByRole('textbox', { name: '账号', exact: true }).fill('guest-test')
   await page.locator('input[name="password"]').fill('guest-password-2026')
@@ -374,7 +419,7 @@ test('signed-in home links and browser history resolve to recommendations', asyn
 
 test('signed-in invalid routes and inaccessible admin links fall back to recommendations', async ({ page }) => {
   const api = await mockApp(page, { restoredSession: true })
-  for (const route of ['', '#missing', '#admin']) {
+  for (const route of ['#missing', '#admin']) {
     await page.goto(`/${route}`)
     await expect(page).toHaveURL(/#recommend$/)
     await expect(page.locator('.recommendation-view')).toBeVisible()

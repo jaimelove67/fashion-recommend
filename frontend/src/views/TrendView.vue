@@ -5,6 +5,8 @@ import TrendGallery from '../components/TrendGallery.vue'
 import OutfitTechniqueExplorer from '../components/OutfitTechniqueExplorer.vue'
 import TrendOutfitBreakdown from '../components/TrendOutfitBreakdown.vue'
 import TrendAnalysisDialog from '../components/TrendAnalysisDialog.vue'
+import TrendFilters from '../components/TrendFilters.vue'
+import TrendPieceFavorites from '../components/TrendPieceFavorites.vue'
 import { createTrendAnalysisExamples } from '../data/trendOutfitAnalyses.js'
 import CrossSiteTryOnLauncher from '../components/CrossSiteTryOnLauncher.vue'
 import { LoaderCircle } from '@lucide/vue'
@@ -35,8 +37,16 @@ const detailTrend = shallowRef(null)
 const selectedId = computed(() => showAnalysisExamples.value ? selectedExampleId.value : state.value.selectedTrendId)
 const trends = computed(() => showAnalysisExamples.value ? analysisExamples : (Array.isArray(state.value.trends) ? state.value.trends : []))
 const galleryTrends = computed(() => showAnalysisExamples.value ? analysisExamples : (Array.isArray(state.value.galleryTrends) ? state.value.galleryTrends : []))
+const galleryPreview = computed(() => galleryTrends.value.slice(0, 10))
 const trendMeta = computed(() => state.value.trendMeta || {})
-const dailySelection = computed(() => !showAnalysisExamples.value && !trendMeta.value.demoMode ? trendMeta.value.dailySelection : null)
+const weekly = computed(() => trendMeta.value.period === 'week')
+const dailySelection = computed(() => !showAnalysisExamples.value && !weekly.value && !trendMeta.value.demoMode ? trendMeta.value.dailySelection : null)
+const filtered = computed(() => state.value.trendPeriod === 'week' || state.value.trendPlatform || state.value.trendTopic)
+const additionalTrends = computed(() => {
+  if (!weekly.value || showAnalysisExamples.value || !galleryPreview.value.length) return []
+  const shown = new Set(galleryPreview.value.map(item => item.id))
+  return trends.value.filter(item => !shown.has(item.id))
+})
 const dailyCount = computed(() => dailySelection.value ? dailySelection.value.menswear + dailySelection.value.womenswear + dailySelection.value.niche : 0)
 const dailyMissing = computed(() => {
   const names = { menswear: '男装', womenswear: '女装', niche: '小众欣赏' }
@@ -91,6 +101,14 @@ async function openWardrobe() {
   await app.selectView('wardrobe')
 }
 
+async function resetFilters() {
+  if (state.value.trendsLoading) return
+  state.value.trendPeriod = 'day'
+  state.value.trendPlatform = ''
+  state.value.trendTopic = ''
+  await app.loadTrends()
+}
+
 onMounted(() => {
   if (state.value.authPhase === 'authenticated' && !state.value.wardrobe?.length && !state.value.wardrobeLoading) {
     void app.loadWardrobe()
@@ -106,7 +124,7 @@ onMounted(() => {
         <h1>穿搭鉴赏与风格参考</h1>
         <p>欣赏穿搭作品，学习搭配技巧，结合个人衣橱探索自己的穿法。</p>
       </div>
-      <span v-if="trends.length || dailySelection" class="trend-count">{{ showAnalysisExamples ? `${trends.length} 套历史分析示例` : dailySelection ? `每日精选 ${dailyCount} / ${dailySelection.target} 套` : `当前范围收录 ${trends.length} 条` }}</span>
+      <span v-if="trends.length || dailySelection" class="trend-count">{{ showAnalysisExamples ? `${trends.length} 套历史分析示例` : dailySelection ? `每日精选 ${dailyCount} / ${dailySelection.target} 套` : `${weekly ? '近 7 天' : '当前范围'}收录 ${trends.length} 条` }}</span>
     </header>
 
     <div v-if="dailySelection" class="trend-daily-composition" aria-label="每日精选收录情况">
@@ -120,16 +138,23 @@ onMounted(() => {
     </div>
     <p v-if="showAnalysisExamples" class="trend-example-notice">以下为已核验的历史作品，用于体验完整穿搭分析；保留原始发布日期，不计入近期鉴赏。</p>
 
+    <TrendFilters v-if="!showAnalysisExamples" :app="app" />
+
     <CrossSiteTryOnLauncher v-if="state.authUser?.username && !showAnalysisExamples" ref="tryOnLauncher" :username="state.authUser.username" />
 
     <TrendGallery
       v-if="galleryTrends.length"
-      :trends="galleryTrends"
+      :trends="galleryPreview"
       :selected-id="selectedTrend?.id"
       :paused="Boolean(detailTrend)"
       :historical="showAnalysisExamples"
       @select="selectTrend"
     />
+
+    <section v-if="additionalTrends.length" class="trend-more-results" aria-labelledby="trend-more-results-title">
+      <header><h2 id="trend-more-results-title">更多近 7 天内容</h2><span>还有 {{ additionalTrends.length }} 条，可逐条查看</span></header>
+      <ol><li v-for="item in additionalTrends" :key="item.id"><div><strong>{{ item.title }}</strong><span>{{ trendPlatformName(item.platform) }} · {{ formatDateTime(item.publishedAt) }}</span></div><button type="button" :aria-label="`查看${item.title}`" @click="openAnalysis(item)">查看内容</button></li></ol>
+    </section>
 
     <TrendDiscovery v-if="trends.length && !galleryTrends.length" :app="app" posts-only :limit="0" />
 
@@ -141,6 +166,7 @@ onMounted(() => {
       <strong>穿搭鉴赏加载失败</strong>
       <span>{{ state.trendError }}</span>
       <button type="button" @click="app.loadTrends()">重新加载</button>
+      <button v-if="filtered" type="button" @click="resetFilters">清除筛选并恢复每日精选</button>
     </div>
     <div v-else-if="isEmptyFeed" class="trend-page-state trend-empty-state">
       <div class="trend-empty-copy">
@@ -148,6 +174,7 @@ onMounted(() => {
         <span>数据源恢复并有符合筛选条件的内容后，将在此展示。</span>
       </div>
       <button type="button" @click="app.loadTrends()">重新加载</button>
+      <button v-if="filtered" type="button" @click="resetFilters">清除筛选并恢复每日精选</button>
     </div>
     <TrendOutfitBreakdown
       v-if="selectedTrend"
@@ -157,6 +184,8 @@ onMounted(() => {
       @open-analysis="openAnalysis"
       @use-trend="useTrend"
     />
+
+    <TrendPieceFavorites v-if="selectedTrend && !showAnalysisExamples && !state.trendsLoading" :app="app" :trend="selectedTrend" />
 
     <TrendAnalysisDialog
       v-if="detailTrend"
@@ -256,6 +285,18 @@ onMounted(() => {
 .trend-content-modes button[aria-pressed="true"] { border-color:var(--line); background:var(--surface); color:var(--accent); }
 .trend-content-modes button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .trend-example-notice { margin:0 0 18px; padding:12px 15px; border-left:3px solid var(--accent); background:var(--surface-soft); color:var(--muted); font-size:12px; line-height:1.8; }
+
+.trend-more-results { margin:20px 0 28px; border:1px solid var(--line); border-radius:10px; padding:18px 22px; }
+.trend-more-results header { display:flex; align-items:baseline; flex-wrap:wrap; gap:10px 18px; }
+.trend-more-results h2 { margin:0; color:var(--ink); font-family:var(--font-display); font-size:20px; font-weight:600; }
+.trend-more-results header>span { color:var(--muted); font-size:12px; }
+.trend-more-results ol { padding:0; margin:16px 0 0; list-style:none; }
+.trend-more-results li { display:flex; align-items:center; justify-content:space-between; gap:14px; border-top:1px solid var(--line); padding:13px 0; }
+.trend-more-results li>div { display:grid; min-width:0; gap:5px; }
+.trend-more-results strong { font-size:13px; font-weight:500; line-height:1.7; overflow-wrap:anywhere; }
+.trend-more-results li span { color:var(--muted); font-size:11px; line-height:1.7; }
+.trend-more-results button { flex-shrink:0; min-height:40px; border:1px solid var(--line); border-radius:6px; padding:7px 11px; background:var(--surface); color:var(--accent); font:inherit; font-size:12px; cursor:pointer; }
+.trend-more-results button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 
 .trend-page-state {
   display: flex;

@@ -95,6 +95,7 @@ test('a new recommendation links to one concise visible explanation', async ({ p
   const errors = await openRecommendation(page)
   await page.getByRole('button', { name: '打开知己 AI 助手', exact: true }).click()
   const assistant = page.getByRole('dialog', { name: '知己 AI 助手' })
+  await assistant.getByRole('button', { name: '衣橱搭配', exact: true }).click()
   await assistant.locator('#assistant-draft').fill('长沙通勤')
   await assistant.getByRole('button', { name: '生成穿搭推荐' }).click()
   await expect(assistant.locator('.assistant-result-card')).toBeVisible()

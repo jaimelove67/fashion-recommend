@@ -4,6 +4,7 @@ import {
   Activity,
   ArrowLeft,
   Bot,
+  BookOpen,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -21,6 +22,7 @@ import {
 } from '@lucide/vue'
 import { trendDisplayImageUrl } from '../utils/trendImage.js'
 import { trendPlatformName } from '../utils/trendSources.js'
+import AdminTechniquesPanel from '../components/AdminTechniquesPanel.vue'
 
 const props = defineProps({
   app: { type: Object, required: true }
@@ -31,6 +33,7 @@ const sections = [
   { id: 'users', label: '账号与权限', description: '账户状态管理', icon: UsersRound },
   { id: 'feedback', label: '反馈审核', description: '用户反馈处理', icon: MessageSquareText },
   { id: 'trendReviews', label: '穿搭图片复核', description: '鉴赏内容与全部配图', icon: ShieldCheck },
+  { id: 'techniques', label: '穿搭技巧管理', description: '整理进度与对照图', icon: BookOpen },
   { id: 'aiModels', label: '模型配置', description: 'AI 能力与密钥', icon: Settings2 },
   { id: 'audit', label: '操作日志', description: '管理操作审计', icon: FileClock }
 ]
@@ -40,6 +43,23 @@ const feedbackStatuses = [
   { value: 'REVIEWED', label: '已查看' },
   { value: 'RESOLVED', label: '已解决' },
   { value: 'ALL', label: '全部状态' }
+]
+
+const auditActions = [
+  { value: 'USER_STATUS_UPDATE', label: '账号状态调整' },
+  { value: 'FEEDBACK_STATUS_UPDATE', label: '反馈状态处理' },
+  { value: 'AI_MODEL_CONFIG_UPDATE', label: 'AI 模型配置调整' },
+  { value: 'AI_MODEL_CONFIG_RESET', label: '恢复 AI 环境配置' },
+  { value: 'TREND_CONTENT_REVIEW', label: '穿搭图片复核' },
+  { value: 'TREND_REFRESH', label: '刷新穿搭数据源' },
+  { value: 'TECHNIQUE_REFRESH', label: '整理穿搭技巧' },
+  { value: 'TECHNIQUE_COMPARISON', label: '补全技巧对照图' }
+]
+const auditOutcomes = [
+  { value: 'SUCCESS', label: '成功' },
+  { value: 'ATTEMPTED', label: '已尝试' },
+  { value: 'SKIPPED', label: '已跳过' },
+  { value: 'QUEUED', label: '已排队' }
 ]
 
 const activeSection = ref('overview')
@@ -110,6 +130,8 @@ const anyAdminLoading = computed(() => props.app.state.adminOverviewLoading
   || props.app.state.adminAuditLoading
   || props.app.state.adminAiModelsLoading
   || props.app.state.adminTrendReviewsLoading
+  || props.app.state.adminTechniquesLoading
+  || Boolean(props.app.state.adminTechniqueAction)
   || Boolean(props.app.state.adminTrendReviewAction)
   || Boolean(props.app.state.adminAiModelAction))
 const missingAiEncryptionKey = computed(() => aiModels.value.some((model) => !model.encryptionAvailable))
@@ -290,6 +312,7 @@ async function selectSection(section) {
   if (section === 'users') props.app.loadAdminUsers({ page: 0 })
   if (section === 'feedback') props.app.loadAdminFeedback({ page: 0 })
   if (section === 'trendReviews') props.app.loadAdminTrendReviews()
+  if (section === 'techniques') props.app.loadAdminTechniques()
   if (section === 'aiModels') {
     const models = await props.app.loadAdminAiModels()
     if (models) models.forEach(syncAiModelDraft)
@@ -303,6 +326,7 @@ async function refreshWorkspace() {
   props.app.loadAdminFeedback({ page: props.app.state.adminFeedbackPage })
   props.app.loadAdminAuditLogs({ page: props.app.state.adminAuditPage })
   if (activeSection.value === 'trendReviews') props.app.loadAdminTrendReviews()
+  if (activeSection.value === 'techniques') props.app.loadAdminTechniques()
   const models = await props.app.loadAdminAiModels()
   if (models) models.forEach(syncAiModelDraft)
 }
@@ -446,13 +470,11 @@ function feedbackStatusLabel(status) {
 }
 
 function auditActionLabel(action) {
-  if (action === 'USER_STATUS_UPDATE') return '账号状态调整'
-  if (action === 'FEEDBACK_STATUS_UPDATE') return '反馈状态处理'
-  if (action === 'AI_MODEL_CONFIG_UPDATE') return 'AI 模型配置调整'
-  if (action === 'AI_MODEL_CONFIG_RESET') return '恢复 AI 环境配置'
-  if (action === 'TREND_CONTENT_REVIEW') return '穿搭图片复核'
-  if (action === 'TREND_REFRESH') return '刷新穿搭数据源'
-  return action || '未知操作'
+  return auditActions.find(item => item.value === action)?.label || action || '未知操作'
+}
+
+function auditOutcomeLabel(outcome) {
+  return auditOutcomes.find(item => item.value === outcome)?.label || outcome || '未知结果'
 }
 
 function engineLabel(engine) {
@@ -573,6 +595,8 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
               <div class="overview-lead-stats">
                 <div><small>平均反馈评分</small><strong>{{ averageRating(overview.averageRating) }}<i v-if="overview.averageRating > 0"> / 5</i></strong></div>
                 <div><small>已收藏推荐</small><strong>{{ overview.savedRecommendations }}</strong></div>
+                <div><small>衣橱单品总数</small><strong>{{ overview.totalWardrobeItems ?? '—' }}</strong></div>
+                <div><small>用户反馈总数</small><strong>{{ overview.totalFeedback ?? '—' }}</strong></div>
               </div>
             </article>
 
@@ -635,7 +659,7 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
             <section class="admin-operation-panel recent-panel" aria-labelledby="recent-actions-title">
               <div class="admin-panel-title"><div><span>最近</span><h3 id="recent-actions-title">近期管理操作</h3></div><button type="button" class="text-button" @click="selectSection('audit')">查看全部</button></div>
               <div v-if="auditLogs.length" class="recent-action-list">
-                <div v-for="log in auditLogs.slice(0, 4)" :key="log.id"><span class="recent-action-mark"></span><div><strong>{{ auditActionLabel(log.action) }}</strong><small>{{ log.targetId || '—' }} · {{ formatDate(log.createdAt) }}</small></div><em>{{ log.outcome === 'SUCCESS' ? '成功' : log.outcome }}</em></div>
+                <div v-for="log in auditLogs.slice(0, 4)" :key="log.id"><span class="recent-action-mark"></span><div><strong>{{ auditActionLabel(log.action) }}</strong><small>{{ log.targetId || '—' }} · {{ formatDate(log.createdAt) }}</small></div><em>{{ auditOutcomeLabel(log.outcome) }}</em></div>
               </div>
               <p v-else class="admin-empty-inline">暂无管理操作记录。</p>
             </section>
@@ -748,6 +772,8 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
             </article>
           </div>
         </section>
+
+        <AdminTechniquesPanel v-else-if="activeSection === 'techniques'" :app="app" />
 
         <section v-else-if="activeSection === 'aiModels'" class="admin-section" aria-labelledby="ai-models-title">
           <header class="admin-section-heading">
@@ -875,8 +901,8 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
           </header>
           <section class="admin-table-panel">
             <form class="admin-toolbar" @submit.prevent="applyAuditFilters">
-              <label class="admin-select-field"><span>操作</span><select v-model="app.state.adminAuditAction"><option value="">全部操作</option><option value="USER_STATUS_UPDATE">账号状态调整</option><option value="FEEDBACK_STATUS_UPDATE">反馈状态处理</option><option value="AI_MODEL_CONFIG_UPDATE">AI 模型配置调整</option><option value="AI_MODEL_CONFIG_RESET">恢复 AI 环境配置</option></select></label>
-              <label class="admin-select-field"><span>结果</span><select v-model="app.state.adminAuditOutcome"><option value="">全部结果</option><option value="SUCCESS">成功</option></select></label>
+              <label class="admin-select-field"><span>操作</span><select v-model="app.state.adminAuditAction"><option value="">全部操作</option><option v-for="action in auditActions" :key="action.value" :value="action.value">{{ action.label }}</option></select></label>
+              <label class="admin-select-field"><span>结果</span><select v-model="app.state.adminAuditOutcome"><option value="">全部结果</option><option v-for="outcome in auditOutcomes" :key="outcome.value" :value="outcome.value">{{ outcome.label }}</option></select></label>
               <button class="toolbar-button toolbar-primary" type="submit" :disabled="app.state.adminAuditLoading">筛选日志</button>
               <span class="toolbar-total">共 {{ app.state.adminAuditTotal }} 条</span>
             </form>
@@ -886,7 +912,7 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
               <table class="admin-table audit-table">
                 <caption class="sr-only">管理员操作审计日志</caption>
                 <thead><tr><th scope="col">时间</th><th scope="col">操作者</th><th scope="col">操作类型</th><th scope="col">对象</th><th scope="col">结果</th><th scope="col">说明</th></tr></thead>
-                <tbody><tr v-for="log in auditLogs" :key="log.id"><td class="muted-cell">{{ formatDate(log.createdAt) }}</td><td><strong>{{ log.actorUsername }}</strong></td><td><span class="audit-action">{{ auditActionLabel(log.action) }}</span></td><td><span class="audit-target">{{ log.targetType }} · {{ log.targetId || '—' }}</span></td><td><span class="audit-outcome">{{ log.outcome === 'SUCCESS' ? '成功' : log.outcome }}</span></td><td class="audit-details">{{ log.details || '—' }}</td></tr></tbody>
+                <tbody><tr v-for="log in auditLogs" :key="log.id"><td class="muted-cell">{{ formatDate(log.createdAt) }}</td><td><strong>{{ log.actorUsername }}</strong></td><td><span class="audit-action">{{ auditActionLabel(log.action) }}</span></td><td><span class="audit-target">{{ log.targetType }} · {{ log.targetId || '—' }}</span></td><td><span class="audit-outcome">{{ auditOutcomeLabel(log.outcome) }}</span></td><td class="audit-details">{{ log.details || '—' }}</td></tr></tbody>
               </table>
             </div>
             <footer class="admin-pagination"><span>第 {{ app.state.adminAuditPage + 1 }} 页</span><div><button type="button" :disabled="app.state.adminAuditPage === 0 || app.state.adminAuditLoading" @click="previousAuditPage"><ChevronLeft :size="14" />上一页</button><button type="button" :disabled="!app.state.adminAuditHasNext || app.state.adminAuditLoading" @click="nextAuditPage">下一页<ChevronRight :size="14" /></button></div></footer>
@@ -1160,7 +1186,7 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
   .admin-layout { grid-template-columns: 1fr; gap: 23px; }
   .admin-sidebar { position: static; }
   .admin-privacy-note { display: none; }
-  .admin-side-nav { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .admin-side-nav { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .admin-side-nav button { grid-template-columns: 1fr; justify-items: center; gap: 6px; padding: 10px 7px; text-align: center; }
   .admin-side-nav button > span { justify-items: center; }
   .admin-side-nav small { display: none; }
@@ -1173,7 +1199,7 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
   .admin-identity-block { justify-items: start; }
   .admin-layout { padding-top: 21px; }
   .admin-sidebar-label { margin-left: 2px; }
-  .admin-side-nav { gap: 4px; }
+  .admin-side-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
   .admin-side-nav button { border-radius: 9px; padding: 9px 3px; }
   .admin-side-nav strong { font-size: 9px; }
   .overview-grid, .overview-lower-grid { grid-template-columns: 1fr; }

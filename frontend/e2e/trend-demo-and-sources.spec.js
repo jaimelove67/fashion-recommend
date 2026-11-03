@@ -21,7 +21,7 @@ const demoItems = [
   }
 ]
 
-test('keeps daily retrieval and reference images without the removed trend toolbar', async ({ page }) => {
+test('keeps daily retrieval and reference images with advanced filters initially collapsed', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.route('**/api/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname
@@ -65,6 +65,7 @@ test('keeps daily retrieval and reference images without the removed trend toolb
   await expect(page.locator('.demo-notice')).toHaveCount(0)
   await expect(page.getByRole('group', { name: '鉴赏时间范围' })).toHaveCount(0)
   await expect(page.getByLabel('内容来源')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '高级筛选', exact: true })).toHaveAttribute('aria-expanded', 'false')
   await expect(page.locator('.updated, .control-refresh')).toHaveCount(0)
 
   const gallery = page.getByRole('region', { name: '穿搭鉴赏画廊' })
