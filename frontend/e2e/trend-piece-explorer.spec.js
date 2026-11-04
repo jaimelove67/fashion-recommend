@@ -41,7 +41,7 @@ test('sourced technique filters change the lesson and reset the self-check when 
   await filters.getByRole('button', { name: category, exact: true }).click()
   await expect(choices).toHaveCount(sourcedTechniques.filter(technique => technique.category === category).length)
   await expect(choices.first()).toHaveAttribute('aria-pressed', 'true')
-  for (const text of ['原帖要点（转述）', '归纳的方法', '为什么这样搭', '调整前', '调整后', '适合什么时候', '注意取舍', '参考原帖']) {
+  for (const text of ['原帖要点与参考来源', '归纳的方法', '为什么这样搭', '调整前', '调整后', '适合什么时候', '注意取舍']) {
     await expect(detail.getByText(text, { exact: true })).toBeVisible()
   }
   await expect(detail.locator('.technique-example-note')).toContainText('编辑推演，非原帖对照实验')
@@ -67,7 +67,7 @@ test('sourced technique filters change the lesson and reset the self-check when 
 test('post summaries retain attributable source notes and links with an empty or unavailable trend feed', async ({ page }) => {
   const empty = await openTechniques(page)
   await expect(empty.explorer.locator('.technique-choice')).toHaveCount(sourcedTechniques.length)
-  await expect(empty.explorer.locator('article.technique-detail')).toContainText('原帖要点（转述）')
+  await expect(empty.explorer.locator('article.technique-detail')).toContainText('原帖要点与参考来源')
 
   await page.unroute('**/api/**')
   const { explorer } = await openTechniques(page, { feedFails: true })
@@ -90,20 +90,16 @@ test('post summaries retain attributable source notes and links with an empty or
       await expect(link).toHaveAttribute('href', url.href)
       await expect(link).toHaveAttribute('target', '_blank')
       await expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+      await expect(sourceRow.getByRole('link')).toHaveCount(1)
       await expect(sourceRow).toContainText(source.author)
       await expect(sourceRow).toContainText(source.platform)
-      await expect(sourceRow).toContainText(source.scope)
-      await expect(sourceRow).toContainText(source.readAt)
+      await expect(sourceRow).not.toContainText('阅读日期')
+      await expect(sourceRow).not.toContainText('阅读范围')
+      await expect(sourceRow.locator('.technique-source-points p')).toHaveText(
+        technique.sourceNotes.filter(note => note.sourceId === source.id).map(note => note.point)
+      )
     }
     expect(technique.sourceNotes.length).toBeGreaterThan(0)
-    for (const note of technique.sourceNotes) {
-      const source = technique.sources.find(item => item.id === note.sourceId)
-      expect(source).toBeTruthy()
-      const noteRow = detail.locator('.technique-note-list li').filter({ hasText: note.point })
-      await expect(noteRow).toContainText(note.point)
-      await expect(noteRow.getByRole('link')).toContainText(source.author)
-      await expect(noteRow.getByRole('link')).toHaveAttribute('href', new URL(source.url).href)
-    }
   }
   await expect(explorer.getByRole('button', { name: '去我的衣橱练习', exact: true })).toBeEnabled()
 })

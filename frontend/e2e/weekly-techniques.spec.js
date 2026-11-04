@@ -52,14 +52,14 @@ test('weekly lessons appear newest first, remove duplicated curated sources and 
   await expect(choices.first()).toContainText(weeklyLesson().title)
   await expect(detail.getByRole('heading', { level: 3 })).toHaveText(weeklyLesson().title)
   await expect(explorer.locator('.technique-weekly-status')).toContainText('最近更新 2026-10-16')
-  await expect(detail.locator('.technique-ai-disclosure')).toContainText('未经人工逐条核读')
+  await expect(detail.locator('.technique-ai-disclosure')).toContainText('AI 根据原帖文字归纳')
   await expect(detail.locator('.technique-example-note')).toContainText('AI 推演，非原帖对照实验')
   await expect(detail.locator('.technique-source-list')).toContainText('原文未署名')
-  await expect(detail.locator('.technique-source-list')).toContainText('正文提取日期：2026-10-16')
+  await expect(detail.locator('.technique-source-list')).not.toContainText('正文提取日期')
   await expect(detail.locator('.technique-source-meta').first()).toContainText('2018-02-26')
   await expect(detail.locator('.technique-source-meta').last()).toContainText('原帖未标注日期')
   await expect(detail.locator('.technique-source-meta').first()).not.toContainText('T18:40:10Z')
-  await expect(detail.locator('.technique-source-list')).toContainText('已提取正文，AI归纳；未核验原图或视频')
+  await expect(detail.locator('.technique-source-list')).not.toContainText('阅读范围')
   await expect(detail).not.toContainText('假冒人工核验声明')
   if (process.env.CAPTURE_WEEKLY_TECHNIQUES) {
     await explorer.screenshot({ path: '../output/weekly-techniques/desktop.png', animations: 'disabled' })
@@ -71,6 +71,29 @@ test('weekly lessons appear newest first, remove duplicated curated sources and 
   await choices.last().click()
   await expect(detail.locator('.technique-checklist')).toBeHidden()
   await expect(detail.locator('.technique-ai-disclosure')).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('source notes are grouped with the correct post when another post has no notes', async ({ page }) => {
+  const lesson = weeklyLesson()
+  lesson.sourceNotes = [
+    { sourceId: lesson.sources[0].id, point: '第一篇原帖的第一条要点。' },
+    { sourceId: lesson.sources[0].id, point: '第一篇原帖的第二条要点。' }
+  ]
+  const { explorer, errors } = await openTechniques(page, { data: { items: [lesson], status: 'ready' } })
+  const detail = explorer.locator('.technique-detail')
+  const rows = detail.locator('.technique-source-list > li')
+  await expect(detail.getByRole('heading', { name: '原帖要点与参考来源', exact: true })).toHaveCount(1)
+  await expect(rows).toHaveCount(2)
+  await expect(rows.first().locator('.technique-source-points p')).toHaveText(lesson.sourceNotes.map(note => note.point))
+  await expect(rows.first().getByRole('link')).toHaveCount(1)
+  await expect(rows.first().getByRole('link')).toHaveAttribute('href', lesson.sources[0].url)
+  await expect(rows.last().locator('.technique-source-points p')).toHaveCount(0)
+  await expect(rows.last()).toContainText('这篇原帖的要点仍在整理。')
+  await expect(rows.last().getByRole('link')).toHaveCount(1)
+  await expect(rows.last().getByRole('link')).toHaveAttribute('href', lesson.sources[1].url)
+  await expect(rows.last()).not.toContainText('阅读范围')
+  await expect(rows.last()).not.toContainText('正文提取日期')
   expect(errors).toEqual([])
 })
 

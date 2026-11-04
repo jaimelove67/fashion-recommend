@@ -258,7 +258,7 @@ test.describe('real local frontend/backend integration', () => {
     for (const technique of outfitTechniques.filter(item => item.sources?.length)) {
       await techniques.locator('.technique-choice').filter({ has: page.getByText(technique.title, { exact: true }) }).click()
       const detail = techniques.locator('article.technique-detail')
-      await expect(detail.getByRole('heading', { name: '原帖要点（转述）', exact: true })).toBeVisible()
+      await expect(detail.getByRole('heading', { name: '原帖要点与参考来源', exact: true })).toBeVisible()
       await expect(detail.locator('.technique-synthesis')).toContainText(technique.synthesisNote)
       await expect(detail.locator('.technique-source-list li')).toHaveCount(technique.sources.length)
       for (const source of technique.sources) {
