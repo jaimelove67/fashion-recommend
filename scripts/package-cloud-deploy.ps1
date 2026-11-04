@@ -78,6 +78,7 @@ $requiredTrees = @(
     @{ Path = 'frontend/src'; Extensions = @('.vue', '.js', '.mjs', '.css', '.json') }
     @{ Path = 'frontend/public/assets/trend-pieces'; Extensions = @('.png', '.jpg', '.jpeg', '.webp') }
     @{ Path = 'frontend/public/assets/trend-analysis'; Extensions = @('.png', '.jpg', '.jpeg', '.webp') }
+    @{ Path = 'frontend/public/assets/techniques'; Extensions = @('.png', '.jpg', '.jpeg', '.webp') }
     @{ Path = 'docker/postgres/init'; Extensions = @('.sql') }
 )
 
