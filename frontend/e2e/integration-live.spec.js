@@ -266,7 +266,7 @@ test.describe('real local frontend/backend integration', () => {
       }
     }
     await page.screenshot({ path: '../output/integration-live/appreciation-techniques.png', fullPage: true, animations: 'disabled' })
-    await techniques.getByRole('button', { name: '去我的衣橱练习', exact: true }).click()
+    await techniques.getByRole('button', { name: '查看我的衣橱', exact: true }).click()
     await expect(page).toHaveURL(/#wardrobe$/)
     await expect(page.getByRole('heading', { name: '我的衣橱', exact: true, level: 1 })).toBeVisible()
     expect(errors).toEqual([])

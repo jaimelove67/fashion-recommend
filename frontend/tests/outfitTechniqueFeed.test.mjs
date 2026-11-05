@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { outfitTechniques } from '../src/data/outfitTechniques.js'
+import { getOutfitTechniqueCase } from '../src/data/outfitTechniqueCases.js'
 import { formatTechniquePublication, formatTechniqueSourcePublication, mergeOutfitTechniques, normalizeOutfitTechniqueFeed,
-  normalizeTechniqueComparisonVisual, normalizeTechniqueProgress, safeTechniqueSourceUrl,
-  techniqueProgressVersion } from '../src/utils/outfitTechniqueFeed.js'
+  normalizeTechniqueComparisonVisual, safeTechniqueSourceUrl } from '../src/utils/outfitTechniqueFeed.js'
 
 function lesson(overrides = {}) {
   return { ...structuredClone(outfitTechniques[0]), id: 'weekly-first', title: '一周一练：领口层次',
@@ -143,17 +143,29 @@ test('rejects unsafe or ambiguous comparison assets without discarding the reada
   }
 })
 
-test('browser reading progress stores only public IDs and changes version when lesson content changes', () => {
-  const first = lesson()
-  const version = techniqueProgressVersion(first)
-  assert.match(version, /^v1-[a-f0-9]{16}$/)
-  assert.equal(techniqueProgressVersion(structuredClone(first)), version)
-  assert.notEqual(techniqueProgressVersion({ ...first, check: '更新后的自检问题' }), version)
-  assert.notEqual(techniqueProgressVersion({ ...first, example: { ...first.example, after: '新练习' } }), version)
-  const stored = JSON.stringify([[first.id, version]])
-  assert.deepEqual(normalizeTechniqueProgress(stored), [[first.id, version]])
-  for (const value of [null, '', 'malformed', '{}', JSON.stringify([{ username: 'private', lesson: first }]),
-    JSON.stringify([['id', 'not-a-version'], [null, version], ['id', version, 'extra']])]) {
-    assert.deepEqual(normalizeTechniqueProgress(value), [])
+test('all existing techniques have distinct problem scenarios and matching comparison cases, including curated API rows', () => {
+  const contexts = new Set()
+  const visualSets = new Set()
+  for (const original of outfitTechniques) {
+    const study = getOutfitTechniqueCase(original)
+    assert.ok(study?.question && study.problem && study.goal && study.solutionTitle && study.solution)
+    assert.notEqual(study.problem, study.solution)
+    assert.equal(study.images.length, 2)
+    assert.notEqual(study.images[0].alt, study.images[1].alt)
+    contexts.add(study.context)
+    visualSets.add(study.images.map(image => image.url).join('|'))
+    const feed = normalizeOutfitTechniqueFeed({ code: 0, data: { items: [{ ...original, generationMode: 'curated' }] } })
+    assert.deepEqual(getOutfitTechniqueCase(feed.items[0]), study)
+  }
+  assert.equal(contexts.size, outfitTechniques.length)
+  assert.equal(visualSets.size, outfitTechniques.length)
+})
+
+test('fixed editorial illustrations are not attached to weekly or rewritten techniques', () => {
+  const original = outfitTechniques[0]
+  for (const changed of [null, { ...original, generationMode: 'weekly-ai' }, { ...original, id: 'another' },
+    { ...original, title: '另一个方法' }, { ...original, example: { ...original.example, after: '换成其他方案' } },
+    { ...original, sources: [{ ...original.sources[0], url: 'https://example.test/another-method' }] }]) {
+    assert.equal(getOutfitTechniqueCase(changed), null)
   }
 })

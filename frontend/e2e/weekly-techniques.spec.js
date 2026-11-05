@@ -3,7 +3,7 @@ import { outfitTechniques } from '../src/data/outfitTechniques.js'
 
 function weeklyLesson(overrides = {}) {
   const base = structuredClone(outfitTechniques[0])
-  return { ...base, id: 'weekly-layering', title: '本周练习：先留空间，再整理领口', category: '叠穿',
+  return { ...base, id: 'weekly-layering', title: '本周技巧：先留空间，再整理领口', category: '叠穿',
     publishedAt: '2026-10-16T02:00:00Z', generationMode: 'weekly-ai',
     sources: base.sources.map((source, index) => ({ ...source, url: `https://example.test/weekly-${index}`,
       publishedAt: index ? null : '2018-02-25T18:40:10Z', author: index ? source.author : null,
@@ -53,7 +53,8 @@ test('weekly lessons appear newest first, remove duplicated curated sources and 
   await expect(detail.getByRole('heading', { level: 3 })).toHaveText(weeklyLesson().title)
   await expect(explorer.locator('.technique-weekly-status')).toContainText('最近更新 2026-10-16')
   await expect(detail.locator('.technique-ai-disclosure')).toContainText('AI 根据原帖文字归纳')
-  await expect(detail.locator('.technique-example-note')).toContainText('AI 推演，非原帖对照实验')
+  await expect(detail.locator('.scene-problem')).toHaveText(weeklyLesson().example.before)
+  await expect(detail.locator('.technique-solution')).toContainText(weeklyLesson().example.after)
   await expect(detail.locator('.technique-source-list')).toContainText('原文未署名')
   await expect(detail.locator('.technique-source-list')).not.toContainText('正文提取日期')
   await expect(detail.locator('.technique-source-meta').first()).toContainText('2018-02-26')
@@ -66,10 +67,8 @@ test('weekly lessons appear newest first, remove duplicated curated sources and 
   }
   await explorer.getByRole('navigation', { name: '按技巧主题筛选' }).getByRole('button', { name: '叠穿', exact: true }).click()
   await expect(choices).toHaveCount(2)
-  await detail.getByRole('button', { name: '展开自查提示', exact: true }).click()
-  await expect(detail.locator('.technique-checklist')).toBeVisible()
   await choices.last().click()
-  await expect(detail.locator('.technique-checklist')).toBeHidden()
+  await expect(detail.locator('.lesson-title')).toHaveText(outfitTechniques[3].title)
   await expect(detail.locator('.technique-ai-disclosure')).toHaveCount(0)
   expect(errors).toEqual([])
 })
@@ -140,17 +139,17 @@ test('a late weekly response preserves the lesson the reader selected', async ({
   try {
     await explorer.locator('.technique-choice').last().click()
     await expect(explorer.locator('.technique-detail h3')).toHaveText(outfitTechniques.at(-1).title)
-    await explorer.getByRole('button', { name: '展开自查提示', exact: true }).click()
+    await explorer.getByRole('button', { name: '收藏', exact: true }).click()
   } finally {
     release()
   }
   await expect(explorer.locator('.technique-choice')).toHaveCount(outfitTechniques.length + 1)
   await expect(explorer.locator('.technique-detail h3')).toHaveText(outfitTechniques.at(-1).title)
-  await expect(explorer.locator('.technique-checklist')).toBeVisible()
+  await expect(explorer.getByRole('button', { name: '已收藏', exact: true })).toHaveAttribute('aria-pressed', 'true')
   expect(errors).toEqual([])
 })
 
-test('mobile weekly lessons fit the page and wardrobe practice only navigates', async ({ page }) => {
+test('mobile weekly lessons fit the page and opening the wardrobe only navigates', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const { explorer, errors, writes } = await openTechniques(page)
   await expect(explorer.locator('.technique-ai-disclosure')).toBeVisible()
@@ -163,47 +162,58 @@ test('mobile weekly lessons fit the page and wardrobe practice only navigates', 
   if (process.env.CAPTURE_WEEKLY_TECHNIQUES) {
     await explorer.screenshot({ path: '../output/weekly-techniques/mobile-390.png', animations: 'disabled' })
   }
-  await explorer.getByRole('button', { name: '去我的衣橱练习', exact: true }).click()
+  await explorer.getByRole('button', { name: '查看我的衣橱', exact: true }).click()
   await expect(page).toHaveURL(/#wardrobe$/)
   expect(writes).toEqual([])
   expect(errors).toEqual([])
 })
 
-test('reading actions select a practice plan, persist only completion, and navigate to the next lesson', async ({ page }) => {
+test('reading has no task controls, ignores old progress and preserves favorites and navigation', async ({ page }) => {
+  const legacy = JSON.stringify([[outfitTechniques[0].id, 'v1-1234567890abcdef']])
+  await page.addInitScript(value => {
+    if (!localStorage.getItem('fashion.techniques.progress.v1')) localStorage.setItem('fashion.techniques.progress.v1', value)
+  }, legacy)
   const { explorer, errors, writes } = await openTechniques(page, { data: { items: [], status: 'disabled' } })
-  await explorer.getByRole('button', { name: '本次练习 B', exact: true }).click()
-  await expect(explorer.getByRole('button', { name: '已选 B', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await explorer.getByRole('button', { name: '展开自查提示', exact: true }).click()
-  await expect(explorer.locator('.technique-checklist')).toContainText('本次练习：B 方案')
-  await explorer.getByRole('button', { name: '标记本节完成', exact: true }).click()
-  await expect(explorer.getByRole('button', { name: '已完成本节', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await expect(explorer.locator('.technique-checklist')).toBeVisible()
-  await expect(explorer.getByRole('progressbar', { name: '本课阅读进度' })).toHaveAttribute('aria-valuenow', '1')
-  const progress = await page.evaluate(() => JSON.parse(localStorage.getItem('fashion.techniques.progress.v1')))
-  expect(progress).toHaveLength(1)
-  expect(progress[0][0]).toBe(outfitTechniques[0].id)
-  expect(progress[0][1]).toMatch(/^v1-[a-f0-9]{16}$/)
+  await expect(explorer.getByRole('progressbar')).toHaveCount(0)
+  await expect(explorer.locator('.technique-practice, .done-toggle, .technique-plan-toggle, .technique-checklist')).toHaveCount(0)
+  await expect(explorer).not.toContainText('步练习')
+  await explorer.getByRole('button', { name: '收藏', exact: true }).click()
   await page.reload()
-  await expect(explorer.getByRole('button', { name: '已完成本节', exact: true })).toBeVisible()
-  await expect(explorer.getByRole('button', { name: '本次练习 B', exact: true })).toHaveAttribute('aria-pressed', 'false')
+  await expect(explorer.getByRole('button', { name: '已收藏', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await explorer.locator('.next-btn').click()
   await expect(explorer.locator('.lesson-title')).toHaveText(outfitTechniques[1].title)
   await expect(explorer.locator('.lesson-title')).toBeFocused()
-  await expect(explorer.locator('.technique-checklist')).toBeHidden()
+  expect(await page.evaluate(() => localStorage.getItem('fashion.techniques.progress.v1'))).toBe(legacy)
   expect(writes).toEqual([])
   expect(errors).toEqual([])
 })
 
-test('a new content version makes its previous completion mark obsolete', async ({ page }) => {
-  const data = { items: [weeklyLesson()], status: 'ready' }
+test('a rewritten curated API case uses its own problem and solution without unrelated fixed images', async ({ page }) => {
+  const rewritten = { ...structuredClone(outfitTechniques[1]), generationMode: 'curated',
+    example: { before: '换成新场景中的条纹上衣后，分界变得太复杂。', after: '保留裤子，先比较一件素色上衣。' } }
+  const data = { items: [rewritten], status: 'ready' }
   const { explorer, errors } = await openTechniques(page, { data })
-  await expect(explorer.locator('.lesson-title')).toHaveText(data.items[0].title)
-  await explorer.getByRole('button', { name: '标记本节完成', exact: true }).click()
-  data.items[0].check = '更新后的自检问题，请重新阅读后再标记。'
-  await page.reload()
-  await expect(explorer.locator('.lesson-title')).toHaveText(data.items[0].title)
-  await expect(explorer.getByRole('button', { name: '标记本节完成', exact: true })).toHaveAttribute('aria-pressed', 'false')
-  await expect(explorer.getByRole('progressbar', { name: '本课阅读进度' })).toHaveAttribute('aria-valuenow', '0')
+  await explorer.getByRole('button', { name: rewritten.title, exact: true }).click()
+  await expect(explorer.locator('.scene-problem')).toHaveText(rewritten.example.before)
+  await expect(explorer.locator('.technique-solution')).toContainText(rewritten.example.after)
+  await expect(explorer.locator('.technique-example img')).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('a missing case illustration keeps the solution readable and changing techniques restores images', async ({ page }) => {
+  await page.route('**/assets/techniques/proportion-comparison.png', route => route.fulfill({ status: 404, body: '' }))
+  const { explorer, errors } = await openTechniques(page, { data: { items: [], status: 'disabled' } })
+  await explorer.getByRole('button', { name: outfitTechniques[1].title, exact: true }).click()
+  const solution = explorer.locator('.technique-example')
+  await solution.scrollIntoViewIfNeeded()
+  await expect(solution.getByRole('status')).toHaveCount(2)
+  await expect(solution.locator('.technique-solution')).toContainText('先让上下近色')
+  await expect(solution.locator('.compare-description')).toHaveCount(2)
+  await explorer.getByRole('button', { name: outfitTechniques[0].title, exact: true }).click()
+  await solution.scrollIntoViewIfNeeded()
+  await expect(solution.getByRole('status')).toHaveCount(0)
+  await expect.poll(() => solution.locator('img').evaluateAll(images => images.length === 2
+    && images.every(image => image.complete && image.naturalWidth > 0))).toBe(true)
   expect(errors).toEqual([])
 })
 
@@ -237,14 +247,14 @@ for (const imageStatus of [200, 404]) test(`a combined generated A/B visual ${im
   const { explorer, errors } = await openTechniques(page, { imageStatus, data: { items: [technique], status: 'ready' } })
   const visual = explorer.locator('.technique-comparison-visual')
   await visual.scrollIntoViewIfNeeded()
-  await expect(visual).toContainText('AI 对照示意图')
-  await expect(visual).toContainText('不是原帖实拍或效果保证')
+  await expect(visual).toContainText('AI 搭配示意')
+  await expect(explorer.locator('.technique-scene img')).toHaveCount(0)
   if (imageStatus === 200) {
     const image = visual.getByRole('img', { name: '同一套衣服的 A / B 方法示意' })
     await expect(image).toHaveAttribute('src', url)
     await expect.poll(() => image.evaluate(node => node.complete && node.naturalWidth > 0)).toBe(true)
   } else {
-    await expect(visual.getByRole('status')).toContainText('可继续阅读下方 A / B 文字方案')
+    await expect(visual.getByRole('status')).toContainText('可继续阅读下面的调整说明')
     await expect(explorer.locator('.technique-comparison')).toContainText(technique.example.before)
     await expect(explorer.locator('.technique-comparison')).toContainText(technique.example.after)
   }

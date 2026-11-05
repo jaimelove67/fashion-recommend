@@ -46,30 +46,6 @@ export function normalizeTechniqueComparisonVisual(value) {
     ...(text(value.note, 1000) ? { note: text(value.note, 1000) } : {}) }
 }
 
-// The browser stores only a public lesson ID and this content-version digest.
-export function techniqueProgressVersion(technique) {
-  const content = JSON.stringify([technique.title, technique.summary, technique.sourceNotes,
-    technique.synthesisNote, technique.steps, technique.reason, technique.example,
-    technique.suitable, technique.limit, technique.check, technique.sources, technique.comparisonVisual])
-  let left = 2166136261
-  let right = 3339675911
-  for (let index = 0; index < content.length; index++) {
-    left = Math.imul(left ^ content.charCodeAt(index), 16777619)
-    right = Math.imul(right ^ content.charCodeAt(index), 2246822519)
-  }
-  return `v1-${(left >>> 0).toString(16).padStart(8, '0')}${(right >>> 0).toString(16).padStart(8, '0')}`
-}
-
-export function normalizeTechniqueProgress(value) {
-  try {
-    const entries = JSON.parse(value)
-    if (!Array.isArray(entries)) return []
-    return entries.filter(entry => Array.isArray(entry) && entry.length === 2
-      && text(entry[0], 200) && typeof entry[1] === 'string' && /^v1-[a-f0-9]{16}$/.test(entry[1]))
-      .map(([id, version]) => [id.trim(), version])
-  } catch { return [] }
-}
-
 function normalizeSource(value, generationMode) {
   if (!value || typeof value !== 'object') return null
   const id = text(value.id, 200)
