@@ -55,6 +55,10 @@ public class TrendRepository {
         return querySince(cutoff, true);
     }
 
+    public List<TrendItem> approvedHistory() {
+        return querySince(Instant.EPOCH, false);
+    }
+
     private List<TrendItem> querySince(Instant cutoff, boolean includeHotBoards) {
         // Filter legacy board rows before the result limit so they cannot crowd out creator posts.
         String boardFilter = includeHotBoards ? "" : "AND payload NOT LIKE '%\"mediaType\":\"board\"%' ";

@@ -40,6 +40,7 @@ const galleryTrends = computed(() => showAnalysisExamples.value ? analysisExampl
 const galleryPreview = computed(() => galleryTrends.value.slice(0, 10))
 const trendMeta = computed(() => state.value.trendMeta || {})
 const weekly = computed(() => trendMeta.value.period === 'week')
+const historicalFallback = computed(() => !showAnalysisExamples.value && Boolean(trendMeta.value.historicalFallback))
 const dailySelection = computed(() => !showAnalysisExamples.value && !weekly.value && !trendMeta.value.demoMode ? trendMeta.value.dailySelection : null)
 const filtered = computed(() => state.value.trendPeriod === 'week' || state.value.trendPlatform || state.value.trendTopic)
 const additionalTrends = computed(() => {
@@ -124,21 +125,21 @@ onMounted(() => {
         <h1>穿搭鉴赏与风格参考</h1>
         <p>欣赏穿搭作品，学习搭配技巧，结合个人衣橱探索自己的穿法。</p>
       </div>
-      <span v-if="trends.length || dailySelection" class="trend-count">{{ showAnalysisExamples ? `${trends.length} 套历史分析示例` : dailySelection ? `每日精选 ${dailyCount} / ${dailySelection.target} 套` : `${weekly ? '近 7 天' : '当前范围'}收录 ${trends.length} 条` }}</span>
+      <span v-if="trends.length || dailySelection" class="trend-count">{{ showAnalysisExamples ? `${trends.length} 套历史分析示例` : historicalFallback ? `穿搭参考 ${trends.length} 套` : dailySelection ? `每日精选 ${dailyCount} / ${dailySelection.target} 套` : `${weekly ? '近 7 天' : '当前范围'}收录 ${trends.length} 条` }}</span>
     </header>
 
-    <div v-if="dailySelection" class="trend-daily-composition" aria-label="每日精选收录情况">
+    <div v-if="dailySelection && !historicalFallback" class="trend-daily-composition" aria-label="每日精选收录情况">
       <p><span>男装 {{ dailySelection.menswear }} / 2</span><span>女装 {{ dailySelection.womenswear }} / 2</span><span>小众风格欣赏 {{ dailySelection.niche }} / 1</span></p>
       <p v-if="dailyMissing">待补充：{{ dailyMissing }}。仅展示已通过复核的近期穿搭。</p>
     </div>
 
     <div class="trend-content-modes" role="group" aria-label="选择穿搭内容">
-      <button type="button" :aria-pressed="!showAnalysisExamples" @click="showAnalysisExamples = false">近期内容</button>
+      <button type="button" :aria-pressed="!showAnalysisExamples" @click="showAnalysisExamples = false">{{ historicalFallback ? '穿搭内容' : '近期内容' }}</button>
       <button type="button" :aria-pressed="showAnalysisExamples" @click="showAnalysisExamples = true">分析示例</button>
     </div>
     <p v-if="showAnalysisExamples" class="trend-example-notice">以下为已核验的历史作品，用于体验完整穿搭分析；保留原始发布日期，不计入近期鉴赏。</p>
 
-    <TrendFilters v-if="!showAnalysisExamples" :app="app" />
+    <TrendFilters v-if="!showAnalysisExamples && !historicalFallback" :app="app" />
 
     <CrossSiteTryOnLauncher v-if="state.authUser?.username && !showAnalysisExamples" ref="tryOnLauncher" :username="state.authUser.username" />
 
@@ -152,8 +153,8 @@ onMounted(() => {
     />
 
     <section v-if="additionalTrends.length" class="trend-more-results" aria-labelledby="trend-more-results-title">
-      <header><h2 id="trend-more-results-title">更多近 7 天内容</h2><span>还有 {{ additionalTrends.length }} 条，可逐条查看</span></header>
-      <ol><li v-for="item in additionalTrends" :key="item.id"><div><strong>{{ item.title }}</strong><span>{{ trendPlatformName(item.platform) }} · {{ formatDateTime(item.publishedAt) }}</span></div><button type="button" :aria-label="`查看${item.title}`" @click="openAnalysis(item)">查看内容</button></li></ol>
+      <header><h2 id="trend-more-results-title">{{ historicalFallback ? '更多穿搭参考' : '更多近 7 天内容' }}</h2><span>还有 {{ additionalTrends.length }} 条，可逐条查看</span></header>
+      <ol><li v-for="item in additionalTrends" :key="item.id"><div><strong>{{ item.title }}</strong><span>{{ trendPlatformName(item.platform) }}<template v-if="!historicalFallback"> · {{ formatDateTime(item.publishedAt) }}</template></span></div><button type="button" :aria-label="`查看${item.title}`" @click="openAnalysis(item)">查看内容</button></li></ol>
     </section>
 
     <TrendDiscovery v-if="trends.length && !galleryTrends.length" :app="app" posts-only :limit="0" />
@@ -178,6 +179,7 @@ onMounted(() => {
     </div>
     <TrendOutfitBreakdown
       v-if="selectedTrend"
+      :hide-dates="historicalFallback"
       :trend="selectedTrend"
       :wardrobe="state.wardrobe || []"
       :wardrobe-loading="state.wardrobeLoading"
@@ -188,6 +190,7 @@ onMounted(() => {
     <TrendPieceFavorites v-if="selectedTrend && !showAnalysisExamples && !state.trendsLoading" :app="app" :trend="selectedTrend" />
 
     <TrendAnalysisDialog
+      :hide-dates="historicalFallback"
       v-if="detailTrend"
       :key="detailTrend.id"
       :trend="detailTrend"
@@ -212,7 +215,7 @@ onMounted(() => {
           <span>{{ trendSourceMessage(source) }}</span>
           <span v-if="trendSourceCounts(source)">{{ trendSourceCounts(source) }}</span>
           <span v-if="trendSourceExclusionReason(source)">原因：{{ trendSourceExclusionReason(source) }}</span>
-          <time v-if="source.lastSuccessAt">最近成功更新 {{ formatDateTime(source.lastSuccessAt) }}</time>
+          <time v-if="source.lastSuccessAt && !historicalFallback">最近成功更新 {{ formatDateTime(source.lastSuccessAt) }}</time>
         </li>
       </ul>
       <button

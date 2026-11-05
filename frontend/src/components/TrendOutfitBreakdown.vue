@@ -5,6 +5,7 @@ import { trendOutfitAnalysis, isTrendAnalysisExample } from '../data/trendOutfit
 import { externalTrendSourceUrl, trendPlatformName } from '../utils/trendSources.js'
 
 const props = defineProps({
+  hideDates: { type: Boolean, default: false },
   trend: { type: Object, required: true },
   wardrobe: { type: Array, default: () => [] },
   wardrobeLoading: { type: Boolean, default: false }
@@ -13,7 +14,7 @@ const emit = defineEmits(['open-analysis', 'use-trend'])
 const analysis = computed(() => trendOutfitAnalysis(props.trend))
 const sourceUrl = computed(() => externalTrendSourceUrl(props.trend))
 const sourceDate = computed(() => {
-  if (!props.trend.publishedAt) return ''
+  if (props.hideDates || !props.trend.publishedAt) return ''
   const date = new Date(props.trend.publishedAt)
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' })
 })

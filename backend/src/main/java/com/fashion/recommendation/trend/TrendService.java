@@ -238,6 +238,30 @@ public class TrendService {
         List<TrendSourceStatus> statuses = sourceStatuses(statusById, observedCounts, eligibleCounts,
                 exclusionReasons, repository.pendingCounts(cutoff));
 
+        // Previously reviewed creator posts remain useful references when the recent selection is empty.
+        // Keep original timestamps and approval checks; historical rows never fill daily quota slots.
+        if (selection.isEmpty()) {
+            List<TrendItem> history = repository.approvedHistory().stream()
+                    .filter(TrendService::isImagePost)
+                    .filter(item -> TrendContentPolicy.exclusionReason(item) == null)
+                    .filter(item -> !TrendTopics.excludedShowOrCelebrity(item))
+                    .filter(item -> item.publishedAt() != null && item.fetchedAt() != null)
+                    .filter(item -> !item.publishedAt().isAfter(now) && !item.fetchedAt().isAfter(now.plusSeconds(60)))
+                    .filter(item -> item.publishedAt().isBefore(cutoff) || item.fetchedAt().isBefore(cutoff))
+                    .filter(item -> platform == null || platform.isBlank() || platform.equals(item.platform()))
+                    .filter(item -> topic == null || topic.isBlank() || item.title().contains(topic)
+                            || item.topicTags().stream().anyMatch(tag -> tag.contains(topic)))
+                    .limit(50)
+                    .map(item -> new TrendItem(item.id(), item.platform(), item.title(), item.topicTags(), item.heatScore(),
+                            item.publishedAt(), item.fetchedAt(), item.sourceUrl(), true, item.imageUrl(), item.summary(), item.evidence()))
+                    .toList();
+            if (!history.isEmpty()) {
+                Instant historicalFetched = history.stream().map(TrendItem::fetchedAt).max(Instant::compareTo).orElse(null);
+                return new TrendFeed("approved-history", historicalFetched, false, history, "历史来源评分", period,
+                        styles(history), statuses, "浏览已收录的穿搭作品，寻找适合自己的搭配思路。", null, true);
+            }
+        }
+
         // A configured demo is deliberately a last resort for the unfiltered, all-source view.
         // A real item that survives the same period rules always wins, and selecting a real source
         // must never make the local demo look like that platform.

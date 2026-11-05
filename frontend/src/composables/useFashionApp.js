@@ -549,6 +549,7 @@ export function useFashionApp() {
         primarySource: feed.primarySource || '',
         fetchedAt: feed.fetchedAt || null,
         demoMode: Boolean(feed.demoMode),
+        historicalFallback: Boolean(feed.historicalFallback),
         scoreLabel: feed.scoreLabel || '来源内评分',
         sources: feed.sources || [],
         notice: feed.notice || '',

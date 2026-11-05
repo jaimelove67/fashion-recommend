@@ -85,10 +85,10 @@ async function filter(key, value) {
           <span v-else class="image-unavailable"><ImageOff :size="26" />{{ imageUnavailableLabel(item) }}</span><span class="source-mark">{{ names[item.platform] || item.platform }}</span>
         </component>
         <div class="look-details">
-          <p class="look-meta">{{ item.evidence?.author || names[item.platform] || item.platform }} · {{ date(item.publishedAt) }}</p><h3>{{ item.title }}</h3><p class="look-tags">{{ (item.topicTags || []).join(' / ') }}</p>
+          <p class="look-meta">{{ item.evidence?.author || names[item.platform] || item.platform }}<template v-if="!state.trendMeta.historicalFallback"> · {{ date(item.publishedAt) }}</template></p><h3>{{ item.title }}</h3><p class="look-tags">{{ (item.topicTags || []).join(' / ') }}</p>
           <p v-if="item.evidence?.creatorTier || item.evidence?.authorFollowers != null || item.evidence?.authorFollowersLabel || isOutfitReviewVideo(item)" class="look-badges"><span v-if="item.evidence?.creatorTier">{{ creatorTierNames[item.evidence.creatorTier] || item.evidence.creatorTier }}</span><span v-if="formatFollowerEvidence(item.evidence)">{{ formatFollowerEvidence(item.evidence) }}</span><span v-if="isOutfitReviewVideo(item)">穿搭测评视频</span></p>
           <p v-if="matches(item).length" class="match-reason">与你偏好的 {{ matches(item).join('、') }} 相关</p>
-          <p v-if="shouldShowStaleTrend(item)" class="look-meta">上次收录于 {{ date(item.fetchedAt) }}，等待更新</p>
+          <p v-if="shouldShowStaleTrend(item) && !state.trendMeta.historicalFallback" class="look-meta">上次收录于 {{ date(item.fetchedAt) }}，等待更新</p>
           <p class="look-meta">{{ item.evidence?.scoreLabel || '来源内评分' }}<template v-if="item.platform !== 'editorial'"> {{ item.heatScore }}</template></p>
           <div class="look-actions"><button type="button" @click="app.useTrend(item)"><Shirt :size="16" />参考风格生成搭配</button><a v-if="externalTrendSourceUrl(item)" :href="externalTrendSourceUrl(item)" target="_blank" rel="noopener noreferrer" aria-label="在来源平台查看"><ArrowUpRight :size="20" /></a></div>
         </div>

@@ -15,6 +15,17 @@ import static org.junit.jupiter.api.Assertions.*;
 class TrendRepositoryTest {
     @Autowired TrendRepository repository;
     @Autowired JdbcTemplate jdbc;
+    @Test void archivedQueryStillRequiresCurrentApprovalAndRespectsHiddenAndChangedContent() {
+        var old = item(Instant.now().minus(20, ChronoUnit.DAYS), 10L);
+        repository.save("weibo", old);
+        assertFalse(repository.approvedHistory().stream().anyMatch(i -> i.id().equals(old.id())));
+        approve(old);
+        assertTrue(repository.approvedHistory().stream().anyMatch(i -> i.id().equals(old.id())));
+        jdbc.update("UPDATE trend_contents SET hidden=TRUE WHERE id=?", old.id());
+        assertFalse(repository.approvedHistory().stream().anyMatch(i -> i.id().equals(old.id())));
+        jdbc.update("UPDATE trend_contents SET hidden=FALSE, reviewed_content_hash='outdated' WHERE id=?", old.id());
+        assertFalse(repository.approvedHistory().stream().anyMatch(i -> i.id().equals(old.id())));
+    }
     @Test void neutralOotdTagsCannotPublishAnImageWithoutContentReview() {
         Instant now = Instant.now();
         var post = new TrendItem("weibo:body-closeup-regression", "weibo",

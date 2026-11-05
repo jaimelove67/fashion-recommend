@@ -7,6 +7,7 @@ import { trendImageCandidates, trendDisplayImageUrl } from '../utils/trendImage.
 import { externalTrendSourceUrl, trendPlatformName } from '../utils/trendSources.js'
 
 const props = defineProps({
+  hideDates: { type: Boolean, default: false },
   trend: { type: Object, required: true },
   wardrobe: { type: Array, default: () => [] },
   wardrobeLoading: { type: Boolean, default: false }
@@ -127,7 +128,7 @@ onBeforeUnmount(() => {
             <div v-else class="analysis-no-image"><strong>原帖配图暂不可用</strong><p>仍可阅读已整理的内容，或前往原帖查看图片。</p></div>
             <div v-if="images.length > 1" class="analysis-image-choices" role="group" aria-label="切换原帖图片"><button v-for="image in images" :key="image.id" type="button" :aria-pressed="activeImage?.id === image.id" @click="activeImageId = image.id">{{ image.label }}</button></div>
             <p class="analysis-caption">{{ activeImage?.label || analysis?.scope }}<template v-if="analysis && activeImage"> · 点击编号，对照具体原因</template></p>
-            <p class="analysis-author">{{ trend.evidence?.author || trendPlatformName(trend.platform) }} · {{ dateLabel }}</p>
+            <p class="analysis-author">{{ trend.evidence?.author || trendPlatformName(trend.platform) }}<template v-if="!hideDates"> · {{ dateLabel }}</template></p>
             <a v-if="sourceUrl" class="analysis-source-link" :href="sourceUrl" target="_blank" rel="noopener noreferrer">查看原帖<ArrowUpRight :size="15" aria-hidden="true" /></a>
           </aside>
 

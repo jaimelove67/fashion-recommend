@@ -13,7 +13,14 @@ public record TrendFeed(
         List<TrendStyle> styles,
         List<TrendSourceStatus> sources,
         String notice,
-        TrendDailySelection.Summary dailySelection) {
+        TrendDailySelection.Summary dailySelection,
+        boolean historicalFallback) {
+
+    public TrendFeed(String primarySource, Instant fetchedAt, boolean demoMode, List<TrendItem> items,
+            String scoreLabel, String period, List<TrendStyle> styles, List<TrendSourceStatus> sources,
+            String notice, TrendDailySelection.Summary dailySelection) {
+        this(primarySource, fetchedAt, demoMode, items, scoreLabel, period, styles, sources, notice, dailySelection, false);
+    }
 
     public TrendFeed(String primarySource, Instant fetchedAt, boolean demoMode, List<TrendItem> items,
             String scoreLabel, String period, List<TrendStyle> styles, List<TrendSourceStatus> sources, String notice) {
