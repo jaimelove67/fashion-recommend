@@ -15,7 +15,7 @@ public class AiModelDefaults {
             @Value("${app.bailian.api-key:}") String apiKey,
             @Value("${app.bailian.model:qwen-plus}") String recommendationModel,
             @Value("${app.bailian.enabled:true}") boolean recommendationEnabled,
-            @Value("${app.bailian.vision-model:qwen-vl-plus}") String visionModel,
+            @Value("${app.bailian.vision-model:qwen3-vl-plus}") String visionModel,
             @Value("${app.bailian.vision-enabled:false}") boolean visionEnabled,
             @Value("${app.bailian.image.endpoint:https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation}")
                     String imageEndpoint,

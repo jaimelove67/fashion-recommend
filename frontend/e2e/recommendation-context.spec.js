@@ -15,19 +15,30 @@ const weather = { city: '长沙', temperatureC: 15, apparentTemperatureC: 14, pr
 const recommendation = { id: 7, city: '长沙', occasion: '通勤', temperatureC: 15,
   summary: '通勤推荐', reason, weather, items: wardrobe, engine: 'llm', saved: false }
 
-async function openRecommendation(page, { saved = true, weatherAvailable = saved, savedReason = reason } = {}) {
+async function openRecommendation(page, { saved = true, weatherAvailable = saved, savedReason = reason, modelGender = null } = {}) {
   const errors = []
   page.on('pageerror', (error) => errors.push(error.message))
   // A different startup city must not replace the weather saved with this outfit.
   await page.addInitScript(() => localStorage.setItem('fashion.weather.city', '上海'))
+  let visualVersion = 1
   await page.route('**/api/**', async (route) => {
-    const pathname = new URL(route.request().url()).pathname
+    const url = new URL(route.request().url())
+    const pathname = url.pathname
     let data = null
     if (pathname === '/api/v1/auth/csrf') data = { token: 'context-fixture', headerName: 'X-XSRF-TOKEN' }
     else if (pathname === '/api/v1/auth/me') data = { username: 'context-fixture', authorities: ['ROLE_USER'] }
     else if (pathname === '/api/v1/trends') data = { items: [], styles: [], sources: [] }
     else if (pathname === '/api/v1/me/wardrobe') data = wardrobe
-    else if (pathname === '/api/v1/me/style-profile') data = { gender: null, styleTags: ['通勤'] }
+    else if (pathname === '/api/v1/me/style-profile') data = { gender: modelGender, styleTags: ['通勤'] }
+    else if (pathname === '/api/v1/me/recommendations/7/visual') {
+      if (url.searchParams.get('force') === 'true') visualVersion++
+      data = { status: 'SUCCEEDED', modelGender, modelSource: 'DEFAULT',
+        imageUrl: `/api/v1/me/recommendations/7/visual/images/saved-${visualVersion}` }
+    }
+    else if (pathname.startsWith('/api/v1/me/recommendations/7/visual/images/')) {
+      return route.fulfill({ contentType: 'image/png', body: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') })
+    }
     else if (pathname === '/api/v1/me/recommendations') data = {
       content: saved ? [{ ...recommendation, reason: savedReason }] : [],
       totalElements: saved ? 1 : 0, page: 0, hasNext: false
@@ -71,6 +82,19 @@ test('local weather stays in sync with navigation while the outfit keeps its sav
   await expect(page.locator('.ootd-reason p')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.locator('.ootd-rationale').screenshot({ path: reviewDir + '/05-after-mobile.png' })
+  expect(errors).toEqual([])
+})
+
+test('saved outfit visuals survive reload and regenerate only on explicit request', async ({ page }) => {
+  const errors = await openRecommendation(page, { modelGender: 'FEMALE' })
+  const image = page.locator('.ootd-board-model-visual img')
+  await expect(image).toHaveAttribute('src', /saved-1$/)
+  await expect(image).toHaveJSProperty('naturalWidth', 1)
+  await page.reload()
+  await expect(image).toHaveAttribute('src', /saved-1$/)
+  await page.getByRole('button', { name: '重新生成效果图', exact: true }).click()
+  await expect(image).toHaveAttribute('src', /saved-2$/)
+  await expect(image).toHaveJSProperty('naturalWidth', 1)
   expect(errors).toEqual([])
 })
 
@@ -118,4 +142,45 @@ test('restored legacy explanations omit internal metadata and unconfirmed proper
   await mkdir(reviewDir, { recursive: true })
   await page.locator('.ootd-rationale').screenshot({ path: reviewDir + '/06-legacy-reason.png' })
   expect(errors).toEqual([])
+})
+
+
+test('outfit images select wardrobe or uploaded items and generation is manual with quotas', async ({ page }) => {
+  let submitted = null
+  let posts = 0
+  await openRecommendation(page, { modelGender: 'FEMALE' })
+  await page.route('**/api/v1/me/recommendations/visual-quota', route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ code: 0, data: { dailyRemaining: posts ? 0 : 1, weeklyRemaining: posts ? 3 : 4 } })
+  }))
+  await page.route('**/api/v1/me/recommendations/7/visual?force=true', async route => {
+    posts++
+    submitted = route.request().postDataJSON()
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 0, data: {
+      status: 'SUCCEEDED', modelGender: 'FEMALE', modelSource: 'DEFAULT', imageUrl: '/api/v1/me/recommendations/7/visual/images/custom'
+    } }) })
+  })
+  await expect(page.locator('.outfit-adjustment')).toHaveCount(0)
+  expect(posts).toBe(0)
+  await page.getByRole('button', { name: '更换米白衬衫', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '更换上装单品' })).toBeVisible()
+  const png = await page.evaluate(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 300
+    canvas.getContext('2d').fillRect(0, 0, 300, 300)
+    return canvas.toDataURL('image/png').split(',')[1]
+  })
+  await page.locator('.item-picker input').setInputFiles({ name: 'custom-shirt.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') })
+  await expect(page.locator('.ootd-board-item').first()).toContainText('本次上传')
+  await expect(page.locator('.ootd-board-model img')).toHaveCount(0)
+  expect(posts).toBe(0)
+  await page.getByRole('button', { name: '生成穿搭效果图', exact: true }).click()
+  await expect(page.getByRole('button', { name: '生图额度已用完', exact: true })).toBeDisabled()
+  expect(submitted.items[0].imageData).toMatch(/^data:image\/png;base64,/)
+  expect(submitted.items[1]).toEqual({ wardrobeId: 2 })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await mkdir(reviewDir, { recursive: true })
+  await page.locator('.ootd-board-wrap').screenshot({ path: reviewDir + '/outfit-editor-desktop.png' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.locator('.ootd-board-wrap').screenshot({ path: reviewDir + '/outfit-editor-mobile.png' })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })

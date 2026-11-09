@@ -49,7 +49,7 @@ app:
     # Recommendation LLM is the primary engine. Set BAILIAN_ENABLED=false only for offline tests.
     enabled: ${BAILIAN_ENABLED:true}
     vision-enabled: ${BAILIAN_VISION_ENABLED:false}
-    vision-model: ${BAILIAN_VISION_MODEL:qwen-vl-plus}
+    vision-model: ${BAILIAN_VISION_MODEL:qwen3-vl-plus}
     profile-analysis-read-timeout: ${BAILIAN_PROFILE_ANALYSIS_READ_TIMEOUT:30s}
     endpoint: ${BAILIAN_ENDPOINT:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
     connect-timeout: ${BAILIAN_CONNECT_TIMEOUT:3s}

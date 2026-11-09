@@ -613,6 +613,23 @@ class BailianImageGenerationClientTest {
         output.writeInt((int) crc.getValue());
     }
 
+    @Test
+    void sendsAllFourUploadedGarmentReferences() throws Exception {
+        RestClient.Builder builder = RestClient.builder().baseUrl("http://aliyun.test");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        String uri = "data:image/png;base64," + Base64.getEncoder().encodeToString(solidPng(300, 300));
+        var items = java.util.stream.IntStream.range(0, 4)
+                .mapToObj(index -> new WardrobeItem(null, "uploaded-" + index, "上装", "", "", uri, null)).toList();
+        server.expect(requestTo("http://aliyun.test/generate")).andExpect(request -> {
+            var body = (org.springframework.mock.http.client.MockClientHttpRequest) request;
+            var content = objectMapper.readTree(body.getBodyAsString()).path("input").path("messages").get(0).path("content");
+            assertEquals(6, content.size());
+            for (int index = 1; index < 6; index++) assertTrue(content.get(index).has("image"));
+        }).andRespond(withSuccess(successfulImageResponse(), MediaType.APPLICATION_JSON));
+        assertTrue(imageClient(builder.build()).generate("FEMALE", "通勤", "杭州", 24.0, items).succeeded());
+        server.verify();
+    }
+
     private static byte[] imageBytes(int width, int height, int type, String format) throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         BufferedImage image = new BufferedImage(width, height, type);

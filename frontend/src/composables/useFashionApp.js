@@ -2,7 +2,7 @@ import { computed, reactive, nextTick, watch } from 'vue'
 import { trendGalleryImageUrl } from '../utils/trendGallery.js'
 import { isConfiguredDemoTrend } from '../utils/trendSources.js'
 import { isTrendAnalysisExample, trendOutfitAnalysis } from '../data/trendOutfitAnalyses.js'
-import { outfitModelReferenceKey } from '../utils/outfitModel.js'
+import { outfitModelReferenceKey, outfitVisualItemKey } from '../utils/outfitModel.js'
 import { favoriteUploadForm } from '../utils/tryOnFavorites.js'
 import { prepareTryOnImage } from '../utils/liveTryOn.js'
 import { recommendationSelectionError } from '../utils/recommendationSelection.js'
@@ -133,6 +133,7 @@ export function useFashionApp() {
   let adminFeedbackRequestVersion = 0
   let pendingWardrobeRead = null
   const visualCache = new Map()
+  const pendingVisuals = new Map()
   const state = reactive({
     authPhase: 'checking',
     authUser: null,
@@ -457,7 +458,9 @@ export function useFashionApp() {
     state.authUser = user
     state.authPhase = 'authenticated'
     state.authError = ''
+    if (isAdmin.value) state.activeView = 'admin'
     normalizeActiveView()
+    if (isAdmin.value && window.location.hash !== '#admin') window.history.replaceState(null, '', '#admin')
     await loadPrivateData()
   }
 
@@ -1363,34 +1366,66 @@ export function useFashionApp() {
   async function generateRecommendationVisual(recommendation, options = {}) {
     if (state.authPhase !== 'authenticated' || !recommendation?.id) return null
     const version = sessionVersion
-    const itemIds = (recommendation.items || []).map((item) => item?.id).filter(Boolean).join(',')
+    const itemsKey = outfitVisualItemKey(recommendation.items)
     const gender = String(state.profile?.gender || '').trim().toUpperCase()
     const referenceKey = outfitModelReferenceKey(state.profile)
     const modelRevision = state.outfitModelRevision
     const modelSource = state.profile?.usePersonalPhotoForOutfit ? 'PERSONAL' : 'DEFAULT'
-    const cacheKey = `${recommendation.id}:${gender}:${referenceKey}:${itemIds}`
+    const cacheKey = `${version}:${recommendation.id}:${gender}:${referenceKey}:${itemsKey}`
+    const pendingKey = `${cacheKey}:${modelRevision}:${Boolean(options.readOnly)}`
+    if (pendingVisuals.has(pendingKey)) return pendingVisuals.get(pendingKey)
     if (!options.force && visualCache.has(cacheKey)) return visualCache.get(cacheKey)
+    const pending = loadVisual()
+    pendingVisuals.set(pendingKey, pending)
     try {
-      const result = await request(`/api/v1/me/recommendations/${recommendation.id}/visual`, { method: 'POST' })
-      if (!isCurrentSession(version) || state.outfitModelRevision !== modelRevision) return null
-      if ((result?.modelSource && result.modelSource !== modelSource)
-        || (result?.modelGender && String(result.modelGender).trim().toUpperCase() !== gender)) return null
-      visualCache.set(cacheKey, result)
-      return result
-    } catch (cause) {
-      if (!isCurrentSession(version) || state.outfitModelRevision !== modelRevision) return null
-      const result = {
-        status: 'FAILED',
-        imageUrl: null,
-        model: null,
-        modelGender: gender || null,
-        modelSource,
-        itemCount: 0,
-        message: cause instanceof Error ? cause.message : '穿搭效果图生成失败，请稍后重试。'
-      }
-      visualCache.set(cacheKey, result)
-      return result
+      return await pending
+    } finally {
+      if (pendingVisuals.get(pendingKey) === pending) pendingVisuals.delete(pendingKey)
     }
+
+    async function loadVisual() {
+      try {
+        const result = await requestRecommendationVisual(recommendation, options, version, modelRevision)
+        if (!isCurrentSession(version) || state.outfitModelRevision !== modelRevision) return null
+        if ((result?.modelSource && result.modelSource !== modelSource)
+          || (result?.modelGender && String(result.modelGender).trim().toUpperCase() !== gender)) return null
+        if (result?.status === 'SUCCEEDED') visualCache.set(cacheKey, result)
+        return result
+      } catch (cause) {
+        if (!isCurrentSession(version) || state.outfitModelRevision !== modelRevision) return null
+        const result = {
+          status: 'FAILED',
+          imageUrl: null,
+          model: null,
+          modelGender: gender || null,
+          modelSource,
+          itemCount: 0,
+          message: cause instanceof Error ? cause.message : '穿搭效果图生成失败，请稍后重试。'
+        }
+        return result
+      }
+    }
+  }
+
+  async function getVisualQuota() {
+    return request('/api/v1/me/recommendations/visual-quota')
+  }
+
+  async function requestRecommendationVisual(recommendation, options, version, modelRevision) {
+    const id = recommendation.id
+    const force = options.force
+    const body = options.customItems ? JSON.stringify({ items: recommendation.items.map(item => item.uploaded
+      ? { name: item.name, category: item.category, imageData: item.imageData }
+      : { wardrobeId: item.id }) }) : undefined
+    const path = `/api/v1/me/recommendations/${id}/visual`
+    let result = await request(force ? `${path}?force=true` : path, options.readOnly ? {} : { method: 'POST', body }, {}, version)
+    for (let attempt = 0; result?.status === 'PENDING' && attempt < 90; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      if (!isCurrentSession(version) || state.outfitModelRevision !== modelRevision) return null
+      result = await request(path, options.customItems ? { method: 'POST', body } : {}, {}, version)
+    }
+    if (result?.status === 'PENDING') throw new Error('效果图仍在生成，请稍后重新打开搭配方案。')
+    return result
   }
 
   async function rateRecommendation(recommendation, rating, details = {}) {
@@ -1723,6 +1758,7 @@ export function useFashionApp() {
     generateRecommendation,
     consultAssistant,
     generateRecommendationVisual,
+    getVisualQuota,
     rateRecommendation,
     saveRecommendation,
     selectView

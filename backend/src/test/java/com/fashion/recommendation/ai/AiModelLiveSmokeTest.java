@@ -29,7 +29,7 @@ class AiModelLiveSmokeTest {
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
     private final String endpoint = env("BAILIAN_ENDPOINT", "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions");
     private final String key = env("DASHSCOPE_API_KEY", "");
-    private final String vision = env("BAILIAN_VISION_MODEL", "qwen-vl-plus");
+    private final String vision = env("BAILIAN_VISION_MODEL", "qwen3-vl-plus");
     private final String recommendation = env("BAILIAN_MODEL", "qwen-plus");
     private final String imageModel = env("BAILIAN_IMAGE_MODEL", "wan2.6-image");
     private final String imageEndpoint = env("BAILIAN_IMAGE_ENDPOINT", "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation");

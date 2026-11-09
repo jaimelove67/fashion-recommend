@@ -34,7 +34,7 @@ const test = base.extend({
   }
 })
 
-async function setup(context, { providerMode = 'streaming' } = {}) {
+async function setup(context, { providerMode = 'streaming', enableShop = true } = {}) {
   let username = 'try-on-owner'
   const favorites = [], writes = [], errors = [], providerRequests = []
   context.on('page', page => page.on('pageerror', error => errors.push(error.message)))
@@ -98,8 +98,11 @@ async function setup(context, { providerMode = 'streaming' } = {}) {
   await expect.poll(() => project.frames().some(frame => frame.url().includes(extensionId + '/floating.html'))).toBe(true)
   const projectFloat = project.frames().find(frame => frame.url().includes(extensionId + '/floating.html'))
   await expect(projectFloat.getByRole('alert')).toBeHidden()
-  const shop = await context.newPage(); await shop.goto(SHOP + '/collection'); await enable(shop)
-  await expect.poll(() => shop.frames().some(frame => frame.url().includes(extensionId + '/floating.html'))).toBe(true)
+  const shop = await context.newPage(); await shop.goto(SHOP + '/collection')
+  if (enableShop) {
+    await enable(shop)
+    await expect.poll(() => shop.frames().some(frame => frame.url().includes(extensionId + '/floating.html'))).toBe(true)
+  }
   const floating = shop.frames().find(frame => frame.url().includes(extensionId + '/floating.html'))
   async function drag() {
     await shop.bringToFront()
@@ -125,6 +128,40 @@ async function setup(context, { providerMode = 'streaming' } = {}) {
     worker, extensionId, drag, start, provider, providerFrame, favorites, writes, providerRequests, errors,
     changeAccount: value => { username = value } }
 }
+
+async function openPopupPage(context, worker, page) {
+  const extensionId = worker.url().split('/')[2]
+  // Headless Chromium does not expose the toolbar bubble as a Playwright page.
+  // Load its real document separately, keeping the shopping tab active for the
+  // popup's chrome.tabs.query call. Host permissions are pregranted above.
+  const popup = await context.newPage()
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`)
+  await page.bringToFront()
+  return popup
+}
+
+test('the shopping-site popup explains a missing project connection instead of silently closing', async ({ context }) => {
+  await context.route(SHOP + '/**', route => route.fulfill({ contentType: 'text/html', body: '<h1>Shopping site fixture</h1>' }))
+  const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker')
+  await worker.evaluate(origin => chrome.storage.local.set({ projectOrigin: origin }), APP)
+  const shop = await context.newPage(); await shop.goto(SHOP + '/collection')
+  const popup = await openPopupPage(context, worker, shop)
+  await expect(popup.locator('#connection')).toContainText('尚未连接项目')
+  await popup.getByRole('button', { name: '在本站启用试穿浮窗', exact: true }).click()
+  await expect(popup.getByRole('alert')).toContainText('开启跨站试穿')
+  await expect(shop.locator('#zhiji-try-on-host')).toHaveCount(0)
+})
+
+test('the connected shopping-site popup enables the site and displays the real floating panel', async ({ context }) => {
+  const api = await setup(context, { enableShop: false })
+  await expect(api.shop.locator('#zhiji-try-on-host')).toHaveCount(0)
+  const popup = await openPopupPage(context, api.worker, api.shop)
+  await expect(popup.locator('#connection')).toContainText('已连接项目账号：try-on-owner')
+  await popup.getByRole('button', { name: '在本站启用试穿浮窗', exact: true }).click()
+  await expect(api.shop.locator('#zhiji-try-on-host')).toBeVisible()
+  expect(api.providerRequests).toEqual([])
+  expect(api.errors).toEqual([])
+})
 
 test('real extension carries a dragged product into try-on and saves it back to the connected account', async ({ context }) => {
   const api = await setup(context)

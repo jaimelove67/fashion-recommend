@@ -7,8 +7,22 @@ const trends = Array.from({ length: 6 }, (_, index) => ({
   summary: `这条原帖的摘要 ${index + 1}`, publishedAt: '2026-10-15T09:00:00+08:00',
   sourceUrl: `https://weibo.com/qa/post-${index}`, evidence: { author: '测试来源', mediaType: 'image' }
 }))
+const analyzedPosts = [
+  {
+    id: 'verified-savis', platform: 'weibo', title: '白T和牛仔裤，怎样通过外搭增加层次？',
+    imageUrl: 'https://images.test/verified-savis.svg', topicTags: ['日常休闲', '白色', '衬衫'],
+    publishedAt: '2026-09-26T16:17:00+08:00', sourceUrl: 'https://www.sina.cn/news/detail/5347432265156146.html',
+    evidence: { author: 'SavisLook', mediaType: 'image' }
+  },
+  {
+    id: 'verified-sanmu', platform: 'weibo', title: '同一件马甲，颜色分界怎样改变重点？',
+    imageUrl: 'https://images.test/verified-sanmu.svg', topicTags: ['一衣多穿', '马甲', '白色'],
+    publishedAt: '2026-06-16T10:41:00+08:00', sourceUrl: 'https://www.sina.cn/news/detail/5310383998634818.html',
+    evidence: { author: '三木三木呢', mediaType: 'image' }
+  }
+]
 
-async function openTrends(page, width = 1280) {
+async function openTrends(page, width = 1280, items = trends) {
   await page.setViewportSize({ width, height: 900 })
   await page.clock.install()
   await page.route('https://images.test/**', route => route.fulfill({ contentType: 'image/svg+xml', body: svg }))
@@ -17,7 +31,7 @@ async function openTrends(page, width = 1280) {
     let data = {}
     if (pathname.endsWith('/auth/csrf')) data = { token: 'analysis-qa', headerName: 'X-XSRF-TOKEN' }
     else if (pathname.endsWith('/auth/me')) data = { username: 'analysis-qa', authorities: [] }
-    else if (pathname.endsWith('/trends')) data = { items: trends, styles: [], sources: [], demoMode: false }
+    else if (pathname.endsWith('/trends')) data = { items, styles: [], sources: [], demoMode: false }
     else if (pathname.endsWith('/me/wardrobe')) data = [
       { id: 'white-tee', name: '我的白色上衣', category: '上衣', color: '白色', recognitionStatus: 'CONFIRMED' },
       { id: 'review-tee', name: '未确认的白色衣服', color: '白色', recognitionStatus: 'NEEDS_MANUAL_REVIEW' }
@@ -27,13 +41,12 @@ async function openTrends(page, width = 1280) {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 0, data }) })
   })
   await page.goto('/#trend')
-  await expect(page.locator('#trend-breakdown-title')).toHaveText(trends[0].title)
+  await expect(page.locator('#trend-breakdown-title')).toHaveText(items[0].title)
 }
 
-async function openExample(page) {
-  await page.getByRole('button', { name: '分析示例', exact: true }).click()
-  await expect(page.locator('.trend-example-notice')).toContainText('不计入近期鉴赏')
-  await expect(page.locator('#trend-gallery-title')).toHaveText('穿搭分析示例')
+async function openAnalyzedPost(page, width = 1280) {
+  await openTrends(page, width, analyzedPosts)
+  await expect(page.locator('#trend-gallery-title')).toHaveText('穿搭鉴赏')
   await expect(page.locator('.brief-points > li')).toHaveCount(3)
   await page.getByRole('button', { name: '深入分析', exact: true }).click()
   return page.getByRole('dialog', { name: '深入分析', exact: true })
@@ -73,11 +86,10 @@ test('gallery selection updates a brief; deep reading freezes the track and rest
   expect(await track.evaluateAll(cards => cards.map(card => card.dataset.galleryIndex).join(','))).not.toBe(trackBefore)
 })
 
-test('verified examples show image-linked reasons, independent substitutions, both comparison photos and the wardrobe route', async ({ page }) => {
-  await openTrends(page)
+test('verified source posts show image-linked reasons, independent substitutions, both comparison photos and the wardrobe route', async ({ page }) => {
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
-  let dialog = await openExample(page)
+  let dialog = await openAnalyzedPost(page)
   await expect(dialog.locator('.analysis-photo img')).toHaveAttribute('src', '/assets/trend-analysis/savis-autumn.jpg')
   await expect.poll(() => dialog.locator('.analysis-photo img').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true)
   await expect(dialog).toContainText('2026/9/26')
@@ -106,8 +118,7 @@ test('verified examples show image-linked reasons, independent substitutions, bo
 })
 
 test('opening the wardrobe from analysis releases the dialog and page scroll lock', async ({ page }) => {
-  await openTrends(page)
-  const dialog = await openExample(page)
+  const dialog = await openAnalyzedPost(page)
   await dialog.getByRole('button', { name: '查看我的衣橱', exact: true }).click()
   await expect(page).toHaveURL(/#wardrobe$/)
   await expect(page.getByRole('dialog')).toHaveCount(0)
@@ -129,8 +140,7 @@ test('unavailable source images preserve the source link and do not create image
 })
 
 for (const width of [390, 320]) test(`analysis is a full-screen readable detail with functional photo markers at ${width}px`, async ({ page }) => {
-  await openTrends(page, width)
-  const dialog = await openExample(page)
+  const dialog = await openAnalyzedPost(page, width)
   const bounds = await dialog.boundingBox()
   expect(bounds.x).toBe(0)
   expect(bounds.y).toBe(0)

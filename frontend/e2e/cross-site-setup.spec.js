@@ -44,6 +44,19 @@ async function setup(page, { extension = null, clipboardFails = false } = {}) {
 
 function guide(page) { return page.getByRole('dialog', { name: '几步准备，开启试穿浮窗' }) }
 
+for (const width of [1280, 390]) test(`try-on remains available without content mode buttons at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 })
+  const errors = await setup(page)
+  await expect(page.getByRole('button', { name: '近期内容', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '分析示例', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '高级筛选', exact: true })).toHaveCount(0)
+  await expect(page.locator('.trend-empty-state')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+  await page.getByRole('button', { name: '首次使用怎么安装？' }).click()
+  await expect(guide(page)).toBeVisible()
+  expect(errors).toEqual([])
+})
+
 test('an unavailable extension opens a download-first guide and failed connection cannot finish setup', async ({ page }) => {
   const errors = await setup(page)
   await page.getByRole('button', { name: '开启跨站试穿', exact: true }).click()

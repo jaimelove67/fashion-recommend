@@ -1,5 +1,5 @@
 <script setup>
-import OutfitAdjustment from '../components/OutfitAdjustment.vue'
+import OutfitItemPicker from '../components/OutfitItemPicker.vue'
 import RecommendationFeedback from '../components/RecommendationFeedback.vue'
 import { computed, ref, watch } from 'vue'
 import {
@@ -18,7 +18,7 @@ import {
   Wind
 } from '@lucide/vue'
 import { formatRecommendationReason, formatRecommendationTitle } from '../utils/recommendationReason'
-import { outfitModelReferenceKey } from '../utils/outfitModel'
+import { outfitModelReferenceKey, outfitVisualItemKey } from '../utils/outfitModel'
 
 const props = defineProps({
   app: { type: Object, required: true }
@@ -26,6 +26,35 @@ const props = defineProps({
 
 const emit = defineEmits(['open-assistant'])
 
+const draftItems = ref(null)
+const editingIndex = ref(null)
+const pickerSection = ref(null)
+const quota = ref(null)
+const quotaError = ref('')
+let pickerTrigger = null
+async function refreshQuota() {
+  try { quota.value = await props.app.getVisualQuota(); quotaError.value = '' }
+  catch { quotaError.value = '额度暂时无法读取，生成时将由服务端校验。' }
+}
+function openItemPicker(index, event) {
+  editingIndex.value = index
+  pickerTrigger = event.currentTarget
+  requestAnimationFrame(() => { pickerSection.value?.scrollIntoView({ block: 'center' }); pickerSection.value?.focus() })
+}
+function closeItemPicker() {
+  editingIndex.value = null
+  requestAnimationFrame(() => {
+    if (pickerTrigger?.isConnected) pickerTrigger.focus()
+    else document.querySelector('.ootd-board-item-image')?.focus()
+  })
+}
+function replaceItem(item) {
+  const items = [...selectedLook.value.items]
+  items[editingIndex.value] = item
+  draftItems.value = items
+  closeItemPicker()
+}
+const quotaExhausted = computed(() => quota.value && (quota.value.dailyRemaining === 0 || quota.value.weeklyRemaining === 0))
 const brokenImages = ref(new Set())
 const visualResults = ref({})
 const visualBusyKeys = ref(new Set())
@@ -189,11 +218,11 @@ const dailyLooks = computed(() => {
   const source = generatedRecommendation.value
   const sourceItems = wardrobeItemsOnly(source?.items)
   const isGenerated = Boolean(source)
-  const items = isGenerated ? sourceItems.slice(0, 4) : itemsForLook(0)
+  const items = draftItems.value || (isGenerated ? sourceItems.slice(0, 4) : itemsForLook(0))
   const mode = dailyLookMode
   const palette = uniqueColors(items).join(' / ') || mode.palette
   const occasion = source?.occasion || state.value.recommendationForm?.occasion || '待选择场合'
-  const visualKey = isGenerated ? visualKeyForSource(source, modelGender.value, sourceItems) : ''
+  const visualKey = isGenerated ? visualKeyForSource(source, modelGender.value, items) : ''
   const visual = visualKey ? visualResults.value[visualKey] : null
   const generatedImage = visual?.imageUrl || ''
   return [{
@@ -227,7 +256,7 @@ const dailyLooks = computed(() => {
 })
 
 const selectedLook = computed(() => dailyLooks.value[0] || null)
-const selectedLookReason = computed(() => formatRecommendationReason(selectedLook.value?.source))
+const selectedLookReason = computed(() => draftItems.value ? '单品已手动调整，请结合当前组合查看穿搭效果。' : formatRecommendationReason(selectedLook.value?.source))
 const currentRecommendationReason = computed(() => formatRecommendationReason(state.value.currentRecommendation))
 const wardrobeLookCount = computed(() => dailyLooks.value.filter((look) => look.items.length).length)
 const generatedLookCount = computed(() => dailyLooks.value.filter((look) => look.isGenerated).length)
@@ -256,13 +285,12 @@ const selectedLookRationale = computed(() => {
   return [
     { label: '适用场合', value: look.source?.occasion || state.value.recommendationForm?.occasion || '待选择' },
     { label: '搭配配色', value: look.palette },
-    { label: '衣橱来源', value: look.items.length ? `${look.items.length} 件已确认衣物` : '当前没有可用衣物' }
+    { label: '单品来源', value: look.items.length ? `${look.items.filter(item => !item.uploaded).length} 件衣橱单品 · ${look.items.filter(item => item.uploaded).length} 件本次上传` : '当前没有可用衣物' }
   ]
 })
 
 function visualKeyForSource(source, gender, items) {
-  const itemIds = (items || []).map((item) => item?.id).filter(Boolean).join(',')
-  return `${source?.id || ''}:${gender || ''}:${outfitModelReferenceKey(profile.value)}:${state.value.outfitModelRevision || 0}:${itemIds}`
+  return `${source?.id || ''}:${gender || ''}:${outfitModelReferenceKey(profile.value)}:${state.value.outfitModelRevision || 0}:${outfitVisualItemKey(items)}`
 }
 
 function visualKeyForLook(look) {
@@ -275,20 +303,23 @@ const selectedVisual = computed(() => {
 })
 const selectedVisualBusy = computed(() => visualBusyKeys.value.has(visualKeyForLook(selectedLook.value)))
 
-async function requestLookVisual(look = selectedLook.value, force = false) {
+async function requestLookVisual(look = selectedLook.value, force = false, readOnly = false) {
   if (!look?.source?.id || !modelGender.value || typeof props.app.generateRecommendationVisual !== 'function') return null
   const key = visualKeyForLook(look)
   if (!key || (!force && visualResults.value[key] && visualResults.value[key].status !== 'PENDING')) return visualResults.value[key] || null
   if (visualBusyKeys.value.has(key)) return null
   visualResults.value = {
     ...visualResults.value,
-    [key]: { status: 'PENDING', imageUrl: null, model: null, modelGender: modelGender.value, message: '正在生成穿搭效果图…' }
+    [key]: { ...visualResults.value[key], status: 'PENDING', modelGender: modelGender.value, message: '正在读取穿搭效果图…' }
   }
   visualBusyKeys.value = new Set([...visualBusyKeys.value, key])
   try {
-    const result = await props.app.generateRecommendationVisual(look.source, { force })
+    const result = await props.app.generateRecommendationVisual({ ...look.source, items: look.items }, { force, readOnly, customItems: Boolean(draftItems.value) })
     if (result && key === visualKeyForLook(selectedLook.value)) {
-      visualResults.value = { ...visualResults.value, [key]: result }
+      visualResults.value = { ...visualResults.value, [key]: { ...result, imageUrl: result.imageUrl || visualResults.value[key]?.imageUrl } }
+      const next = new Set(brokenImages.value)
+      next.delete(imageKey('model', { id: key }))
+      brokenImages.value = next
     } else {
       const next = { ...visualResults.value }
       delete next[key]
@@ -299,6 +330,7 @@ async function requestLookVisual(look = selectedLook.value, force = false) {
     const next = new Set(visualBusyKeys.value)
     next.delete(key)
     visualBusyKeys.value = next
+    if (!readOnly) await refreshQuota()
   }
 }
 
@@ -357,9 +389,11 @@ function showRecommendationReason() {
   section.focus({ preventScroll: true })
 }
 
+watch(() => generatedRecommendation.value?.id, () => { draftItems.value = null; editingIndex.value = null })
 watch(() => selectedLook.value?.visualKey, () => {
   const look = selectedLook.value
-  if (look?.isGenerated && modelGender.value) requestLookVisual(look)
+  if (look?.isGenerated && modelGender.value && !draftItems.value) requestLookVisual(look, false, true)
+  refreshQuota()
 }, { immediate: true })
 </script>
 
@@ -449,7 +483,10 @@ watch(() => selectedLook.value?.visualKey, () => {
           <button class="ootd-today" type="button" @click="app.selectView('history')">查看搭配记录</button>
         </header>
 
-        <OutfitAdjustment v-if="generatedRecommendation" :app="app" :recommendation="generatedRecommendation" />
+        <p class="outfit-edit-hint">点击左右单品图片更换，搭配完成后点击“生成穿搭效果图”。</p>
+        <div v-if="editingIndex !== null" ref="pickerSection" tabindex="-1">
+          <OutfitItemPicker :item="selectedLook.items[editingIndex]" :wardrobe="availableWardrobe" :selected="selectedLook.items" @select="replaceItem" @close="closeItemPicker" />
+        </div>
         <div v-if="selectedLook" class="ootd-board-wrap">
           <div class="ootd-board" :aria-label="`${selectedLook.title}的穿搭方案展示`">
             <div class="ootd-board-heading">
@@ -492,7 +529,7 @@ watch(() => selectedLook.value?.visualKey, () => {
               class="ootd-board-item"
               :class="`board-item-${itemIndex + 1}`"
             >
-              <div class="ootd-board-item-image">
+              <button type="button" class="ootd-board-item-image" :aria-label="`更换${item.name || item.category}`" :disabled="selectedVisualBusy" @click="openItemPicker(itemIndex, $event)">
                 <img
                   v-if="imageSource(item, `ootd-board-${dailyDateKey}`, itemIndex)"
                   :src="imageSource(item, `ootd-board-${dailyDateKey}`, itemIndex)"
@@ -500,13 +537,14 @@ watch(() => selectedLook.value?.visualKey, () => {
                   @error="imageFailed(`ootd-board-${dailyDateKey}`, item, itemIndex)"
                 />
                 <span v-else class="ootd-image-missing"><Shirt :size="19" aria-hidden="true" /><small>暂无图片</small></span>
-              </div>
+                <span class="item-change-label">点击更换</span>
+              </button>
               <footer>
                 <div>
                   <strong>{{ wardrobeCategoryLabel(item.category) }}</strong>
                   <small>{{ String(itemIndex + 1).padStart(2, '0') }} / {{ item.name || item.style || '衣橱单品' }}</small>
                 </div>
-                <span>衣橱已有</span>
+                <span>{{ item.uploaded ? '本次上传' : '衣橱已有' }}</span>
               </footer>
             </article>
 
@@ -537,16 +575,17 @@ watch(() => selectedLook.value?.visualKey, () => {
                 v-if="selectedLook.isGenerated && selectedLook.modelGender"
                 type="button"
                 class="ootd-visual-action"
-                :disabled="selectedVisualBusy"
+                :disabled="selectedVisualBusy || quotaExhausted || editingIndex !== null"
                 @click="requestLookVisual(selectedLook, true)"
               >
                 <LoaderCircle v-if="selectedVisualBusy" :size="14" class="spinning" />
                 <Sparkles v-else :size="14" />
-                {{ selectedVisualBusy ? '生成中' : selectedLook.modelImageKind === 'generated' ? '重新生成效果图' : '生成穿搭效果图' }}
+                {{ selectedVisualBusy ? '生成中' : quotaExhausted ? '生图额度已用完' : selectedLook.modelImageKind === 'generated' ? '重新生成效果图' : '生成穿搭效果图' }}
               </button>
             </div>
           </div>
 
+          <p class="outfit-quota" role="status">每天最多1张，每周最多4张 · 北京时间每日零点、每周一重置<span v-if="quota"> · 今日剩余 {{ quota.dailyRemaining }} 张，本周剩余 {{ quota.weeklyRemaining }} 张</span><span v-if="quotaError"> · {{ quotaError }}</span></p>
           <section class="ootd-rationale" aria-labelledby="ootd-rationale-title">
             <div class="ootd-rationale-heading"><span>搭配依据</span><strong id="ootd-rationale-title">搭配信息</strong></div>
             <dl>
@@ -656,6 +695,11 @@ watch(() => selectedLook.value?.visualKey, () => {
 </template>
 
 <style scoped>
+.outfit-edit-hint, .outfit-quota { color: var(--rec-muted); font-size: 13px; line-height: 1.7; margin: 16px 0; }
+.ootd-board-item-image { position: relative; display: block; width: 100%; cursor: pointer; padding: 0; color: var(--rec-ink); }
+.ootd-board-item-image:disabled { cursor: wait; opacity: .6; }
+.item-change-label { position: absolute; right: 8px; bottom: 8px; padding: 6px 10px; border-radius: 6px; background: var(--surface); color: var(--ink); font-size: 12px; }
+
 .trend-reference-banner { display:flex; flex-wrap:wrap; align-items:center; gap:20px; padding:24px; margin:20px 0; background:var(--accent-soft); color:var(--accent-strong); }
 .trend-reference-banner > div { flex:1 1 260px; }
 .trend-reference-banner p { margin:8px 0; overflow-wrap:anywhere; }

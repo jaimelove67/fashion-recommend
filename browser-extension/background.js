@@ -119,7 +119,7 @@ async function handle(message, sender) {
     return { ok: true }
   }
   if (message.type === 'SHOW_CURRENT' && localPage(sender)) {
-    if (!(await state())?.enabled) return { enabled: false }
+    if (!(await state())?.enabled) throw new Error('尚未连接项目账号。请点击“打开项目趋势页”，在项目中点击“开启跨站试穿”，并保留项目标签页，再回到本站启用。')
     if (await hasIntegratedWindow()) { await focusIntegratedWindow(); return { ok: true } }
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
     if (tab) await chrome.tabs.sendMessage(tab.id, { type: 'SHOW_PANEL' })

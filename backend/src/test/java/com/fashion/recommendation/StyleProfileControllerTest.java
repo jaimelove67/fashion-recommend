@@ -55,6 +55,7 @@ class StyleProfileControllerTest {
     @MockBean WeatherService weather;
     @MockBean LlmRecommendationClient recommendations;
     @MockBean BailianImageGenerationClient images;
+    @MockBean com.fashion.recommendation.storage.GeneratedImageDownloader generatedImageDownloader;
 
     @BeforeEach
     void providers() {
@@ -231,6 +232,7 @@ class StyleProfileControllerTest {
     @Test
     void outfitGenerationUsesPresetUnlessPersonalPhotoIsExplicitlySelected() throws Exception {
         String actor = "outfit-visual-preference-user";
+        jdbc.update("INSERT INTO app_users(username,password_hash) VALUES (?,?)", actor, "test-only");
         basic(actor, 175, 65);
         upload(actor).andExpect(status().isOk());
         item(actor, "衬衫", "上装", "米白");
@@ -239,14 +241,18 @@ class StyleProfileControllerTest {
         var result = new OutfitImageGenerationResult("SUCCEEDED", "https://images.test/look.png", "wan2.6-image", "request", null);
         when(images.generate(anyString(), anyString(), anyString(), anyDouble(), anyList())).thenReturn(result);
         when(images.generate(anyString(), anyString(), anyString(), anyDouble(), anyList(), any(StoredImageData.class))).thenReturn(result);
+        when(generatedImageDownloader.download(result.imageUrl())).thenReturn(new StoredImageData(PHOTO, "image/png"));
         clearInvocations(storage);
         mvc.perform(post("/api/v1/me/recommendations/" + id + "/visual").with(user(actor)).with(csrf()))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.modelSource").value("DEFAULT"));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.data.modelSource").value("DEFAULT"));
         verify(images).generate(eq("MALE"), anyString(), eq("长沙"), anyDouble(), anyList());
         verify(storage, never()).read(anyString());
         postJson(actor, "/outfit-model", "{\"usePersonalPhotoForOutfit\":true}").andExpect(status().isOk());
+        jdbc.update("DELETE FROM recommendation_visual_usage WHERE user_id=?", actor);
         mvc.perform(post("/api/v1/me/recommendations/" + id + "/visual").with(user(actor)).with(csrf()))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.modelSource").value("PERSONAL"));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.data.modelSource").value("PERSONAL"));
         var photo = ArgumentCaptor.forClass(StoredImageData.class);
         verify(images).generate(eq("MALE"), anyString(), eq("长沙"), anyDouble(), anyList(), photo.capture());
         assertArrayEquals(PHOTO, photo.getValue().content());

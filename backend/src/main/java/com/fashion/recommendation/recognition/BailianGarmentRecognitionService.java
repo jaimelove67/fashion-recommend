@@ -43,7 +43,7 @@ public class BailianGarmentRecognitionService implements GarmentRecognitionServi
             @Value("${app.bailian.endpoint:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}")
                     String endpoint,
             @Value("${app.bailian.api-key:}") String apiKey,
-            @Value("${app.bailian.vision-model:qwen-vl-plus}") String model,
+            @Value("${app.bailian.vision-model:qwen3-vl-plus}") String model,
             @Value("${app.bailian.vision-enabled:false}") boolean enabled,
             @Value("${app.bailian.connect-timeout:3s}") Duration connectTimeout,
             @Value("${app.bailian.read-timeout:8s}") Duration readTimeout) {

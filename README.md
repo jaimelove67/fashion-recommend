@@ -141,7 +141,7 @@ mvn spring-boot:run
 
 1. 编辑基础资料，通过 `POST /api/v1/me/style-profile/refresh` 保存身高、体重、模特性别和偏好。
 2. 选择照片，通过 `POST /api/v1/me/style-profile/photo` 上传；也可跳过照片，手动填写形象特征和建议。
-3. 用户明确同意本次 AI 分析后，调用 `POST /api/v1/me/style-profile/analyze`。个人分析复用“视觉识别（衣物与个人形象）”的模型配置，要求 `BAILIAN_VISION_ENABLED=true` 且已配置可用密钥，默认模型为 qwen-vl-plus。读取超时由 `BAILIAN_PROFILE_ANALYSIS_READ_TIMEOUT` 控制，默认 30 秒。
+3. 用户明确同意本次 AI 分析后，调用 `POST /api/v1/me/style-profile/analyze`。个人分析复用“视觉识别（衣物与个人形象）”的模型配置，要求 `BAILIAN_VISION_ENABLED=true` 且已配置可用密钥，默认模型为 qwen3-vl-plus。读取超时由 `BAILIAN_PROFILE_ANALYSIS_READ_TIMEOUT` 控制，默认 30 秒。
 
 本地模型启用配置：在 `.env` 中显式设置 `BAILIAN_ENABLED=true`、`BAILIAN_VISION_ENABLED=true`、`BAILIAN_IMAGE_ENABLED=true` 并配置 `DASHSCOPE_API_KEY`；修改后需重新创建后端容器。`.env.example` 已包含这三个启用开关。视觉识别仍需用户明确同意，项目启动不会自动发送个人照片或生成效果图。
 
@@ -229,7 +229,7 @@ mvn spring-boot:run
 | BAILIAN_ENABLED | true | 是否启用文本推荐大模型（默认优先使用；离线测试需显式设为 false） |
 | BAILIAN_MODEL | qwen-plus | 文本推荐模型 |
 | BAILIAN_VISION_ENABLED | false | 是否启用图片视觉识别 |
-| BAILIAN_VISION_MODEL | qwen-vl-plus | 衣物与个人形象共用的视觉识别模型 |
+| BAILIAN_VISION_MODEL | qwen3-vl-plus | 衣物与个人形象共用的视觉识别模型 |
 | BAILIAN_PROFILE_ANALYSIS_READ_TIMEOUT | 30s | 个人形象分析读取超时 |
 | BAILIAN_ENDPOINT | 百炼兼容接口 | 模型请求地址 |
 | BAILIAN_CONNECT_TIMEOUT / BAILIAN_READ_TIMEOUT | 3s / 30s | 模型连接和读取超时；包含个人分析的完整推荐请求可能超过原来的 8 秒 |

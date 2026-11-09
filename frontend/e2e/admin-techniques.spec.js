@@ -33,7 +33,8 @@ async function openAdmin(page, options = {}) {
     else if (path === '/api/v1/admin/overview') data = {
       totalUsers: 8, enabledUsers: 7, disabledUsers: 1, totalWardrobeItems: 42,
       totalRecommendations: 6, totalFeedback: 5, averageRating: 4.2, savedRecommendations: 3,
-      llmRecommendations: 4, fallbackRecommendations: 2, pendingFeedback: 1, manualReviewItems: 0, pendingImageCleanupTasks: 0
+      llmRecommendations: 4, fallbackRecommendations: 2, pendingFeedback: 1, manualReviewItems: 0, pendingImageCleanupTasks: 0,
+      ...options.overview
     }
     else if (path === '/api/v1/trends') data = { items: [], styles: [], sources: [], demoMode: false }
     else if (path.endsWith('/wardrobe') || path.endsWith('/ai-models') || path.endsWith('/try-on-favorites')) data = []
@@ -50,6 +51,25 @@ async function openAdmin(page, options = {}) {
   await expect(page.getByRole('heading', { name: '运营总览', exact: true })).toBeVisible()
   return { writes, requests, errors }
 }
+
+test('overview charts show large counts proportionally without growing the page and handle empty data', async ({ page }) => {
+  const options = { overview: { totalRecommendations: 1000000, llmRecommendations: 750000, fallbackRecommendations: 200000 } }
+  await openAdmin(page, options)
+  const chart = page.getByRole('img', { name: '推荐记录构成：模型推荐 750000 条，规则降级 200000 条，未标记 50000 条' })
+  await expect(chart.locator('.runtime-chart-row')).toHaveCount(3)
+  await expect(chart.locator('.runtime-chart-fill-0')).toHaveAttribute('style', 'width: 100%;')
+  await expect(chart.locator('.runtime-chart-fill-1')).toHaveAttribute('style', /26\.666/)
+  const accountChart = page.getByRole('button', { name: '点击重播账号状态图表' })
+  await accountChart.focus()
+  await page.keyboard.press('Space')
+  await expect(accountChart.getByRole('img', { name: '账号状态构成' })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+  options.overview = { totalUsers: 0, enabledUsers: 0, disabledUsers: 0, totalRecommendations: 0, llmRecommendations: 0, fallbackRecommendations: 0 }
+  await page.getByRole('button', { name: '刷新数据' }).click()
+  await expect(page.getByRole('heading', { name: '暂无推荐记录' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '暂无账户数据' })).toBeVisible()
+  await expect(page.getByRole('img', { name: '推荐记录构成：模型推荐 0 条，规则降级 0 条，未标记 0 条' })).toBeVisible()
+})
 
 async function selectTechniques(page) {
   await page.getByRole('button', { name: /穿搭技巧管理/ }).click()

@@ -229,26 +229,8 @@ const runtimeHeadline = computed(() => {
   return '模型与规则推荐数量相当'
 })
 
-const runtimeBarTicks = computed(() => {
-  const max = Math.max(1, ...runtimeBars.value.map((bar) => bar.value))
-  const base = 192
-  const step = 142 / max
-  return runtimeBars.value.map((bar, barIndex) => {
-    const x = 82 + barIndex * 118
-    return {
-      ...bar,
-      x,
-      topY: bar.value ? base - (bar.value - 1) * step : base,
-      ticks: Array.from({ length: bar.value }, (_, index) => ({
-        index,
-        x1: x - 14 - ((index * 17 + barIndex * 7) % 3),
-        x2: x + 14 + ((index * 11 + barIndex * 5) % 3),
-        y: base - index * step,
-        opacity: 0.64 + ((index * 19 + barIndex * 13) % 28) / 100
-      }))
-    }
-  })
-})
+const runtimeBarMax = computed(() => Math.max(1, ...runtimeBars.value.map(bar => bar.value)))
+const runtimeChartLabel = computed(() => `推荐记录构成：${runtimeBars.value.map(bar => `${bar.label} ${bar.value} 条`).join('，')}`)
 
 function disconnectOverviewChartsObserver() {
   if (overviewChartsObserver) {
@@ -589,9 +571,11 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
 
           <div v-if="overview" class="overview-grid">
             <article class="overview-lead">
-              <div class="overview-lead-top"><span>已启用账户</span><CheckCircle2 :size="18" aria-hidden="true" /></div>
-              <strong class="overview-lead-number">{{ overview.enabledUsers }}</strong>
-              <p>当前共有 {{ overview.totalUsers }} 个账号，{{ overview.disabledUsers }} 个账号处于停用状态。</p>
+              <div class="overview-lead-primary">
+                <div class="overview-lead-top"><CheckCircle2 :size="16" aria-hidden="true" /><span>已启用账户</span></div>
+                <strong class="overview-lead-number">{{ overview.enabledUsers }}</strong>
+                <p>当前共有 {{ overview.totalUsers }} 个账号，{{ overview.disabledUsers }} 个账号处于停用状态。</p>
+              </div>
               <div class="overview-lead-stats">
                 <div><small>平均反馈评分</small><strong>{{ averageRating(overview.averageRating) }}<i v-if="overview.averageRating > 0"> / 5</i></strong></div>
                 <div><small>已收藏推荐</small><strong>{{ overview.savedRecommendations }}</strong></div>
@@ -616,28 +600,20 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
           <div v-if="overview" ref="overviewChartsRef" class="overview-lower-grid">
             <section class="admin-operation-panel mono-chart-card" aria-labelledby="recommendation-health-title">
               <div class="admin-panel-title"><div><span>推荐</span><h3 id="recommendation-health-title">{{ runtimeHeadline }}</h3></div><Bot :size="17" aria-hidden="true" /></div>
-              <p class="mono-chart-sub">已生成记录 · 一格一条</p>
-              <div class="mono-chart-stage" role="button" tabindex="0" aria-label="点击重播推荐运行图表" @click="replayOverviewCharts" @keydown.enter.prevent="replayOverviewCharts">
-                <svg :key="overviewChartsKey" class="mono-chart-svg" :class="{ 'is-visible': overviewChartsVisible }" viewBox="0 0 400 230" role="img" aria-labelledby="runtime-chart-title runtime-chart-desc">
-                  <title id="runtime-chart-title">推荐运行结果构成</title>
-                  <desc id="runtime-chart-desc">每格表示一条推荐记录，按模型推荐、规则降级与未标记分类。</desc>
-                  <line class="mono-chart-element" x1="28" y1="196" x2="372" y2="196" :stroke="monoGrid" stroke-width="0.8" style="--chart-delay: 0ms; --chart-opacity: .9" />
-                  <g v-for="bar in runtimeBarTicks" :key="bar.label">
-                    <line v-for="tick in bar.ticks" :key="`${bar.label}-${tick.index}`" class="mono-chart-element" :x1="tick.x1" :y1="tick.y" :x2="tick.x2" :y2="tick.y" :stroke="bar.color" stroke-width="1.2" :style="{ '--chart-delay': `${tick.index * 12}ms`, '--chart-opacity': tick.opacity }"><title>{{ bar.label }} · 第 {{ tick.index + 1 }} 条记录</title></line>
-                    <text class="mono-chart-element mono-chart-value" :x="bar.x" :y="bar.topY - 10" :fill="bar.color" text-anchor="middle" :style="{ '--chart-delay': `${350 + bar.x}ms`, '--chart-opacity': 1 }">{{ bar.value }}</text>
-                    <text class="mono-chart-element mono-chart-axis" :x="bar.x" y="214" :fill="monoMuted" text-anchor="middle" :style="{ '--chart-delay': `${650 + bar.x}ms`, '--chart-opacity': 1 }">{{ bar.label }}</text>
-                  </g>
-                  <text class="mono-chart-element mono-chart-footnote" x="200" y="229" :fill="monoFaint" text-anchor="middle" style="--chart-delay: 1050ms; --chart-opacity: 1">一格 = 一条记录</text>
-                </svg>
+              <p class="mono-chart-sub">按生成方式查看记录数量</p>
+              <div class="runtime-chart" role="img" :aria-label="runtimeChartLabel">
+                <div v-for="(bar, index) in runtimeBars" :key="bar.label" class="runtime-chart-row">
+                  <div class="runtime-chart-label"><span>{{ bar.label }}</span><strong>{{ bar.value }} <small>条</small></strong></div>
+                  <div class="runtime-chart-track" aria-hidden="true"><span :class="`runtime-chart-fill-${index}`" :style="{ width: `${bar.value / runtimeBarMax * 100}%` }"></span></div>
+                </div>
               </div>
               <p class="admin-caption">共 {{ overview.totalRecommendations }} 条推荐记录，按实际生成方式分类统计。</p>
-              <p class="mono-chart-source">推荐记录</p>
             </section>
 
             <section class="admin-operation-panel boundary-panel mono-chart-card" aria-labelledby="account-composition-title">
               <div class="admin-panel-title"><div><span>账号</span><h3 id="account-composition-title">{{ accountHeadline }}</h3></div><UsersRound :size="17" aria-hidden="true" /></div>
               <p class="mono-chart-sub">当前账号状态 · 一格代表 1%</p>
-              <div class="mono-chart-stage" role="button" tabindex="0" aria-label="点击重播账号状态图表" @click="replayOverviewCharts" @keydown.enter.prevent="replayOverviewCharts">
+              <div class="mono-chart-stage" role="button" tabindex="0" aria-label="点击重播账号状态图表" @click="replayOverviewCharts" @keydown.enter.prevent="replayOverviewCharts" @keydown.space.prevent="replayOverviewCharts">
                 <svg :key="overviewChartsKey" class="mono-chart-svg" :class="{ 'is-visible': overviewChartsVisible }" viewBox="0 0 400 230" role="img" aria-labelledby="account-chart-title account-chart-desc">
                   <title id="account-chart-title">账号状态构成</title>
                   <desc id="account-chart-desc">用一百个环形刻度展示可用账号和停用账号的百分比。</desc>
@@ -653,7 +629,6 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
               <div class="mono-chart-legend" aria-label="账号状态图例"><span v-for="segment in accountComposition" :key="segment.label"><i :style="{ backgroundColor: segment.color }"></i>{{ segment.label }} {{ segment.value }}（{{ segment.percent }}%）</span></div>
               <div class="boundary-note"><ShieldCheck :size="15" aria-hidden="true" /><span>衣物识别待人工确认：{{ overview.manualReviewItems }} 件</span></div>
               <p class="admin-caption">后台提供账户、穿搭图片复核、反馈、AI 配置与操作记录管理。</p>
-              <p class="mono-chart-source">账号状态</p>
             </section>
 
             <section class="admin-operation-panel recent-panel" aria-labelledby="recent-actions-title">
@@ -955,32 +930,44 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
 .admin-section-heading > div > span, .admin-panel-title > div > span { color: var(--accent-strong); font-size: 11px; font-weight: 600; letter-spacing: .02em; }
 .admin-section-heading h2 { margin: 6px 0 0; color: var(--ink); font-family: var(--font-display); font-size: 30px; font-weight: 400; letter-spacing: -.045em; }
 .admin-section-heading > p { max-width: 260px; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.6; text-align: right; }
-.overview-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(290px, .92fr); gap: 13px; }
-.overview-lead { min-height: 285px; border-radius: 16px; padding: 25px; color: var(--surface); background: var(--accent-strong); box-shadow: 0 22px 42px rgba(11,48,40,.15); }
-.overview-lead-top { display: flex; align-items: center; justify-content: space-between; color: rgba(252,250,245,.72); font-size: 10px; }
-.overview-lead-top svg { color: var(--nav-active-bg); }
-.overview-lead-number { display: block; margin-top: 31px; font-family: var(--font-display); font-size: clamp(64px, 8vw, 92px); font-weight: 400; letter-spacing: -.08em; line-height: .8; }
-.overview-lead p { max-width: 330px; margin: 18px 0 28px; color: rgba(252,250,245,.72); font-size: 11px; line-height: 1.7; }
-.overview-lead-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; border-top: 1px solid rgba(252,250,245,.22); padding-top: 14px; }
-.overview-lead-stats div { display: grid; gap: 4px; }
-.overview-lead-stats small { color: rgba(252,250,245,.62); font-size: 9px; }
-.overview-lead-stats strong { font-family: var(--font-display); font-size: 24px; font-weight: 400; }
-.overview-lead-stats i { color: rgba(252,250,245,.64); font-family: var(--font-sans); font-size: 9px; font-style: normal; }
+.overview-grid { background: var(--surface); border: 1px solid var(--line); border-bottom: 0; border-radius: 14px 14px 0 0; padding: 32px 32px 0; }
+.overview-lead { display: grid; grid-template-columns: minmax(160px, .8fr) minmax(0, 2fr); align-items: center; gap: 30px; padding: 0 0 28px; }
+.overview-lead-primary { min-width: 0; }
+.overview-lead-top { display: flex; align-items: center; gap: 7px; color: var(--accent-strong); font-size: 13px; font-weight: 600; }
+.overview-lead-number { display: block; margin-top: 12px; color: var(--accent-strong); font-family: var(--font-display); font-size: 56px; font-weight: 400; letter-spacing: -.04em; line-height: 1; font-variant-numeric: tabular-nums; }
+.overview-lead p { max-width: 230px; margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.overview-lead-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 26px; border-left: 1px solid var(--line); padding-left: 28px; }
+.overview-lead-stats div { display: grid; gap: 6px; min-width: 0; }
+.overview-lead-stats small { color: var(--muted); font-size: 12px; }
+.overview-lead-stats strong { color: var(--ink); font-family: var(--font-display); font-size: 25px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.overview-lead-stats i { color: var(--muted); font-family: var(--font-sans); font-size: 11px; font-style: normal; }
 .admin-signal-panel, .admin-operation-panel, .admin-table-panel { border: 1px solid var(--line); border-radius: 15px; background: rgba(255,255,255,.42); }
-.admin-signal-panel { padding: 21px 20px 13px; }
+.admin-signal-panel { display: grid; grid-template-columns: minmax(120px, .8fr) minmax(0, 2fr); gap: 30px; align-items: start; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 24px 0; background: transparent; }
 .admin-panel-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .admin-panel-title > svg { color: var(--accent-strong); }
 .admin-panel-title h3 { margin: 6px 0 0; color: var(--ink); font-family: var(--font-display); font-size: 22px; font-weight: 400; letter-spacing: -.04em; }
-.admin-signal-list { display: grid; margin-top: 19px; }
-.admin-signal-list > * { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--line); padding: 13px 0; color: var(--muted); font-size: 11px; }
+.admin-signal-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 26px; margin: 0; }
+.admin-signal-list > * { display: flex; min-height: 46px; align-items: center; justify-content: space-between; gap: 10px; border: 0; border-bottom: 1px solid var(--line); padding: 8px 0; color: var(--ink); font: inherit; font-size: 12px; }
 .admin-signal-list button { width: 100%; background: transparent; text-align: left; }
 .admin-signal-list button:hover { color: var(--accent-strong); }
 .admin-signal-list span { display: inline-flex; align-items: center; gap: 8px; }
 .admin-signal-list span svg { color: var(--accent-strong); }
 .admin-signal-list strong { color: var(--ink); font-family: var(--font-display); font-size: 21px; font-weight: 400; }
-.overview-lower-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; margin-top: 13px; }
-.mono-chart-card { min-height: 342px; border-radius: 24px; }
-.mono-chart-sub { margin: 18px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.overview-lower-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-top: 0; padding: 0 32px 10px; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 14px 14px; background: var(--surface); }
+.overview-lower-grid > .admin-operation-panel { min-width: 0; min-height: 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 27px 0 30px; background: transparent; }
+.overview-lower-grid > .mono-chart-card:first-child { padding-right: 30px; }
+.overview-lower-grid > .mono-chart-card:nth-child(2) { padding-left: 30px; border-left: 1px solid var(--line); }
+.mono-chart-sub { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.runtime-chart { display: grid; gap: 20px; margin-top: 26px; }
+.runtime-chart-row { display: grid; gap: 8px; }
+.runtime-chart-label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: var(--ink); font-size: 13px; }
+.runtime-chart-label strong { font-size: 15px; font-variant-numeric: tabular-nums; }
+.runtime-chart-label small { color: var(--muted); font-size: 11px; font-weight: 400; }
+.runtime-chart-track { height: 8px; overflow: hidden; border-radius: 999px; background: var(--line); }
+.runtime-chart-track span { display: block; height: 100%; border-radius: inherit; }
+.runtime-chart-fill-0 { background: var(--accent-strong); }
+.runtime-chart-fill-1 { background: #788b7d; }
+.runtime-chart-fill-2 { background: #a99b83; }
 .mono-chart-stage { margin-top: 5px; border-top: 1px solid var(--line); padding-top: 5px; cursor: pointer; outline: 0; }
 .mono-chart-stage:focus-visible { border-radius: 8px; box-shadow: 0 0 0 3px rgba(55,126,111,.12); }
 .mono-chart-svg { display: block; width: 100%; height: 211px; overflow: visible; }
@@ -991,15 +978,14 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
 .mono-chart-center-value { font-size: 27px; }
 .mono-chart-center-label, .mono-chart-axis { font-family: var(--font-sans); font-size: 9px; font-weight: 700; }
 .mono-chart-footnote { font-family: var(--font-sans); font-size: 9px; font-weight: 500; letter-spacing: 0; }
-.mono-chart-legend { display: flex; flex-wrap: wrap; gap: 7px 14px; margin-top: -2px; color: var(--muted); font-size: 9px; }
+.mono-chart-legend { display: flex; flex-wrap: wrap; gap: 10px 18px; margin-top: -2px; color: var(--ink); font-size: 12px; }
 .mono-chart-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .mono-chart-legend i { display: block; width: 7px; height: 7px; border-radius: 50%; }
-.mono-chart-source { margin: 10px 0 0; color: #C6C5BF; font-size: 10px; font-weight: 500; letter-spacing: 0; }
 .mono-chart-card .boundary-note { margin-top: 11px; }
 @media (prefers-reduced-motion: reduce) {
   .mono-chart-svg .mono-chart-element { opacity: var(--chart-opacity, 1); animation: none; }
 }
-.admin-operation-panel { min-height: 205px; padding: 21px 20px; }
+.admin-operation-panel { min-height: 205px; padding: 25px 24px; }
 .runtime-total { display: flex; align-items: baseline; gap: 8px; margin: 23px 0 17px; }
 .runtime-total strong { color: var(--ink); font-family: var(--font-display); font-size: 40px; font-weight: 400; letter-spacing: -.06em; }
 .runtime-total span { color: var(--muted); font-size: 10px; }
@@ -1009,7 +995,7 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
 .runtime-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line-strong); }
 .runtime-dot-llm { background: var(--accent-strong); }
 .runtime-dot-fallback { background: var(--coral); }
-.admin-caption { margin: 17px 0 0; color: var(--muted); font-size: 9px; line-height: 1.55; }
+.admin-caption { margin: 20px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .boundary-panel { background: var(--surface-soft); }
 .boundary-copy { margin: 23px 0 18px; color: var(--muted); font-size: 11px; line-height: 1.75; }
 .boundary-note { display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 7px 10px; color: var(--accent-strong); background: rgba(255,255,255,.58); font-size: 9px; font-weight: 700; }
@@ -1203,8 +1189,14 @@ onBeforeUnmount(disconnectOverviewChartsObserver)
   .admin-side-nav button { border-radius: 9px; padding: 9px 3px; }
   .admin-side-nav strong { font-size: 9px; }
   .overview-grid, .overview-lower-grid { grid-template-columns: 1fr; }
-  .overview-lead { min-height: 250px; padding: 21px; }
-  .overview-lead-number { margin-top: 27px; font-size: 70px; }
+  .overview-grid { padding: 24px 20px 0; }
+  .overview-lead { grid-template-columns: 1fr; gap: 20px; padding: 0 0 24px; }
+  .overview-lead-number { margin-top: 12px; font-size: 52px; }
+  .overview-lead-stats { gap: 16px; border-left: 0; border-top: 1px solid var(--line); padding: 20px 0 0; }
+  .admin-signal-panel { grid-template-columns: 1fr; gap: 12px; }
+  .admin-signal-list { grid-template-columns: 1fr; gap: 0; }
+  .overview-lower-grid { padding: 0 20px 10px; }
+  .overview-lower-grid > .mono-chart-card:first-child, .overview-lower-grid > .mono-chart-card:nth-child(2) { border-left: 0; padding: 24px 0; }
   .admin-section-heading { align-items: start; flex-direction: column; gap: 8px; }
   .admin-section-heading > p { max-width: none; text-align: left; }
   .admin-ai-model-heading { align-items: flex-start; flex-direction: column; gap: 9px; }

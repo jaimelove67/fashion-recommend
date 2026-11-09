@@ -74,6 +74,12 @@ class RecommendationControllerTest {
     private ImageStorage imageStorage;
 
     @MockBean
+    private com.fashion.recommendation.storage.GeneratedImageDownloader generatedImageDownloader;
+
+    @Autowired
+    private com.fashion.recommendation.recommendation.RecommendationVisualRepository visualRepository;
+
+    @MockBean
     private GarmentRecognitionService garmentRecognitionService;
 
     @BeforeEach
@@ -185,6 +191,7 @@ class RecommendationControllerTest {
     @Test
     void visualGenerationUsesOnlyCurrentUsersConfirmedRecommendationItems() throws Exception {
         String userId = "visual-recommendation-user";
+        jdbcTemplate.update("INSERT INTO app_users(username,password_hash) VALUES (?,?)", userId, "test-only");
         long topId = createItem(userId, "雾蓝衬衫", "上装", "雾蓝");
         long bottomId = createItem(userId, "深蓝长裤", "下装", "深蓝");
         mockMvc.perform(post("/api/v1/me/style-profile/refresh")
@@ -203,14 +210,28 @@ class RecommendationControllerTest {
         given(bailianImageGenerationClient.generate(any(), anyString(), anyString(), any(), any()))
                 .willReturn(new OutfitImageGenerationResult(
                         "SUCCEEDED", "https://result.test/daily-look.png", "wan2.6-image", "visual-1", null));
+        given(generatedImageDownloader.download("https://result.test/daily-look.png"))
+                .willReturn(new com.fashion.recommendation.storage.StoredImageData(new byte[] {1, 2, 3}, "image/png"));
 
-        mockMvc.perform(post("/api/v1/me/recommendations/" + recommendationId + "/visual")
+        var visual = mockMvc.perform(post("/api/v1/me/recommendations/" + recommendationId + "/visual")
                         .with(user(userId)).with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("SUCCEEDED"))
-                .andExpect(jsonPath("$.data.imageUrl").value("https://result.test/daily-look.png"))
+                .andExpect(jsonPath("$.data.imageUrl").value(org.hamcrest.Matchers.startsWith("/api/v1/me/recommendations/")))
                 .andExpect(jsonPath("$.data.modelGender").value("FEMALE"))
-                .andExpect(jsonPath("$.data.itemCount").value(2));
+                .andExpect(jsonPath("$.data.itemCount").value(2)).andReturn();
+        String imageUrl = readData(visual).path("imageUrl").asText();
+
+        mockMvc.perform(post("/api/v1/me/recommendations/" + recommendationId + "/visual")
+                        .with(user(userId)).with(csrf()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.imageUrl").value(imageUrl));
+        mockMvc.perform(get(imageUrl).with(user(userId)))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().bytes(new byte[] {1, 2, 3}));
+        mockMvc.perform(get(imageUrl).with(user("another-visual-user"))).andExpect(status().isNotFound());
+        String assetId = imageUrl.substring(imageUrl.lastIndexOf('/') + 1);
+        mockMvc.perform(get(imageUrl).with(user(userId)).header("If-None-Match", "\"" + assetId + "\""))
+                .andExpect(status().isNotModified());
 
         ArgumentCaptor<List> itemsCaptor = ArgumentCaptor.forClass(List.class);
         verify(bailianImageGenerationClient).generate(
@@ -219,6 +240,84 @@ class RecommendationControllerTest {
         assertEquals(2, items.size());
         assertEquals(List.of(topId, bottomId), items.stream()
                 .map(item -> ((com.fashion.recommendation.wardrobe.WardrobeItem) item).id()).toList());
+
+        String fingerprint = jdbcTemplate.queryForObject("SELECT fingerprint FROM recommendation_visuals WHERE recommendation_id=?",
+                String.class, recommendationId);
+        mockMvc.perform(post("/api/v1/me/recommendations/" + recommendationId + "/visual?force=true")
+                        .with(user(userId)).with(csrf())).andExpect(status().isTooManyRequests());
+        assertEquals(0, visualRepository.quota(userId).dailyRemaining());
+        assertEquals(3, visualRepository.quota(userId).weeklyRemaining());
+        jdbcTemplate.update("DELETE FROM recommendation_visual_usage WHERE user_id=?", userId);
+        for (int i = 0; i < 4; i++) {
+            jdbcTemplate.update("INSERT INTO recommendation_visual_usage(token,user_id,reserved_at,completed) VALUES (?,?,?,TRUE)",
+                    "weekly-" + i, userId, java.sql.Timestamp.from(java.time.Instant.now()));
+        }
+        assertEquals(0, visualRepository.quota(userId).weeklyRemaining());
+        jdbcTemplate.update("DELETE FROM recommendation_visual_usage WHERE user_id=?", userId);
+        String token = visualRepository.reserve(recommendationId, fingerprint, true);
+        assertTrue(token != null);
+        assertNull(visualRepository.reserve(recommendationId, fingerprint, true));
+        mockMvc.perform(post("/api/v1/me/recommendations/" + recommendationId + "/visual?force=true")
+                        .with(user(userId)).with(csrf()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("PENDING"));
+        visualRepository.release(recommendationId, fingerprint, token);
+
+        String expiredToken = visualRepository.reserve(recommendationId, fingerprint, true);
+        jdbcTemplate.update("UPDATE recommendation_visuals SET lease_until=? WHERE recommendation_id=? AND fingerprint=?",
+                java.sql.Timestamp.from(java.time.Instant.now().minusSeconds(1)), recommendationId, fingerprint);
+        jdbcTemplate.update("UPDATE recommendation_visual_usage SET reserved_at=? WHERE token=?",
+                java.sql.Timestamp.from(java.time.Instant.now().minusSeconds(901)), expiredToken);
+        String replacementToken = visualRepository.reserve(recommendationId, fingerprint, true);
+        assertTrue(replacementToken != null);
+        assertFalse(visualRepository.finish(recommendationId, fingerprint, expiredToken,
+                new com.fashion.recommendation.storage.StoredImageData(new byte[] {9}, "image/png"), "stale-model"));
+        visualRepository.release(recommendationId, fingerprint, expiredToken);
+        assertTrue(visualRepository.find(recommendationId, fingerprint).orElseThrow().pending());
+        visualRepository.release(recommendationId, fingerprint, replacementToken);
+
+        mockMvc.perform(post("/api/v1/me/recommendations/" + recommendationId + "/visual")
+                        .with(user(userId)).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("items", List.of(
+                                Map.of("wardrobeId", -1), Map.of("wardrobeId", bottomId))))))
+                .andExpect(status().isBadRequest());
+        var forced = mockMvc.perform(post("/api/v1/me/recommendations/" + recommendationId + "/visual?force=true")
+                        .with(user(userId)).with(csrf()))
+                .andExpect(status().isOk()).andReturn();
+        assertFalse(imageUrl.equals(readData(forced).path("imageUrl").asText()));
+        verify(bailianImageGenerationClient, org.mockito.Mockito.times(2)).generate(any(), anyString(), anyString(), any(), any());
+
+        String replacementUrl = readData(forced).path("imageUrl").asText();
+        jdbcTemplate.update("DELETE FROM recommendation_visual_usage WHERE user_id=?", userId);
+        given(generatedImageDownloader.download(anyString())).willThrow(new IllegalStateException("download failed"));
+        mockMvc.perform(post("/api/v1/me/recommendations/" + recommendationId + "/visual?force=true")
+                        .with(user(userId)).with(csrf()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("FAILED"));
+        mockMvc.perform(get("/api/v1/me/recommendations/" + recommendationId + "/visual").with(user(userId)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.data.imageUrl").value(replacementUrl));
+
+        assertEquals(1, visualRepository.quota(userId).dailyRemaining());
+        var buffer = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(new java.awt.image.BufferedImage(300, 300, java.awt.image.BufferedImage.TYPE_INT_RGB), "png", buffer);
+        String uploaded = "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(buffer.toByteArray());
+        mockMvc.perform(post("/api/v1/me/recommendations/" + recommendationId + "/visual")
+                        .with(user(userId)).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("items", List.of(
+                                Map.of("name", "上传上装", "category", "上装", "imageData", uploaded), Map.of("wardrobeId", bottomId))))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("FAILED"));
+        var uploadedCaptor = ArgumentCaptor.forClass(List.class);
+        verify(bailianImageGenerationClient, org.mockito.Mockito.times(4)).generate(any(), anyString(), anyString(), any(), uploadedCaptor.capture());
+        var uploadedItems = uploadedCaptor.getValue();
+        assertEquals(uploaded, ((com.fashion.recommendation.wardrobe.WardrobeItem) uploadedItems.get(0)).imageUrl());
+        assertNull(((com.fashion.recommendation.wardrobe.WardrobeItem) uploadedItems.get(0)).id());
+        assertEquals(1, visualRepository.quota(userId).dailyRemaining());
+
+        mockMvc.perform(put("/api/v1/me/wardrobe/" + topId).with(user(userId)).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"白衬衫\",\"category\":\"上装\",\"color\":\"白色\",\"style\":\"通勤\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/me/recommendations/" + recommendationId + "/visual").with(user(userId)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("UNAVAILABLE"));
     }
 
     @Test

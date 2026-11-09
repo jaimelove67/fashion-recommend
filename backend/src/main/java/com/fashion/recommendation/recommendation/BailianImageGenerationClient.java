@@ -50,7 +50,7 @@ public class BailianImageGenerationClient {
     private static final String SUCCEEDED = "SUCCEEDED";
     private static final String FAILED = "FAILED";
     private static final String CANCELED = "CANCELED";
-    private static final int MAX_REFERENCE_IMAGES = 3;
+    private static final int MAX_REFERENCE_IMAGES = 4;
     private static final int MIN_IMAGE_DIMENSION = 240;
     private static final int MAX_IMAGE_DIMENSION = 8_000;
     private static final int MAX_REFERENCE_DIMENSION = 2_048;

@@ -13,12 +13,13 @@ const trend = {
 const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aAt8AAAAASUVORK5CYII=', 'base64')
 const lookImage = readFileSync(new URL('../public/assets/look-urban.jpg', import.meta.url))
 
-async function setup(page, { generic = false, failFirstSave = false, platform = 'weibo', weeklyCount = 1 } = {}) {
+async function setup(page, { generic = false, failFirstSave = false, platform = 'weibo', admin = false } = {}) {
   const queries = []
   const mutations = []
   const favorites = []
   const errors = []
   let saveAttempts = 0
+  let failNextTrend = false
   const currentTrend = { ...trend, platform,
     sourceUrl: platform === 'xiaohongshu' ? 'https://www.xiaohongshu.com/explore/fashion-reference' : sourceUrl }
   page.on('pageerror', error => errors.push(error.message))
@@ -31,7 +32,7 @@ async function setup(page, { generic = false, failFirstSave = false, platform = 
     let data = null
     if (request.method() !== 'GET') mutations.push({ path, body: request.postDataBuffer()?.toString('utf8') || '' })
     if (path === '/api/v1/auth/csrf') data = { token: 'trend-test', headerName: 'X-XSRF-TOKEN' }
-    else if (path === '/api/v1/auth/me') data = { username: 'trend-test', authorities: ['ROLE_USER'] }
+    else if (path === '/api/v1/auth/me') data = { username: 'trend-test', authorities: admin ? ['ROLE_USER', 'ROLE_ADMIN'] : ['ROLE_USER'] }
     else if (path === '/api/v1/me/wardrobe') data = []
     else if (path === '/api/v1/me/recommendations') data = { content: [], totalElements: 0, page: 0, hasNext: false }
     else if (path === '/api/v1/me/style-profile') data = { gender: null, stylePreferences: [] }
@@ -39,15 +40,12 @@ async function setup(page, { generic = false, failFirstSave = false, platform = 
     else if (path === '/api/v1/outfit-techniques') data = { items: [], status: 'disabled' }
     else if (path === '/api/v1/trends') {
       queries.push(Object.fromEntries(url.searchParams))
-      if (url.searchParams.get('topic') === '暂不可用') return route.fulfill({ status: 503, contentType: 'application/json',
-        body: JSON.stringify({ code: 503, message: '趋势暂时无法加载' }) })
-      const empty = url.searchParams.get('topic') === '无匹配内容'
+      if (failNextTrend) {
+        failNextTrend = false
+        return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ code: 503, message: '趋势暂时无法加载' }) })
+      }
       const item = generic ? { ...currentTrend, title: '通勤风格灵感', summary: '简洁自然的日常风格。' } : currentTrend
-      const items = url.searchParams.get('period') === 'week' && weeklyCount > 1
-        ? Array.from({ length: weeklyCount }, (_, index) => ({ ...item, id: `weekly-${index}`,
-          title: `第${index + 1}套白衬衫参考`, imageUrl: `${picture}?look=${index}`,
-          evidence: { mediaType: 'image', images: [`${picture}?look=${index}`], fullBodyImageUrl: `${picture}?look=${index}` } })) : [item]
-      data = { items: empty ? [] : items, sources: [{ id: platform, state: 'ready' }], styles: [],
+      data = { items: [item], sources: [{ id: platform, state: 'ready' }], styles: [],
         period: url.searchParams.get('period'),
         dailySelection: url.searchParams.get('period') === 'day'
           ? { menswear: 1, womenswear: 0, niche: 0, target: 5, missing: {}, assignments: [] } : null }
@@ -64,34 +62,20 @@ async function setup(page, { generic = false, failFirstSave = false, platform = 
   })
   await page.goto('/#trend')
   await expect(page.getByRole('heading', { name: '穿搭鉴赏与风格参考' })).toBeVisible()
-  return { queries, mutations, errors }
+  return { queries, mutations, errors, failNextTrend: () => { failNextTrend = true } }
 }
 
-test('advanced filters retain daily defaults and submit week, platform and trimmed topic with empty-result recovery', async ({ page }) => {
+test('loads the daily feed without advanced filter controls', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   const { queries, errors } = await setup(page)
+  await expect(page.getByRole('button', { name: '高级筛选', exact: true })).toHaveCount(0)
+  await expect(page.getByLabel('时间范围', { exact: true })).toHaveCount(0)
   await expect(page.getByLabel('内容来源', { exact: true })).toHaveCount(0)
-  expect(queries[0].period).toBe('day')
-  await page.getByRole('button', { name: '高级筛选', exact: true }).click()
-  await page.getByLabel('时间范围', { exact: true }).selectOption('week')
-  await page.getByLabel('内容来源', { exact: true }).selectOption('weibo')
-  await page.getByLabel('标题或标签关键词', { exact: true }).fill('  无匹配内容  ')
-  await page.getByRole('button', { name: '应用筛选', exact: true }).click()
-  await expect(page.getByText('当前筛选范围暂无穿搭内容', { exact: true })).toBeVisible()
-  expect(queries.at(-1)).toMatchObject({ period: 'week', platform: 'weibo', topic: '无匹配内容' })
-  await expect(page.locator('.trend-daily-composition')).toHaveCount(0)
-  await page.getByRole('button', { name: '清除筛选并恢复每日精选', exact: true }).click()
+  await expect(page.getByLabel('标题或标签关键词', { exact: true })).toHaveCount(0)
   await expect(page.locator('.trend-daily-composition')).toBeVisible()
-  expect(queries.at(-1).period).toBe('day')
-  expect(queries.at(-1).platform || '').toBe('')
-  expect(queries.at(-1).topic || '').toBe('')
-  await expect(page.getByLabel('时间范围', { exact: true })).toHaveValue('day')
-  await expect(page.getByLabel('标题或标签关键词', { exact: true })).toHaveValue('')
-  await page.screenshot({ path: '../output/feature-gaps/trend-desktop.png', fullPage: true })
-  await page.setViewportSize({ width: 390, height: 844 })
-  await expect(page.getByRole('button', { name: '应用筛选', exact: true })).toBeVisible()
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-  await page.screenshot({ path: '../output/feature-gaps/trend-mobile.png', fullPage: true })
+  await expect(page.locator('.trend-breakdown')).toContainText(trend.title)
+  expect(queries[0]).toMatchObject({ period: 'day', platform: '' })
+  expect(queries[0].topic || '').toBe('')
   expect(errors).toEqual([])
 })
 
@@ -146,27 +130,16 @@ test('Xiaohongshu garment mentions use the same illustration collection and keep
   expect(upload.body).toContain('https://www.xiaohongshu.com/explore/fashion-reference')
 })
 
-test('failed weekly filters identify retained daily content instead of relabelling it as a weekly result', async ({ page }) => {
-  await setup(page)
+test('a failed refresh identifies retained content and allows retry', async ({ page }) => {
+  const { failNextTrend } = await setup(page, { admin: true })
   await expect(page.locator('.trend-count')).toContainText('每日精选')
-  await page.getByRole('button', { name: '高级筛选', exact: true }).click()
-  await page.getByLabel('时间范围', { exact: true }).selectOption('week')
-  await page.getByLabel('标题或标签关键词', { exact: true }).fill('暂不可用')
-  await page.getByRole('button', { name: '应用筛选', exact: true }).click()
-  await expect(page.getByRole('region', { name: '穿搭高级筛选' }).getByRole('alert')).toContainText('仍显示上次成功加载的内容')
+  failNextTrend()
+  await page.locator('.trend-source-details summary').click()
+  await page.getByRole('button', { name: '刷新已连接数据源', exact: true }).click()
+  const alert = page.locator('.trend-refresh-error')
+  await expect(alert).toContainText('当前显示上次成功加载的内容')
   await expect(page.locator('.trend-count')).toContainText('每日精选')
-  await page.getByRole('button', { name: '高级筛选', exact: true }).click()
-  await expect(page.getByRole('region', { name: '穿搭高级筛选' }).getByRole('alert')).toBeVisible()
-})
-
-test('weekly content beyond the ten-image gallery remains reachable without repeating gallery entries', async ({ page }) => {
-  await setup(page, { weeklyCount: 12 })
-  await page.getByRole('button', { name: '高级筛选', exact: true }).click()
-  await page.getByLabel('时间范围', { exact: true }).selectOption('week')
-  await page.getByRole('button', { name: '应用筛选', exact: true }).click()
-  const more = page.getByRole('region', { name: '更多近 7 天内容', exact: true })
-  await expect(more.getByRole('listitem')).toHaveCount(2)
-  await expect(more.getByRole('button', { name: '查看第1套白衬衫参考', exact: true })).toHaveCount(0)
-  await more.getByRole('button', { name: '查看第12套白衬衫参考', exact: true }).click()
-  await expect(page.getByRole('dialog', { name: '深入分析', exact: true }).locator('.analysis-look-title')).toHaveText('第12套白衬衫参考')
+  await alert.getByRole('button', { name: '重新加载', exact: true }).click()
+  await expect(alert).toHaveCount(0)
+  await expect(page.locator('.trend-breakdown')).toContainText(trend.title)
 })

@@ -56,7 +56,7 @@ test('shows an empty state without preset images when the trends API returns no 
   await expect(emptyState.getByRole('button', { name: '重新加载', exact: true })).toBeEnabled()
   const images = emptyState.locator('.trend-empty-images img')
   await expect(images).toHaveCount(0)
-  await expect(emptyState).toContainText('当前筛选范围暂无穿搭内容')
+  await expect(emptyState).toContainText('当前暂无穿搭内容')
 })
 
 test('shows source posts when trends have no verified gallery images', async ({ page }) => {

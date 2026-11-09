@@ -40,48 +40,11 @@ const filters = [
 ]
 
 const ratedCount = computed(() => props.app.recommendationStats.rated || 0)
-const historyRungWidth = 13
-const historyRungs = computed(() => {
-  const days = props.app.historyTrend || []
-  const maxTotal = Math.max(1, ...days.map((day) => Math.max(0, Number(day.count) || 0)))
-  const base = 258
-  const step = Math.min(12, 192 / (maxTotal + 1))
-  const x0 = (index) => 38 + index * 53
-
-  return days.map((day, dayIndex) => {
-    const total = Math.max(0, Number(day.count) || 0)
-    const saved = Math.min(total, Math.max(0, Number(day.saved) || 0))
-    let offset = 0
-    const segments = [
-      { key: 'unsaved', label: '未收藏', value: total - saved, shade: '#8F8E88' },
-      { key: 'saved', label: '已收藏', value: saved, shade: '#1C1C1A' }
-    ].map((segment, segmentIndex) => {
-      const start = offset + segmentIndex
-      const rungs = Array.from({ length: segment.value }, (_, rungIndex) => {
-        const seed = rungIndex + 1 + dayIndex * 17 + segmentIndex * 31
-        const random = Math.abs(((seed * 73856093) ^ ((dayIndex + segmentIndex + 2) * 19349663)) % 1000) / 1000
-        return {
-          key: `${day.key}-${segment.key}-${rungIndex}`,
-          index: rungIndex + 1,
-          y: base - (start + rungIndex) * step,
-          opacity: 0.62 + random * 0.38,
-          delay: dayIndex * 90 + (start + rungIndex) * 12
-        }
-      })
-      const labelY = segment.value ? base - (start + segment.value / 2) * step + 2.5 : base
-      offset += segment.value
-      return { ...segment, rungs, labelY }
-    })
-
-    return {
-      ...day,
-      total,
-      x: x0(dayIndex),
-      totalY: base - (offset + segments.length - 1) * step - 8,
-      segments
-    }
-  })
-})
+const historyDays = computed(() => (props.app.historyTrend || []).map((day) => {
+  const total = Math.max(0, Number(day.count) || 0)
+  const saved = Math.min(total, Math.max(0, Number(day.saved) || 0))
+  return { ...day, total, saved, unsaved: total - saved }
+}))
 const filteredHistory = computed(() => props.app.state.history)
 let searchTimer
 watch([query, activeFilter], () => {
@@ -183,38 +146,18 @@ function refreshCurrentSection() {
         </div>
       </header>
 
-      <div class="history-chart" role="img" aria-label="最近 7 天生成的搭配中，已收藏和未收藏的数量">
-        <svg viewBox="0 0 440 320" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-          <line x1="24" y1="262" x2="416" y2="262" class="chart-baseline" />
-          <g v-for="day in historyRungs" :key="day.key">
-            <g v-for="segment in day.segments" :key="`${day.key}-${segment.key}`">
-              <line
-                v-for="rung in segment.rungs"
-                :key="rung.key"
-                :x1="day.x - historyRungWidth"
-                :x2="day.x + historyRungWidth"
-                :y1="rung.y"
-                :y2="rung.y"
-                :stroke="segment.shade"
-                :style="{ '--rung-opacity': rung.opacity, '--rung-delay': `${rung.delay}ms` }"
-                class="history-rung"
-              >
-                <title>{{ day.label }} · {{ segment.label }} · 第 {{ rung.index }} 条</title>
-              </line>
-              <text
-                v-if="segment.value"
-                :x="day.x + historyRungWidth + 7"
-                :y="segment.labelY"
-                :fill="segment.shade"
-                class="segment-value"
-              >{{ segment.value }}</text>
-            </g>
-            <text :x="day.x" :y="day.totalY" class="day-total">{{ day.total }}</text>
-            <text :x="day.x" y="282" class="day-label">{{ day.label }}</text>
-          </g>
-          <text x="220" y="307" class="chart-note">每格表示一套搭配 · 深色表示已收藏</text>
-        </svg>
-      </div>
+      <ol class="history-timeline" aria-label="最近 7 天生成的搭配统计">
+        <li v-for="day in historyDays" :key="day.key" :aria-label="`${day.label}，共 ${day.total} 套，已收藏 ${day.saved} 套，未收藏 ${day.unsaved} 套`">
+          <span class="timeline-date" aria-hidden="true">{{ day.label }}</span>
+          <span class="timeline-track" aria-hidden="true">
+            <span v-if="!day.total" class="timeline-dot empty"></span>
+            <span v-if="day.saved" class="timeline-dot saved"></span>
+            <span v-if="day.unsaved" class="timeline-dot unsaved"></span>
+          </span>
+          <span class="timeline-total" aria-hidden="true">{{ day.total }}<small> 套</small></span>
+          <span v-if="day.total" class="timeline-breakdown" aria-hidden="true"><span>已 {{ day.saved }}</span><span>未 {{ day.unsaved }}</span></span>
+        </li>
+      </ol>
       <p class="chart-source">按已加载记录的生成日期统计，收藏状态以当前状态为准。</p>
     </section>
 
@@ -462,44 +405,31 @@ function refreshCurrentSection() {
 .chart-legend { display: flex; flex-wrap: wrap; justify-content: end; gap: 17px; color: var(--muted); font-size: 10px; }
 .chart-legend span { display: flex; align-items: center; gap: 6px; }
 .chart-legend i { width: 8px; height: 8px; }
-.chart-legend .saved-mark { background: #1C1C1A; }
-.chart-legend .unsaved-mark { background: #8F8E88; }
-.history-chart {
-  overflow-x: auto;
+.chart-legend .saved-mark { border-radius: 50%; background: #345f50; }
+.chart-legend .unsaved-mark { border-radius: 2px; background: #8f9b8e; }
+.history-timeline {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   margin-top: 25px;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  padding: 14px 0 10px;
+  padding: 32px 0 26px;
+  list-style: none;
 }
-
-.history-chart svg { display: block; width: min(560px, 100%); min-width: 440px; height: 320px; margin: 0 auto; }
-.chart-baseline { stroke: #DEDDD6; stroke-width: .8; }
-.history-rung {
-  --rung-opacity: 1;
-  --rung-delay: 0ms;
-  stroke-width: 1.2;
-  stroke-linecap: round;
-  opacity: 0;
-  animation: history-rung-in .9s cubic-bezier(.25, 1, .5, 1) both;
-  animation-delay: var(--rung-delay);
-}
-@keyframes history-rung-in { to { opacity: var(--rung-opacity); } }
-.segment-value,
-.day-total,
-.day-label,
-.chart-note {
-  font-family: var(--font-sans);
-  text-anchor: middle;
-}
-.segment-value { font-size: 8px; font-weight: 800; text-anchor: start; }
-.day-total { fill: #1C1C1A; font-size: 10.5px; font-weight: 800; }
-.day-label { fill: #8F8E88; font-size: 7.5px; font-weight: 700; }
-.chart-note { fill: #B0AFA9; font-size: 7px; font-weight: 600; letter-spacing: .08em; }
+.history-timeline li { min-width: 0; text-align: center; }
+.timeline-date { display: block; color: var(--muted); font-size: 12px; }
+.timeline-track { position: relative; display: flex; height: 64px; align-items: center; justify-content: center; gap: 5px; }
+.timeline-track::before { position: absolute; top: 50%; right: 0; left: 0; height: 1px; background: var(--line-strong); content: ''; }
+.history-timeline li:first-child .timeline-track::before { left: 50%; }
+.history-timeline li:last-child .timeline-track::before { right: 50%; }
+.timeline-dot { position: relative; width: 12px; height: 12px; flex: 0 0 12px; box-shadow: 0 0 0 4px var(--bg); }
+.timeline-dot.empty { width: 7px; height: 7px; flex-basis: 7px; border-radius: 50%; background: #aab4aa; }
+.timeline-dot.saved { border-radius: 50%; background: #345f50; }
+.timeline-dot.unsaved { border-radius: 3px; background: #8f9b8e; }
+.timeline-total { display: block; color: var(--ink); font-family: var(--font-mono); font-size: 22px; line-height: 1.2; overflow-wrap: anywhere; }
+.timeline-total small { color: var(--muted); font-family: var(--font-sans); font-size: 11px; }
+.timeline-breakdown { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 10px; margin-top: 8px; color: var(--muted); font-size: 11px; }
 .chart-source { margin: 10px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
-
-@media (prefers-reduced-motion: reduce) {
-  .history-rung { animation: none; opacity: var(--rung-opacity); }
-}
 
 .records-section { padding-top: 64px; }
 .records-header > span { color: var(--muted); font-size: 11px; }
@@ -669,6 +599,10 @@ function refreshCurrentSection() {
   .stats-band { grid-template-columns: 1fr; }
   .stats-band article { border-right: 0; border-bottom: 1px solid var(--line); padding: 20px; }
   .stats-band article:last-child { border-bottom: 0; }
+  .history-timeline { padding: 24px 0 20px; }
+  .timeline-track { height: 56px; }
+  .timeline-total { font-size: 18px; }
+  .timeline-breakdown { flex-direction: column; gap: 2px; }
   .record-tools { align-items: stretch; flex-direction: column; }
   .filter-group { display: grid; grid-template-columns: repeat(3, 1fr); }
   .search-field { width: 100%; }

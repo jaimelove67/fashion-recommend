@@ -121,7 +121,7 @@ class TechniqueComparisonVisualServiceTest {
         var items = java.util.stream.IntStream.range(0, 5).mapToObj(i -> technique("busy-" + i)).toList();
         when(curated.items()).thenReturn(items);
         service = new TechniqueComparisonVisualService(techniques, curated, repository, collector,
-                new TechniqueComparisonImageClient(images), Runnable::run, clock);
+                new TechniqueComparisonImageClient(images, new com.fashion.recommendation.storage.GeneratedImageDownloader()), Runnable::run, clock);
 
         // This is the same permit held by an ordinary user's in-flight outfit generation.
         assertTrue(permit.tryAcquire());

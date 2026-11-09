@@ -17,7 +17,7 @@ const props = defineProps({
   historical: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['select'])
+const emit = defineEmits(['select', 'open'])
 const gallerySection = ref(null)
 const galleryStage = ref(null)
 const galleryCardWidth = ref(360)
@@ -272,7 +272,7 @@ watch(() => props.paused, paused => {
           :aria-posinset="index + 1"
           :aria-setsize="galleryImages.length"
           :tabindex="0"
-          @click="selectTrend({ item, index })"
+          @click="selectTrend({ item, index }); emit('open', item)"
         >
           <span class="gallery-card-image">
             <img
